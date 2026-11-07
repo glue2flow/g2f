@@ -1,0 +1,66 @@
+# Declarative module: every node maps its parameters to one HTTP request.
+# Parameters are available as `params`, the incoming item as `json`.
+module: github
+name: GitHub
+description: GitHub REST API
+color: "#24292f"
+baseUrl: https://api.github.com
+
+params:
+  - name: token
+    label: Access token
+    type: secret
+    description: Personal access token. Optional for public data.
+
+headers:
+  Accept: application/vnd.github+json
+  X-GitHub-Api-Version: "2022-11-28"
+  Authorization: "{{ params.token != nil && params.token != '' ? 'Bearer ' + params.token : '' }}"
+
+nodes:
+  - type: repo.get
+    name: Get Repository
+    description: Fetch metadata for a repository.
+    params:
+      - { name: owner, label: Owner, required: true, placeholder: octocat }
+      - { name: repo, label: Repository, required: true, placeholder: hello-world }
+    request:
+      method: GET
+      path: /repos/{{ params.owner }}/{{ params.repo }}
+
+  - type: issues.list
+    name: List Issues
+    description: List open issues of a repository (one item per issue).
+    params:
+      - { name: owner, label: Owner, required: true }
+      - { name: repo, label: Repository, required: true }
+      - name: state
+        label: State
+        type: select
+        default: open
+        options:
+          - { label: Open, value: open }
+          - { label: Closed, value: closed }
+          - { label: All, value: all }
+    request:
+      method: GET
+      path: /repos/{{ params.owner }}/{{ params.repo }}/issues
+      query:
+        state: "{{ params.state }}"
+        per_page: 50
+    output: "{{ map(response.body, ({number: .number, title: .title, url: .html_url, user: .user.login})) }}"
+
+  - type: issues.create
+    name: Create Issue
+    description: Open a new issue.
+    params:
+      - { name: owner, label: Owner, required: true }
+      - { name: repo, label: Repository, required: true }
+      - { name: title, label: Title, required: true }
+      - { name: body, label: Body, type: text }
+    request:
+      method: POST
+      path: /repos/{{ params.owner }}/{{ params.repo }}/issues
+      body:
+        title: "{{ params.title }}"
+        body: "{{ params.body }}"

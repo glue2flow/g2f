@@ -1,0 +1,7 @@
+.git
+**/node_modules
+web/dist
+*.md
+!modules/*.md
+docker-compose*.yml
+bin/

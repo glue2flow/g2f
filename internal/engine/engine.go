@@ -1,0 +1,343 @@
+// Package engine executes workflow graphs.
+//
+// Execution model: a run starts at one trigger node. All nodes reachable from
+// it are executed once, in topological order. A node's input is the
+// concatenation of all items arriving on its incoming edges; a node that
+// receives no items (e.g. the unused branch of an If) is skipped, and so are
+// its descendants unless they receive items from elsewhere.
+package engine
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"runtime/debug"
+	"sync"
+	"time"
+
+	"github.com/wolfposd/g8g/internal/expression"
+	"github.com/wolfposd/g8g/internal/nodes"
+	"github.com/wolfposd/g8g/internal/store"
+	"github.com/wolfposd/g8g/internal/workflow"
+)
+
+// ExecStore is the persistence the engine needs.
+type ExecStore interface {
+	CreateExecution(ctx context.Context, e *store.Execution) error
+	UpdateExecution(ctx context.Context, e *store.Execution) error
+}
+
+type Options struct {
+	Workers        int
+	Timeout        time.Duration
+	MaxStoredItems int
+}
+
+type Engine struct {
+	reg   *nodes.Registry
+	store ExecStore
+	log   *slog.Logger
+	opts  Options
+
+	sem     chan struct{}
+	wg      sync.WaitGroup
+	baseCtx context.Context
+	cancel  context.CancelFunc
+}
+
+func New(reg *nodes.Registry, st ExecStore, log *slog.Logger, opts Options) *Engine {
+	if opts.Workers <= 0 {
+		opts.Workers = 16
+	}
+	if opts.Timeout <= 0 {
+		opts.Timeout = 5 * time.Minute
+	}
+	if opts.MaxStoredItems <= 0 {
+		opts.MaxStoredItems = 100
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	return &Engine{
+		reg: reg, store: st, log: log, opts: opts,
+		sem: make(chan struct{}, opts.Workers), baseCtx: ctx, cancel: cancel,
+	}
+}
+
+// Request describes one workflow run.
+type Request struct {
+	Workflow    *workflow.Workflow
+	TriggerType nodes.TriggerKind
+	// TriggerNode is the id of the trigger node to start from. If empty, the
+	// first trigger node of TriggerType is used.
+	TriggerNode string
+	// Items is the trigger payload (e.g. the webhook request). If empty the
+	// trigger node produces its own default items.
+	Items       []nodes.Item
+	TriggeredBy string
+}
+
+// Result is returned by synchronous runs.
+type Result struct {
+	Execution *store.Execution
+	// LastOutput is the output of the last node that ran.
+	LastOutput []nodes.Item
+}
+
+// Start persists a queued execution and runs it in the background.
+func (e *Engine) Start(ctx context.Context, req Request) (*store.Execution, error) {
+	exec, start, err := e.prepare(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	e.wg.Add(1)
+	go func() {
+		defer e.wg.Done()
+		select {
+		case e.sem <- struct{}{}:
+		case <-e.baseCtx.Done():
+			e.finish(exec, nil, errors.New("server shutting down"))
+			return
+		}
+		defer func() { <-e.sem }()
+		e.execute(e.baseCtx, exec, req, start)
+	}()
+	return exec, nil
+}
+
+// Run executes synchronously and returns the result, bounded by ctx.
+func (e *Engine) Run(ctx context.Context, req Request) (*Result, error) {
+	exec, start, err := e.prepare(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	select {
+	case e.sem <- struct{}{}:
+	case <-ctx.Done():
+		e.finish(exec, nil, ctx.Err())
+		return &Result{Execution: exec}, nil
+	}
+	defer func() { <-e.sem }()
+	e.wg.Add(1)
+	defer e.wg.Done()
+	return e.execute(ctx, exec, req, start), nil
+}
+
+// Shutdown cancels running executions and waits for them to record their state.
+func (e *Engine) Shutdown(timeout time.Duration) {
+	e.cancel()
+	done := make(chan struct{})
+	go func() { e.wg.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(timeout):
+		e.log.Warn("engine shutdown timed out")
+	}
+}
+
+func (e *Engine) prepare(ctx context.Context, req Request) (*store.Execution, *workflow.Node, error) {
+	start, err := e.findTrigger(req)
+	if err != nil {
+		return nil, nil, err
+	}
+	exec := &store.Execution{
+		WorkflowID:      req.Workflow.ID,
+		WorkflowVersion: req.Workflow.Version,
+		TriggerType:     string(req.TriggerType),
+		TriggerNode:     start.ID,
+		TriggeredBy:     req.TriggeredBy,
+		Status:          store.StatusQueued,
+	}
+	if err := e.store.CreateExecution(ctx, exec); err != nil {
+		return nil, nil, fmt.Errorf("create execution: %w", err)
+	}
+	return exec, start, nil
+}
+
+func (e *Engine) findTrigger(req Request) (*workflow.Node, error) {
+	g := &req.Workflow.Graph
+	if req.TriggerNode != "" {
+		n := g.Node(req.TriggerNode)
+		if n == nil {
+			return nil, fmt.Errorf("trigger node %q not found", req.TriggerNode)
+		}
+		kind := e.reg.TriggerKind(n.Type)
+		if kind == "" {
+			return nil, fmt.Errorf("node %q is not a trigger", n.Name)
+		}
+		// Manual runs may start from any trigger (useful to test webhook/schedule flows).
+		if req.TriggerType != nodes.TriggerManual && kind != req.TriggerType {
+			return nil, fmt.Errorf("node %q is a %s trigger, not %s", n.Name, kind, req.TriggerType)
+		}
+		if n.Disabled {
+			return nil, fmt.Errorf("trigger node %q is disabled", n.Name)
+		}
+		return n, nil
+	}
+	var fallback *workflow.Node
+	for i := range g.Nodes {
+		n := &g.Nodes[i]
+		kind := e.reg.TriggerKind(n.Type)
+		if kind == "" || n.Disabled {
+			continue
+		}
+		if kind == req.TriggerType {
+			return n, nil
+		}
+		if fallback == nil {
+			fallback = n
+		}
+	}
+	if req.TriggerType == nodes.TriggerManual && fallback != nil {
+		return fallback, nil
+	}
+	return nil, fmt.Errorf("workflow has no %s trigger", req.TriggerType)
+}
+
+func (e *Engine) execute(ctx context.Context, exec *store.Execution, req Request, start *workflow.Node) *Result {
+	ctx, cancel := context.WithTimeout(ctx, e.opts.Timeout)
+	defer cancel()
+
+	exec.Status = store.StatusRunning
+	if err := e.store.UpdateExecution(ctx, exec); err != nil {
+		e.log.Error("update execution", "id", exec.ID, "err", err)
+	}
+
+	log := e.log.With("workflow", req.Workflow.ID, "execution", exec.ID)
+	g := &req.Workflow.Graph
+	reachable := g.Reachable(start.ID)
+	order, err := g.TopoOrder(reachable)
+	if err != nil {
+		return e.finish(exec, nil, err)
+	}
+
+	env := expression.Env{
+		"workflow":  map[string]any{"id": req.Workflow.ID, "name": req.Workflow.Name},
+		"execution": map[string]any{"id": exec.ID, "triggerType": exec.TriggerType},
+		"nodes":     map[string]any{},
+		"trigger":   map[string]any{},
+	}
+	nodeOutputs := env["nodes"].(map[string]any)
+	inputs := map[string][]nodes.Item{start.ID: req.Items}
+	received := map[string]bool{start.ID: true}
+	var last []nodes.Item
+
+	for _, id := range order {
+		n := g.Node(id)
+		step := store.Step{NodeID: n.ID, NodeName: n.Name, NodeType: n.Type, StartedAt: time.Now().UTC()}
+		in := inputs[id]
+		step.InputCount = len(in)
+
+		if !received[id] || (id != start.ID && len(in) == 0) {
+			step.Status = "skipped"
+			exec.Steps = append(exec.Steps, step)
+			continue
+		}
+
+		var out nodes.Output
+		if n.Disabled {
+			out = nodes.Output{workflow.DefaultHandle: in}
+		} else {
+			out, err = e.runNode(ctx, n, in, env, log)
+		}
+		step.DurationMs = time.Since(step.StartedAt).Milliseconds()
+		if err != nil {
+			step.Status = "error"
+			step.Error = err.Error()
+			exec.Steps = append(exec.Steps, step)
+			return e.finish(exec, nil, fmt.Errorf("node %q: %w", n.Name, err))
+		}
+		step.Status = "success"
+		step.Output, step.Truncated = e.truncate(out)
+		exec.Steps = append(exec.Steps, step)
+
+		all := flatten(out)
+		nodeOutputs[n.Name] = all
+		if id == start.ID && len(all) > 0 {
+			env["trigger"] = all[0]
+		}
+		last = all
+
+		for _, edge := range g.Edges {
+			if edge.Source != id || !reachable[edge.Target] {
+				continue
+			}
+			received[edge.Target] = true
+			inputs[edge.Target] = append(inputs[edge.Target], out[edge.Handle()]...)
+		}
+	}
+	return e.finish(exec, last, nil)
+}
+
+func (e *Engine) runNode(ctx context.Context, n *workflow.Node, in []nodes.Item, env expression.Env, log *slog.Logger) (out nodes.Output, err error) {
+	impl, ok := e.reg.Get(n.Type)
+	if !ok {
+		return nil, fmt.Errorf("unknown node type %q", n.Type)
+	}
+	def := impl.Definition()
+	defer func() {
+		if r := recover(); r != nil {
+			log.Error("node panic", "node", n.Name, "panic", r, "stack", string(debug.Stack()))
+			err = fmt.Errorf("internal error: %v", r)
+		}
+	}()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if in == nil {
+		in = []nodes.Item{}
+	}
+	return impl.Execute(ctx, &nodes.ExecContext{
+		Node: n, Def: &def, Items: in, Env: env, Logger: log,
+	})
+}
+
+func (e *Engine) finish(exec *store.Execution, last []nodes.Item, err error) *Result {
+	now := time.Now().UTC()
+	exec.FinishedAt = &now
+	if err != nil {
+		exec.Status = store.StatusError
+		exec.Error = err.Error()
+	} else {
+		exec.Status = store.StatusSuccess
+	}
+	// Use a fresh context so results are stored even after cancellation.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if uerr := e.store.UpdateExecution(ctx, exec); uerr != nil {
+		e.log.Error("store execution result", "id", exec.ID, "err", uerr)
+	}
+	return &Result{Execution: exec, LastOutput: last}
+}
+
+func (e *Engine) truncate(out nodes.Output) (map[string][]map[string]any, bool) {
+	res := make(map[string][]map[string]any, len(out))
+	truncated := false
+	for h, items := range out {
+		if len(items) > e.opts.MaxStoredItems {
+			items = items[:e.opts.MaxStoredItems]
+			truncated = true
+		}
+		res[h] = items
+	}
+	return res, truncated
+}
+
+func flatten(out nodes.Output) []nodes.Item {
+	if len(out) == 1 {
+		for _, items := range out {
+			return items
+		}
+	}
+	var all []nodes.Item
+	// "main" first, then other handles in a stable order.
+	all = append(all, out[workflow.DefaultHandle]...)
+	for _, h := range []string{"true", "false"} {
+		all = append(all, out[h]...)
+	}
+	for h, items := range out {
+		if h != workflow.DefaultHandle && h != "true" && h != "false" {
+			all = append(all, items...)
+		}
+	}
+	return all
+}

@@ -1,0 +1,74 @@
+# Sample stack: g8g + PostgreSQL + Keycloak (with a pre-configured demo realm).
+#
+#   docker compose up --build
+#   open http://localhost:8080   (login: alice / alice, bob / bob, carol / carol)
+#   Keycloak admin console: http://localhost:8081  (admin / admin)
+#
+# NOT production-ready: default passwords, Keycloak in dev mode, plain HTTP.
+
+name: g8g
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: g8g
+      POSTGRES_PASSWORD: g8g
+      POSTGRES_DB: g8g
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./deploy/postgres/init.sql:/docker-entrypoint-initdb.d/10-keycloak.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U g8g -d g8g"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.4
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: keycloak
+      # Tokens must carry the issuer the browser sees.
+      KC_HOSTNAME: http://localhost:8081
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+      KC_HEALTH_ENABLED: "true"
+    volumes:
+      - ./deploy/keycloak/realm-g8g.json:/opt/keycloak/data/import/realm-g8g.json:ro
+    ports:
+      - "8081:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  g8g:
+    build: .
+    image: g8g:latest
+    environment:
+      G8G_DATABASE_URL: postgres://g8g:g8g@postgres:5432/g8g?sslmode=disable
+      G8G_PUBLIC_URL: http://localhost:8080
+      G8G_AUTH_MODE: oidc
+      # Expected token issuer (as seen by the browser) ...
+      G8G_OIDC_ISSUER: http://localhost:8081/realms/g8g
+      # ... while signing keys are fetched over the internal network.
+      G8G_OIDC_JWKS_URL: http://keycloak:8080/realms/g8g/protocol/openid-connect/certs
+      G8G_OIDC_CLIENT_ID: g8g
+      G8G_OIDC_GROUPS_CLAIM: groups
+      G8G_OIDC_ORG_CLAIM: org
+      G8G_OIDC_ADMIN_ROLE: g8g-admin
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      keycloak:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  pgdata:

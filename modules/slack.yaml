@@ -1,0 +1,26 @@
+module: slack
+name: Slack
+description: Post messages through Slack incoming webhooks
+color: "#4a154b"
+
+nodes:
+  - type: webhook.post
+    name: Post Message (Webhook)
+    description: Send a message to a channel via an incoming webhook URL.
+    params:
+      - name: webhookUrl
+        label: Webhook URL
+        type: secret
+        required: true
+        placeholder: https://hooks.slack.com/services/...
+      - name: text
+        label: Text
+        type: text
+        required: true
+        default: "Workflow {{ workflow.name }} says hi"
+    request:
+      method: POST
+      url: "{{ params.webhookUrl }}"
+      body:
+        text: "{{ params.text }}"
+    output: "{{ {ok: response.status == 200} }}"
