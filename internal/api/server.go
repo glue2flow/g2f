@@ -19,6 +19,7 @@ import (
 	"github.com/wolfposd/g8g/internal/config"
 	"github.com/wolfposd/g8g/internal/engine"
 	"github.com/wolfposd/g8g/internal/nodes"
+	"github.com/wolfposd/g8g/internal/oauth"
 	"github.com/wolfposd/g8g/internal/plugin"
 	"github.com/wolfposd/g8g/internal/secrets"
 	"github.com/wolfposd/g8g/internal/store"
@@ -44,6 +45,7 @@ type Server struct {
 	resume   http.Handler
 	secrets  *secrets.Service
 	plugins  *plugin.Manager
+	oauth    *oauth.Manager
 }
 
 type Deps struct {
@@ -61,13 +63,14 @@ type Deps struct {
 	Resume  http.Handler
 	Secrets *secrets.Service
 	Plugins *plugin.Manager
+	OAuth   *oauth.Manager
 }
 
 func New(d Deps) *Server {
 	return &Server{
 		cfg: d.Config, store: d.Store, reg: d.Registry, engine: d.Engine,
 		auth: d.Auth, log: d.Logger, listener: d.Listener, webhooks: d.Webhooks,
-		secrets: d.Secrets, plugins: d.Plugins, resume: d.Resume,
+		secrets: d.Secrets, plugins: d.Plugins, resume: d.Resume, oauth: d.OAuth,
 	}
 }
 
@@ -101,6 +104,11 @@ func (s *Server) Handler() http.Handler {
 			r.Get("/executions/{id}", s.getExecution)
 			r.Post("/executions/{id}/cancel", s.cancelExecution)
 
+			r.Get("/connections", s.listConnections)
+			r.Post("/connections/authorize", s.authorizeConnection)
+			r.Patch("/connections/{id}", s.updateConnection)
+			r.Delete("/connections/{id}", s.deleteConnection)
+
 			r.Get("/plugins", s.listPlugins)
 			r.Post("/plugins", s.importPlugin)
 			r.Delete("/plugins/{module}", s.deletePlugin)
@@ -115,6 +123,7 @@ func (s *Server) Handler() http.Handler {
 	if s.resume != nil {
 		r.Handle("/webhook-resume/*", s.resume)
 	}
+	r.Get("/oauth/callback", s.oauthCallback)
 
 	r.NotFound(s.spa)
 	return r
@@ -167,10 +176,12 @@ type clientConfig struct {
 	Realm       string          `json:"realm,omitempty"`
 	ClientID    string          `json:"clientId,omitempty"`
 	PublicURL   string          `json:"publicUrl"`
+	// OAuthRedirectURL must be registered at OAuth2 providers.
+	OAuthRedirectURL string `json:"oauthRedirectUrl"`
 }
 
 func (s *Server) getConfig(w http.ResponseWriter, _ *http.Request) {
-	c := clientConfig{AuthMode: s.cfg.Auth.Mode, PublicURL: s.cfg.PublicURL}
+	c := clientConfig{AuthMode: s.cfg.Auth.Mode, PublicURL: s.cfg.PublicURL, OAuthRedirectURL: s.cfg.PublicURL + "/oauth/callback"}
 	if s.cfg.Auth.Mode == config.AuthOIDC {
 		// Keycloak issuers look like https://host/realms/<realm>.
 		if base, realm, ok := strings.Cut(s.cfg.Auth.Issuer, "/realms/"); ok {

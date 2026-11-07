@@ -188,6 +188,9 @@ func (s *Server) apply(ctx context.Context, u *auth.User, wf *workflow.Workflow,
 	if err := s.checkWorkflowRefs(ctx, u, wf.ID, &in.Graph); err != nil {
 		return err
 	}
+	if err := s.checkConnectionRefs(ctx, u, &wf.Graph, &in.Graph); err != nil {
+		return err
+	}
 	wf.Name, wf.Description, wf.Graph, wf.Active = in.Name, in.Description, in.Graph, in.Active
 	if sharing {
 		wf.Scope, wf.OrgRole, wf.Shares = in.Scope, in.OrgRole, in.Shares
@@ -292,6 +295,31 @@ func (s *Server) checkWorkflowRefs(ctx context.Context, u *auth.User, selfID str
 					return fmt.Errorf("node %q: workflow %s not found or not shared with you as %s", n.Name, id, min)
 				}
 			}
+		}
+	}
+	return nil
+}
+
+// checkConnectionRefs makes sure every newly selected account is usable by the
+// saving user and belongs to the node's plugin. Unchanged selections are not
+// re-checked, so co-editors can save a workflow that uses someone else's
+// shared account without having access to it themselves.
+func (s *Server) checkConnectionRefs(ctx context.Context, u *auth.User, old, g *workflow.Graph) error {
+	for _, n := range g.Nodes {
+		id, _ := n.Params[nodes.ConnectionParam].(string)
+		impl, _ := s.reg.Get(n.Type)
+		def := impl.Definition()
+		if id == "" || def.Param(nodes.ConnectionParam) == nil {
+			continue
+		}
+		if prev := old.Node(n.ID); prev != nil && prev.Type == n.Type {
+			if prevID, _ := prev.Params[nodes.ConnectionParam].(string); prevID == id {
+				continue
+			}
+		}
+		c, err := s.store.GetConnection(ctx, id)
+		if err != nil || !c.UsableBy(u) || c.Module != def.Module {
+			return fmt.Errorf("node %q: account not found or not shared with you", n.Name)
 		}
 	}
 	return nil

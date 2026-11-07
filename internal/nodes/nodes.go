@@ -49,6 +49,8 @@ const (
 	ParamWorkflow ParamType = "workflow"
 	// ParamWorkflows references several workflows (comma separated ids).
 	ParamWorkflows ParamType = "workflows"
+	// ParamConnection references a connected OAuth2 account (added automatically).
+	ParamConnection ParamType = "connection"
 	// ParamDateTime is a local date-time string "YYYY-MM-DDTHH:MM".
 	ParamDateTime ParamType = "datetime"
 )
@@ -173,7 +175,10 @@ type ExecContext struct {
 	Config map[string]any
 	// Vars holds the module's organization variables, exposed to expressions
 	// in node fields as `vars`.
-	Vars   map[string]any
+	Vars map[string]any
+	// OAuth holds a valid access token of the node's connected account
+	// (OAuth2 modules only). Like Config, it is not visible to node fields.
+	OAuth  *OAuthToken
 	Env    expression.Env // shared scope: nodes, trigger, execution, workflow
 	Logger *slog.Logger
 	// Runtime is provided by the engine (sub-workflows, resume URL).
@@ -278,19 +283,20 @@ func truthy(v any) bool {
 
 // ModuleInfo describes a group of nodes installed together (a plugin).
 type ModuleInfo struct {
-	Module       string     `json:"module"`
-	Name         string     `json:"name"`
-	Version      string     `json:"version,omitempty"`
-	Description  string     `json:"description,omitempty"`
-	Color        string     `json:"color,omitempty"`
-	Runtime      string     `json:"runtime"` // builtin | http | wasm
-	Source       string     `json:"source"`  // builtin | file:<name> | imported
-	Config       []Param    `json:"config"`  // plugin-only settings per organization
-	Vars         []Param    `json:"vars"`    // per-organization values usable in node fields
-	AllowedHosts []string   `json:"allowedHosts,omitempty"`
-	Nodes        []string   `json:"nodes"`
-	InstalledBy  string     `json:"installedBy,omitempty"`
-	InstalledAt  *time.Time `json:"installedAt,omitempty"`
+	Module       string      `json:"module"`
+	Name         string      `json:"name"`
+	Version      string      `json:"version,omitempty"`
+	Description  string      `json:"description,omitempty"`
+	Color        string      `json:"color,omitempty"`
+	Runtime      string      `json:"runtime"` // builtin | http | wasm
+	Source       string      `json:"source"`  // builtin | file:<name> | imported
+	Config       []Param     `json:"config"`  // plugin-only settings per organization
+	Vars         []Param     `json:"vars"`    // per-organization values usable in node fields
+	AllowedHosts []string    `json:"allowedHosts,omitempty"`
+	OAuth2       *OAuth2Spec `json:"oauth2,omitempty"`
+	Nodes        []string    `json:"nodes"`
+	InstalledBy  string      `json:"installedBy,omitempty"`
+	InstalledAt  *time.Time  `json:"installedAt,omitempty"`
 }
 
 // BuiltinModule is the module name of nodes implemented in Go.
@@ -464,4 +470,20 @@ func (d *Definition) SecretParams() []string {
 		}
 	}
 	return out
+}
+
+// OAuthToken is a fresh access token handed to OAuth2 plugin nodes.
+type OAuthToken struct {
+	AccessToken string `json:"accessToken"`
+	TokenType   string `json:"tokenType"`
+	Account     string `json:"account,omitempty"`
+}
+
+// AuthorizationHeader returns e.g. "Bearer <token>".
+func (t *OAuthToken) AuthorizationHeader() string {
+	typ := t.TokenType
+	if typ == "" || strings.EqualFold(typ, "bearer") {
+		typ = "Bearer"
+	}
+	return typ + " " + t.AccessToken
 }

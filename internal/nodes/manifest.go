@@ -2,6 +2,7 @@ package nodes
 
 import (
 	"fmt"
+	"net/url"
 	"regexp"
 	"strings"
 	"time"
@@ -45,6 +46,11 @@ type Manifest struct {
 	BaseURL string         `yaml:"baseUrl"`
 	Headers map[string]any `yaml:"headers"`
 
+	// OAuth2 lets users connect their own accounts (authorization code flow).
+	// The host runs the flow, stores and refreshes tokens, and hands the access
+	// token to the plugin; workflow editors never see it.
+	OAuth2 *OAuth2Spec `yaml:"oauth2"`
+
 	// wasm runtime
 	Wasm         string   `yaml:"wasm"`         // file name inside the bundle (default plugin.wasm)
 	AllowedHosts []string `yaml:"allowedHosts"` // hosts the plugin may call over HTTP
@@ -53,6 +59,35 @@ type Manifest struct {
 
 	Nodes []ManifestNode `yaml:"nodes"`
 }
+
+// OAuth2Spec describes the provider of an OAuth2 plugin.
+type OAuth2Spec struct {
+	AuthorizeURL    string            `yaml:"authorizeUrl" json:"authorizeUrl"`
+	TokenURL        string            `yaml:"tokenUrl" json:"tokenUrl"`
+	Scopes          []string          `yaml:"scopes" json:"scopes"`
+	ScopeSeparator  string            `yaml:"scopeSeparator" json:"-"`
+	AuthorizeParams map[string]string `yaml:"authorizeParams" json:"-"` // e.g. access_type: offline
+	PKCE            bool              `yaml:"pkce" json:"pkce"`
+	// TokenAuth: how the client authenticates at the token endpoint:
+	// "body" (client_id/client_secret form fields, default) or "basic".
+	TokenAuth string `yaml:"tokenAuth" json:"-"`
+	// Names of the config entries holding the OAuth app credentials.
+	ClientIDConfig     string `yaml:"clientIdConfig" json:"clientIdConfig"`
+	ClientSecretConfig string `yaml:"clientSecretConfig" json:"clientSecretConfig"`
+	// UserInfo optionally names the connected account (e.g. its email).
+	UserInfo *OAuth2UserInfo `yaml:"userInfo" json:"-"`
+	// APIHosts receive the access token (http runtime). Default: baseUrl host.
+	APIHosts []string `yaml:"apiHosts" json:"apiHosts"`
+}
+
+type OAuth2UserInfo struct {
+	URL   string `yaml:"url"`
+	Field string `yaml:"field"` // top-level field of the JSON response, e.g. email
+}
+
+// ConnectionParam is the name of the parameter that OAuth2 modules add to
+// every node; it holds the id of the connected account to use.
+const ConnectionParam = "connection"
 
 type ManifestNode struct {
 	Type        string   `yaml:"type"`
@@ -131,6 +166,11 @@ func (m *Manifest) validate() error {
 	if len(m.Nodes) == 0 {
 		return fmt.Errorf("at least one node is required")
 	}
+	if m.OAuth2 != nil {
+		if err := m.validateOAuth2(); err != nil {
+			return fmt.Errorf("oauth2: %w", err)
+		}
+	}
 	if err := normalizeParams(m.Config, "config"); err != nil {
 		return err
 	}
@@ -179,6 +219,74 @@ func (m *Manifest) validate() error {
 	return nil
 }
 
+func (m *Manifest) validateOAuth2() error {
+	o := m.OAuth2
+	for name, u := range map[string]string{"authorizeUrl": o.AuthorizeURL, "tokenUrl": o.TokenURL} {
+		if err := checkProviderURL(u); err != nil {
+			return fmt.Errorf("%s: %w", name, err)
+		}
+	}
+	if o.UserInfo != nil {
+		if err := checkProviderURL(o.UserInfo.URL); err != nil {
+			return fmt.Errorf("userInfo.url: %w", err)
+		}
+	}
+	if o.ScopeSeparator == "" {
+		o.ScopeSeparator = " "
+	}
+	switch o.TokenAuth {
+	case "":
+		o.TokenAuth = "body"
+	case "body", "basic":
+	default:
+		return fmt.Errorf("tokenAuth must be body or basic")
+	}
+	if o.ClientIDConfig == "" {
+		o.ClientIDConfig = "clientId"
+	}
+	if o.ClientSecretConfig == "" {
+		o.ClientSecretConfig = "clientSecret"
+	}
+	// The app credentials are plugin config: set per organization by admins.
+	found := map[string]bool{}
+	for _, p := range m.Config {
+		found[p.Name] = true
+		if p.Name == o.ClientSecretConfig && p.Type != ParamSecret {
+			return fmt.Errorf("config %q must be of type secret", p.Name)
+		}
+	}
+	for _, name := range []string{o.ClientIDConfig, o.ClientSecretConfig} {
+		if !found[name] {
+			return fmt.Errorf("config must declare %q (the OAuth app credentials)", name)
+		}
+	}
+	if len(o.APIHosts) == 0 && m.Runtime == "http" {
+		u, err := url.Parse(m.BaseURL)
+		if err != nil || u.Hostname() == "" {
+			return fmt.Errorf("apiHosts is required when the module has no baseUrl")
+		}
+		o.APIHosts = []string{u.Hostname()}
+	}
+	for _, p := range append(append([]Param{}, m.Params...), m.Config...) {
+		if p.Name == ConnectionParam {
+			return fmt.Errorf("parameter name %q is reserved for the account picker", ConnectionParam)
+		}
+	}
+	return nil
+}
+
+// checkProviderURL requires https, except for localhost (development, tests).
+func checkProviderURL(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return fmt.Errorf("invalid URL %q", raw)
+	}
+	if u.Scheme == "https" || (u.Scheme == "http" && (u.Hostname() == "localhost" || u.Hostname() == "127.0.0.1")) {
+		return nil
+	}
+	return fmt.Errorf("%q must use https", raw)
+}
+
 func normalizeParams(ps []Param, where string) error {
 	names := map[string]bool{}
 	for i := range ps {
@@ -210,12 +318,20 @@ func (m *Manifest) Info(source string) ModuleInfo {
 	return ModuleInfo{
 		Module: m.Module, Name: m.Name, Version: m.Version, Description: m.Description,
 		Color: m.Color, Runtime: m.Runtime, Source: source, Config: m.Config, Vars: m.Vars, AllowedHosts: m.AllowedHosts,
+		OAuth2: m.OAuth2,
 	}
 }
 
 // NodeDefinition builds the editor definition for one manifest node.
 func (m *Manifest) NodeDefinition(n ManifestNode, source string) Definition {
-	params := append(append([]Param{}, m.Params...), n.Params...)
+	var params []Param
+	if m.OAuth2 != nil {
+		params = append(params, Param{
+			Name: ConnectionParam, Label: "Account", Type: ParamConnection, Required: true, NoExpression: true,
+			Description: "Connected " + m.Name + " account used by this node.",
+		})
+	}
+	params = append(append(params, m.Params...), n.Params...)
 	category := m.Name
 	return Definition{
 		Type: m.Module + "." + n.Type, Name: n.Name, Category: category, Description: n.Description,

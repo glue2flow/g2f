@@ -65,7 +65,38 @@ func Eval(code string, env Env) (any, error) {
 	if err != nil {
 		return nil, fmt.Errorf("expression %q: %w", code, err)
 	}
-	return v, nil
+	return Normalize(v), nil
+}
+
+// Normalize converts values produced by expr into JSON-compatible types:
+// some builtins (e.g. fromPairs, groupBy) return maps with interface keys,
+// which encoding/json cannot store.
+func Normalize(v any) any {
+	switch t := v.(type) {
+	case map[any]any:
+		out := make(map[string]any, len(t))
+		for k, e := range t {
+			out[fmt.Sprint(k)] = Normalize(e)
+		}
+		return out
+	case map[string]any:
+		for k, e := range t {
+			t[k] = Normalize(e)
+		}
+		return t
+	case []any:
+		for i, e := range t {
+			t[i] = Normalize(e)
+		}
+		return t
+	case []map[string]any:
+		out := make([]any, len(t))
+		for i, e := range t {
+			out[i] = Normalize(e)
+		}
+		return out
+	}
+	return v
 }
 
 // Render evaluates all {{ }} blocks in s.

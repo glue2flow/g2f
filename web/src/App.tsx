@@ -4,6 +4,7 @@ import type { ClientConfig, NodeDef, User } from "./types";
 import { WorkflowList } from "./pages/WorkflowList";
 import { Editor } from "./pages/Editor";
 import { Plugins } from "./pages/Plugins";
+import { Connections } from "./pages/Connections";
 
 /** Minimal hash router: #/ and #/w/<id>. */
 function useRoute(): string {
@@ -53,6 +54,9 @@ export function App({ config }: { config: ClientConfig }) {
           <a href="#/" className={route === "/" || route.startsWith("/w/") ? "active" : ""}>
             Workflows
           </a>
+          <a href="#/connections" className={route === "/connections" ? "active" : ""}>
+            Connections
+          </a>
           <a href="#/plugins" className={route === "/plugins" ? "active" : ""}>
             Plugins
           </a>
@@ -72,7 +76,9 @@ export function App({ config }: { config: ClientConfig }) {
         {editorMatch ? (
           <Editor key={editorMatch[1]} id={editorMatch[1]} defs={defs} user={user} config={config} />
         ) : route === "/plugins" ? (
-          <Plugins user={user} onChanged={loadDefs} />
+          <Plugins user={user} config={config} onChanged={loadDefs} />
+        ) : route === "/connections" ? (
+          <Connections user={user} />
         ) : (
           <WorkflowList user={user} defs={defs} />
         )}

@@ -70,7 +70,8 @@ export type ParamType =
   | "datetime"
   | "code"
   | "workflow"
-  | "workflows";
+  | "workflows"
+  | "connection";
 
 export interface ParamDef {
   name: string;
@@ -137,6 +138,7 @@ export interface ClientConfig {
   realm?: string;
   clientId?: string;
   publicUrl: string;
+  oauthRedirectUrl: string;
 }
 
 export const roleRank: Record<Role, number> = { viewer: 1, runner: 2, editor: 3, owner: 4 };
@@ -163,6 +165,7 @@ export interface ModuleInfo {
   config: ParamDef[];
   vars: ParamDef[];
   allowedHosts?: string[];
+  oauth2?: { authorizeUrl: string; tokenUrl: string; scopes: string[]; apiHosts?: string[] };
   nodes: string[];
   installedBy?: string;
   installedAt?: string;
@@ -199,4 +202,19 @@ export function outputsFor(def: NodeDef | undefined, params: Record<string, unkn
   const out = parseList(params[dyn.param] ?? p?.default);
   for (const e of dyn.extra ?? []) if (!out.includes(e)) out.push(e);
   return out;
+}
+
+export interface Connection {
+  id: string;
+  module: string;
+  name: string;
+  account: string;
+  ownerSub: string;
+  ownerName: string;
+  scope: Scope;
+  groups: string[];
+  scopes: string;
+  expiresAt?: string;
+  createdAt: string;
+  canManage: boolean;
 }

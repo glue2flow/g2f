@@ -1,6 +1,7 @@
 package expression
 
 import (
+	"encoding/json"
 	"reflect"
 	"testing"
 )
@@ -63,5 +64,18 @@ func TestIdentifiers(t *testing.T) {
 	}
 	if got, _ := Identifiers("{{ config.botToken }}"); len(got) != 1 || got[0] != "config" {
 		t.Fatalf("config not detected: %v", got)
+	}
+}
+
+func TestNormalizeInterfaceMaps(t *testing.T) {
+	v, err := Render("{{ fromPairs([['a', 1], ['b', [fromPairs([['c', 2]])]]]) }}", Env{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := json.Marshal(v); err != nil {
+		t.Fatalf("not JSON-serializable: %v (%T)", err, v)
+	}
+	if v.(map[string]any)["b"].([]any)[0].(map[string]any)["c"] != 2 {
+		t.Fatalf("got %#v", v)
 	}
 }

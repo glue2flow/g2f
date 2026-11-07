@@ -17,6 +17,7 @@ import (
 	"github.com/wolfposd/g8g/internal/config"
 	"github.com/wolfposd/g8g/internal/engine"
 	"github.com/wolfposd/g8g/internal/nodes"
+	"github.com/wolfposd/g8g/internal/oauth"
 	"github.com/wolfposd/g8g/internal/plugin"
 	"github.com/wolfposd/g8g/internal/secrets"
 	"github.com/wolfposd/g8g/internal/store"
@@ -89,11 +90,13 @@ func run(log *slog.Logger) error {
 		log.Warn("AUTHENTICATION DISABLED (G8G_AUTH_MODE=none) - do not use in production")
 	}
 
+	oauthMgr := oauth.NewManager(st, box, reg, sec, cfg.PublicURL)
 	nodes.CodeNodeEnabled = !cfg.DisableCodeNode
 	signer := trigger.NewResumeSigner(cfg.SecretKey, cfg.PublicURL)
 	errDispatch := trigger.NewErrorDispatcher(st, nil, reg, log, cfg.PublicURL)
 	eng := engine.New(reg, st, log, engine.Options{
 		Secrets:   sec,
+		Tokens:    oauthMgr,
 		Workflows: st,
 		ResumeURL: signer.URL,
 		OnFailure: errDispatch.WorkflowFailed,
@@ -115,6 +118,7 @@ func run(log *slog.Logger) error {
 		Resume:   trigger.NewResumeHandler(signer, eng, log),
 		Secrets:  sec,
 		Plugins:  plugins,
+		OAuth:    oauthMgr,
 	})
 	go plugins.Run(schedCtx, cfg.PluginSync)
 	go eng.RunResumer(schedCtx, 2*time.Second)

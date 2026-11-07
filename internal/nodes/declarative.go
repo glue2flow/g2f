@@ -3,6 +3,8 @@ package nodes
 import (
 	"context"
 	"fmt"
+	neturl "net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -43,6 +45,9 @@ func (d *declarativeNode) Definition() Definition { return d.def }
 func ResolveParams(ec *ExecContext, item Item, index int) (map[string]any, error) {
 	params := map[string]any{}
 	for _, p := range ec.Def.Params {
+		if p.Type == ParamConnection {
+			continue // resolved by the engine into ec.OAuth
+		}
 		v, err := ec.Param(p.Name, item, index)
 		if err != nil {
 			return nil, err
@@ -79,6 +84,16 @@ func (d *declarativeNode) Execute(ctx context.Context, ec *ExecContext) (Output,
 		if err != nil {
 			return nil, err
 		}
+		// The OAuth token only goes to the module's API hosts, so a URL built
+		// from node parameters can never send it elsewhere.
+		sendToken := false
+		if ec.OAuth != nil {
+			if !d.tokenHostAllowed(expression.Stringify(urlV)) {
+				return nil, fmt.Errorf("refusing to send the %s access token to %s (not in oauth2.apiHosts)", d.module.Name, hostOf(expression.Stringify(urlV)))
+			}
+			sendToken = true
+			env["oauth"] = map[string]any{"accessToken": ec.OAuth.AccessToken, "tokenType": ec.OAuth.TokenType}
+		}
 		headers := map[string]any{}
 		for _, h := range []map[string]any{d.module.Headers, req.Headers} {
 			for k, v := range h {
@@ -86,6 +101,9 @@ func (d *declarativeNode) Execute(ctx context.Context, ec *ExecContext) (Output,
 					return nil, err
 				}
 			}
+		}
+		if sendToken && !hasHeader(headers, "Authorization") {
+			headers["Authorization"] = ec.OAuth.AuthorizationHeader()
 		}
 		queryV, err := resolve(anyMap(req.Query))
 		if err != nil {
@@ -123,6 +141,33 @@ func (d *declarativeNode) Execute(ctx context.Context, ec *ExecContext) (Output,
 		out = []Item{}
 	}
 	return Output{"main": out}, nil
+}
+
+func (d *declarativeNode) tokenHostAllowed(raw string) bool {
+	if d.module.OAuth2 == nil {
+		return false
+	}
+	u, err := neturl.Parse(raw)
+	if err != nil {
+		return false
+	}
+	return slices.Contains(d.module.OAuth2.APIHosts, u.Hostname())
+}
+
+func hostOf(raw string) string {
+	if u, err := neturl.Parse(raw); err == nil && u.Host != "" {
+		return u.Host
+	}
+	return raw
+}
+
+func hasHeader(h map[string]any, name string) bool {
+	for k, v := range h {
+		if strings.EqualFold(k, name) && expression.Stringify(v) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func anyMap(m map[string]any) any {

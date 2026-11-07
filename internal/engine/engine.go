@@ -42,6 +42,11 @@ type ExecStore interface {
 	UpdateExecution(ctx context.Context, e *store.Execution) error
 }
 
+// TokenSource returns fresh OAuth2 access tokens of connected accounts.
+type TokenSource interface {
+	Token(ctx context.Context, org, module, connectionID string) (*nodes.OAuthToken, error)
+}
+
 // WorkflowLoader loads workflows for sub-workflow calls.
 type WorkflowLoader interface {
 	GetWorkflow(ctx context.Context, id string) (*workflow.Workflow, error)
@@ -50,6 +55,8 @@ type WorkflowLoader interface {
 type Options struct {
 	// Secrets is optional; without it nodes see no secrets and no plugin config.
 	Secrets SecretSource
+	// Tokens is optional; without it nodes of OAuth2 plugins fail.
+	Tokens TokenSource
 	// Workflows is optional; without it Execute Workflow nodes fail.
 	Workflows WorkflowLoader
 	// ResumeURL builds the signed URL that resumes a waiting execution.
@@ -467,6 +474,20 @@ func (e *Engine) runNode(ctx context.Context, st *runState, n *workflow.Node, by
 			}
 		}
 	}
+	var token *nodes.OAuthToken
+	if def.Param(nodes.ConnectionParam) != nil {
+		id, _ := n.Params[nodes.ConnectionParam].(string)
+		if id == "" {
+			return nil, errors.New("no account selected")
+		}
+		if e.opts.Tokens == nil {
+			return nil, errors.New("connected accounts are not available")
+		}
+		if token, err = e.opts.Tokens.Token(ctx, st.Workflow.OrgID, def.Module, id); err != nil {
+			return nil, fmt.Errorf("account: %w", err)
+		}
+		rc.scrub.add(token.AccessToken)
+	}
 	defer func() {
 		if r := recover(); r != nil {
 			rc.log.Error("node panic", "node", n.Name, "panic", r, "stack", string(debug.Stack()))
@@ -480,7 +501,7 @@ func (e *Engine) runNode(ctx context.Context, st *runState, n *workflow.Node, by
 		in = []nodes.Item{}
 	}
 	return impl.Execute(ctx, &nodes.ExecContext{
-		Node: n, Def: &def, Items: in, Inputs: byHandle, Config: ms.config, Vars: ms.vars,
+		Node: n, Def: &def, Items: in, Inputs: byHandle, Config: ms.config, Vars: ms.vars, OAuth: token,
 		Env: env, Logger: rc.log, Runtime: rc.rt,
 	})
 }
@@ -500,6 +521,16 @@ func (e *Engine) finish(exec *store.Execution, st *runState, last []nodes.Item, 
 	defer cancel()
 	if uerr := e.store.UpdateExecution(ctx, exec); uerr != nil {
 		e.log.Error("store execution result", "id", exec.ID, "err", uerr)
+		// Never leave an execution "running": retry without node outputs.
+		for i := range exec.Steps {
+			exec.Steps[i].Output = nil
+		}
+		if exec.Error == "" {
+			exec.Error = "node outputs could not be stored: " + uerr.Error()
+		}
+		if uerr := e.store.UpdateExecution(ctx, exec); uerr != nil {
+			e.log.Error("store execution result without outputs", "id", exec.ID, "err", uerr)
+		}
 	}
 	if err != nil && e.opts.OnFailure != nil && st != nil {
 		snapshot := *exec

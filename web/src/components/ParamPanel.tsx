@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
-import { isSecretRef, parseList, type NodeDef, type ParamDef, type Workflow } from "../types";
+import { connectAccount } from "../lib/connect";
+import { isSecretRef, parseList, type Connection, type NodeDef, type ParamDef, type Workflow } from "../types";
 import type { FlowNodeData } from "./FlowNode";
 
 interface Props {
@@ -37,7 +38,14 @@ export function ParamPanel({ nodeId, data, readOnly, extra, onChange, onDelete }
         {def?.params
           .filter((p) => visible(p, def, data.params))
           .map((p) => (
-            <Field key={p.name} def={p} value={data.params[p.name]} readOnly={readOnly} onChange={(v) => setParam(p.name, v)} />
+            <Field
+              key={p.name}
+              def={p}
+              module={def.module}
+              value={data.params[p.name]}
+              readOnly={readOnly}
+              onChange={(v) => setParam(p.name, v)}
+            />
           ))}
         {!def && <div className="alert error">This node type is not installed on the server.</div>}
       </div>
@@ -70,11 +78,13 @@ export function ParamPanel({ nodeId, data, readOnly, extra, onChange, onDelete }
 
 function Field({
   def,
+  module,
   value,
   readOnly,
   onChange,
 }: {
   def: ParamDef;
+  module: string;
   value: unknown;
   readOnly: boolean;
   onChange: (v: unknown) => void;
@@ -150,6 +160,9 @@ function Field({
       break;
     case "workflow":
       input = <WorkflowPicker value={v} readOnly={readOnly} onChange={onChange} />;
+      break;
+    case "connection":
+      input = <ConnectionPicker module={module} value={v} readOnly={readOnly} onChange={onChange} />;
       break;
     case "workflows":
       input = <WorkflowPicker multiple value={v} readOnly={readOnly} onChange={onChange} />;
@@ -346,6 +359,70 @@ function WorkflowPicker({
           {w.name}
         </label>
       ))}
+    </div>
+  );
+}
+
+/** Selects a connected account of the node's plugin, or connects a new one. */
+function ConnectionPicker({
+  module,
+  value,
+  readOnly,
+  onChange,
+}: {
+  module: string;
+  value: unknown;
+  readOnly: boolean;
+  onChange: (v: unknown) => void;
+}) {
+  const [list, setList] = useState<Connection[]>();
+  const [error, setError] = useState<string>();
+  const [busy, setBusy] = useState(false);
+  const load = () =>
+    api
+      .connections(module)
+      .then(setList)
+      .catch((e) => setError(e.message));
+  useEffect(() => {
+    load();
+  }, [module]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const selected = String(value ?? "");
+  const known = !selected || list?.some((c) => c.id === selected);
+  async function connect() {
+    setBusy(true);
+    setError(undefined);
+    try {
+      const id = await connectAccount(module);
+      await load();
+      onChange(id);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="connection-picker">
+      <div className="row">
+        <select disabled={readOnly || !list} value={selected} onChange={(e) => onChange(e.target.value)}>
+          <option value="">{list && list.length === 0 ? "No connected account yet" : "Select an account…"}</option>
+          {list?.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
+              {c.account ? ` – ${c.account}` : ""}
+              {c.canManage ? "" : ` (shared by ${c.ownerName})`}
+            </option>
+          ))}
+          {!known && <option value={selected}>Account of another user</option>}
+        </select>
+        {!readOnly && (
+          <button type="button" className="btn small" disabled={busy} onClick={connect}>
+            {busy ? "Waiting…" : "＋ Connect"}
+          </button>
+        )}
+      </div>
+      {error && <span className="field-desc error-text">{error}</span>}
     </div>
   );
 }

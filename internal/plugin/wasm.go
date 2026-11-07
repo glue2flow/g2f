@@ -23,6 +23,7 @@ import (
 //	  "items":  [{"json": {...}, "params": {...}, "input": "main"}],
 //	  "config": {...},                         // plugin-only settings of the organization
 //	  "vars":   {...},                         // organization variables
+//	  "oauth":  {"accessToken": "...", "tokenType": "Bearer"}, // OAuth2 plugins
 //	  "workflow":  {"id": "...", "name": "..."},
 //	  "execution": {"id": "..."}
 //	}
@@ -34,12 +35,14 @@ import (
 //	{"outputs": {"main": [...], "other": [...]}}
 //	{"error": "message"}                      // or set an Extism error
 type wasmRequest struct {
-	Node      string         `json:"node"`
-	Items     []wasmItem     `json:"items"`
-	Config    map[string]any `json:"config"`
-	Vars      map[string]any `json:"vars"`
-	Workflow  any            `json:"workflow,omitempty"`
-	Execution any            `json:"execution,omitempty"`
+	Node   string         `json:"node"`
+	Items  []wasmItem     `json:"items"`
+	Config map[string]any `json:"config"`
+	Vars   map[string]any `json:"vars"`
+	// OAuth is the connected account's access token (OAuth2 plugins only).
+	OAuth     *nodes.OAuthToken `json:"oauth,omitempty"`
+	Workflow  any               `json:"workflow,omitempty"`
+	Execution any               `json:"execution,omitempty"`
 }
 
 type wasmItem struct {
@@ -126,6 +129,7 @@ func (n *wasmNode) Definition() nodes.Definition { return n.def }
 func (n *wasmNode) Execute(ctx context.Context, ec *nodes.ExecContext) (nodes.Output, error) {
 	req := wasmRequest{Node: n.nodeType, Config: ec.Config, Workflow: ec.Env["workflow"], Execution: ec.Env["execution"]}
 	req.Vars = ec.Vars
+	req.OAuth = ec.OAuth
 	if req.Config == nil {
 		req.Config = map[string]any{}
 	}

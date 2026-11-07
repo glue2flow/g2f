@@ -1,5 +1,5 @@
 import Keycloak from "keycloak-js";
-import type { ClientConfig, ConfigValue, Execution, ModuleInfo, NodeDef, TriggerInfo, User, Workflow } from "./types";
+import type { ClientConfig, ConfigValue, Connection, Execution, ModuleInfo, NodeDef, Scope, TriggerInfo, User, Workflow } from "./types";
 
 let keycloak: Keycloak | null = null;
 
@@ -64,6 +64,13 @@ export const api = {
     request<Execution>("POST", `/api/workflows/${id}/run`, { nodeId, items }),
   executions: (id: string) => request<Execution[]>("GET", `/api/workflows/${id}/executions`),
   triggers: (id: string) => request<TriggerInfo[]>("GET", `/api/workflows/${id}/triggers`),
+  connections: (module?: string) =>
+    request<Connection[]>("GET", "/api/connections" + (module ? `?module=${encodeURIComponent(module)}` : "")),
+  authorizeConnection: (module: string, name?: string) =>
+    request<{ url: string }>("POST", "/api/connections/authorize", { module, name }),
+  updateConnection: (id: string, patch: { name?: string; scope?: Scope; groups?: string[] }) =>
+    request<Connection>("PATCH", `/api/connections/${id}`, patch),
+  deleteConnection: (id: string) => request<void>("DELETE", `/api/connections/${id}`),
   plugins: () => request<ModuleInfo[]>("GET", "/api/plugins"),
   importPlugin: (file: File) => {
     const fd = new FormData();

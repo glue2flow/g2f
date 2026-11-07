@@ -1,0 +1,81 @@
+# Google Sheets via OAuth2. Users connect their own Google account; g8g stores
+# and refreshes the tokens and adds them to requests to sheets.googleapis.com.
+#
+# Setup (once per organization, by an admin):
+#   1. Google Cloud console -> APIs & Services: enable the "Google Sheets API".
+#   2. Credentials -> Create OAuth client ID -> "Web application".
+#      Authorized redirect URI: <G8G_PUBLIC_URL>/oauth/callback
+#   3. g8g -> Plugins -> Google Sheets -> Settings: enter client ID and secret.
+module: google-sheets
+name: Google Sheets
+version: 1.0.0
+description: Read and append spreadsheet rows with your Google account
+color: "#0f9d58"
+baseUrl: https://sheets.googleapis.com/v4/spreadsheets
+
+config:
+  - name: clientId
+    label: OAuth client ID
+    description: From Google Cloud console (Web application client).
+  - name: clientSecret
+    label: OAuth client secret
+    type: secret
+
+oauth2:
+  authorizeUrl: https://accounts.google.com/o/oauth2/v2/auth
+  tokenUrl: https://oauth2.googleapis.com/token
+  scopes:
+    - https://www.googleapis.com/auth/spreadsheets
+    - openid
+    - email
+  pkce: true
+  authorizeParams:
+    access_type: offline # returns a refresh token
+    prompt: consent
+  userInfo:
+    url: https://openidconnect.googleapis.com/v1/userinfo
+    field: email
+  apiHosts: [sheets.googleapis.com]
+
+params:
+  - name: spreadsheetId
+    label: Spreadsheet ID
+    required: true
+    description: The long id in the sheet URL, docs.google.com/spreadsheets/d/<id>/edit
+  - name: range
+    label: Range
+    required: true
+    default: Sheet1!A:Z
+    placeholder: Sheet1!A:D
+
+nodes:
+  - type: appendRow
+    name: Append Row
+    description: Append one row per input item.
+    params:
+      - name: values
+        label: Values
+        type: json
+        required: true
+        default: ["{{ json.name }}", "{{ json.email }}", "{{ now() }}"]
+        description: JSON array with one entry per column. Expressions refer to the current item.
+    request:
+      method: POST
+      path: /{{ params.spreadsheetId }}/values/{{ params.range }}:append
+      query:
+        valueInputOption: USER_ENTERED
+        insertDataOption: INSERT_ROWS
+      body:
+        values: ["{{ params.values }}"]
+    output: "{{ {updatedRange: response.body.updates.updatedRange, updatedRows: response.body.updates.updatedRows} }}"
+
+  - type: readRows
+    name: Read Rows
+    description: Read a range. The first row is used as column names; each further row becomes an item.
+    request:
+      method: GET
+      path: /{{ params.spreadsheetId }}/values/{{ params.range }}
+    output: >-
+      {{ let rows = response.body.values ?? [];
+         let head = len(rows) > 0 ? rows[0] : [];
+         map(rows[1:], let row = #; fromPairs(map(head, [#, (#index < len(row) ? row[#index] : nil)]))) }}

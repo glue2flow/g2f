@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { SecretField } from "../components/ParamPanel";
-import { SECRET_REF, type ConfigValue, type ModuleInfo, type User } from "../types";
+import { SECRET_REF, type ClientConfig, type ConfigValue, type ModuleInfo, type User } from "../types";
 
-export function Plugins({ user, onChanged }: { user: User; onChanged: () => void }) {
+export function Plugins({ user, config, onChanged }: { user: User; config: ClientConfig; onChanged: () => void }) {
   const [modules, setModules] = useState<ModuleInfo[]>();
   const [error, setError] = useState<string>();
   const [notice, setNotice] = useState<string>();
@@ -85,6 +85,7 @@ export function Plugins({ user, onChanged }: { user: User; onChanged: () => void
                 <strong>{m.name}</strong>
                 {m.version && <span className="muted small">v{m.version}</span>}
                 <div className="spacer" />
+                {m.oauth2 && <span className="chip rt-oauth">OAuth2</span>}
                 <span className={`chip rt-${m.runtime}`}>{m.runtime}</span>
               </div>
               {m.description && <p className="desc">{m.description}</p>}
@@ -114,13 +115,30 @@ export function Plugins({ user, onChanged }: { user: User; onChanged: () => void
           ))}
         </div>
       )}
-      {configFor && <ConfigDialog module={configFor} org={user.org} onClose={() => setConfigFor(undefined)} />}
+      {configFor && (
+        <ConfigDialog
+          module={configFor}
+          org={user.org}
+          redirectUrl={config.oauthRedirectUrl}
+          onClose={() => setConfigFor(undefined)}
+        />
+      )}
     </div>
   );
 }
 
 /** Edits a plugin's global configuration for the admin's organization. */
-function ConfigDialog({ module, org, onClose }: { module: ModuleInfo; org: string; onClose: () => void }) {
+function ConfigDialog({
+  module,
+  org,
+  redirectUrl,
+  onClose,
+}: {
+  module: ModuleInfo;
+  org: string;
+  redirectUrl: string;
+  onClose: () => void;
+}) {
   const [values, setValues] = useState<ConfigValue[]>();
   const [draft, setDraft] = useState<Record<string, unknown>>({});
   const [error, setError] = useState<string>();
@@ -155,6 +173,18 @@ function ConfigDialog({ module, org, onClose }: { module: ModuleInfo; org: strin
           Applies to all workflows of organization <b>{org}</b>. Values are encrypted at rest; secrets can be replaced but never
           read back.
         </p>
+        {module.oauth2 && (
+          <div className="info-box">
+            Users connect their own {module.name} accounts on the <a href="#/connections">Connections</a> page. Register this
+            redirect URI in the provider's OAuth app:
+            <div className="row" style={{ marginTop: 6 }}>
+              <code className="url">{redirectUrl}</code>
+              <button className="btn small" onClick={() => navigator.clipboard?.writeText(redirectUrl)}>
+                Copy
+              </button>
+            </div>
+          </div>
+        )}
         {error && <div className="alert error">{error}</div>}
         {!values ? (
           <div className="loading">Loading…</div>
