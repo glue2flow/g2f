@@ -32,6 +32,15 @@ type Step struct {
 	Output     map[string][]map[string]any `json:"output,omitempty"`
 	Truncated  bool                        `json:"truncated,omitempty"`
 	Error      string                      `json:"error,omitempty"`
+	// Logs holds messages the node wrote to the execution log (Log node, console.log).
+	Logs []LogEntry `json:"logs,omitempty"`
+}
+
+// LogEntry is one message in a step's execution log.
+type LogEntry struct {
+	Time    time.Time `json:"time"`
+	Level   string    `json:"level"` // debug | info | warn | error
+	Message string    `json:"message"`
 }
 
 type Execution struct {

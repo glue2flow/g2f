@@ -271,19 +271,32 @@ type logNode struct{}
 func (logNode) Definition() Definition {
 	return Definition{
 		Type: "core.log", Name: "Log", Category: "Core", Source: "builtin", Module: BuiltinModule,
-		Description: "Write a message to the server log and pass items through unchanged.",
+		Description: "Write a message to the execution log and pass items through unchanged.",
 		Color:       "#64748b", Inputs: []string{"main"}, Outputs: []string{"main"},
-		Params: []Param{{Name: "message", Label: "Message", Type: ParamString, Default: "{{ json }}"}},
+		Params: []Param{
+			{Name: "message", Label: "Message", Type: ParamText, Default: "{{ json }}",
+				Description: "Written once per item. Shown under the run in the Executions panel and in the server log."},
+			{Name: "level", Label: "Level", Type: ParamSelect, Default: LogInfo, Options: []Option{
+				{Value: LogDebug, Label: "Debug"}, {Value: LogInfo, Label: "Info"},
+				{Value: LogWarn, Label: "Warning"}, {Value: LogError, Label: "Error"},
+			}},
+		},
 	}
 }
 
 func (logNode) Execute(_ context.Context, ec *ExecContext) (Output, error) {
+	level, _ := ec.Node.Params["level"].(string)
+	switch level {
+	case LogDebug, LogInfo, LogWarn, LogError:
+	default:
+		level = LogInfo
+	}
 	for i, item := range ec.Items {
 		msg, err := ec.String("message", item, i)
 		if err != nil {
 			return nil, err
 		}
-		ec.Logger.Info("workflow log", "node", ec.Node.Name, "message", msg)
+		ec.Log(level, msg)
 	}
 	return passthrough(ec)
 }

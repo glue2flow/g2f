@@ -70,7 +70,7 @@ Each execution stores per-node status, duration and output (capped at
 | Category | Nodes |
 | --- | --- |
 | Triggers | Manual, Schedule, Webhook, **Called by Workflow**, **Error Trigger** |
-| Core | HTTP Request, Set Fields, If, **Switch**, **Merge**, **Code**, **Wait**, Transform Items, Log |
+| Core | HTTP Request, Set Fields, If, **Switch**, **Merge**, **Code**, **Wait**, Transform Items, **Log** |
 | Flow | **Execute Workflow** (incl. loops over items / batches) |
 | Logic | **And**, **Or**, **Xor** |
 
@@ -90,7 +90,8 @@ after a timeout (default 10 s).
 - *Once for all items*: use `items`, return an array.
 - *Once per item*: use `item` and `index`, return an object, or `null` to drop the item.
 
-`nodes`, `trigger`, `workflow`, `execution` and `console.log()` are available. Administrators
+`nodes`, `trigger`, `workflow`, `execution` and `console.log()` (also `info`, `warn`, `error`,
+`debug`) are available. Console output goes to the run's execution log. Administrators
 can turn the node off with `G2F_DISABLE_CODE_NODE=true`. Memory use of scripts is not limited.
 
 ```js
@@ -144,6 +145,12 @@ condition (default `{{ true }}`, i.e. "received anything"). Example: `{{ json.st
 
 All received items go to `false` otherwise. Because a node runs only after all its
 predecessors, *And* also works as a join: "continue when both branches produced data".
+
+**Log** writes its *Message* (multi-line, with `{{ expressions }}`) once per item at the chosen
+level (debug, info, warning, error) and passes the items on unchanged. Messages appear in the
+editor under the run: the **Log** tab of the Executions panel shows all messages of a run, and
+each node's tab shows its own. They also go to the server log with the workflow and execution
+IDs. Known secret values are masked. A node keeps at most 500 messages of up to 8 KB each per run.
 
 ### Triggers
 

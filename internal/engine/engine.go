@@ -21,6 +21,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/glue2flow/g2f/internal/expression"
 	"github.com/glue2flow/g2f/internal/nodes"
@@ -350,7 +351,7 @@ func (e *Engine) execute(ctx context.Context, exec *store.Execution, st *runStat
 			if n.Disabled {
 				out = nodes.Output{workflow.DefaultHandle: in}
 			} else {
-				out, err = e.runNode(ctx, st, withSecrets(n, secrets[n.ID]), byHandle, in, env, rc)
+				out, err = e.runNode(ctx, st, withSecrets(n, secrets[n.ID]), byHandle, in, env, rc, &step.Logs)
 			}
 			step.DurationMs = time.Since(step.StartedAt).Milliseconds()
 
@@ -452,7 +453,7 @@ func withSecrets(n *workflow.Node, secrets map[string]string) *workflow.Node {
 }
 
 func (e *Engine) runNode(ctx context.Context, st *runState, n *workflow.Node, byHandle map[string][]nodes.Item,
-	in []nodes.Item, env expression.Env, rc *runCtx) (out nodes.Output, err error) {
+	in []nodes.Item, env expression.Env, rc *runCtx, logs *[]store.LogEntry) (out nodes.Output, err error) {
 	impl, ok := e.reg.Get(n.Type)
 	if !ok {
 		return nil, fmt.Errorf("unknown node type %q", n.Type)
@@ -502,7 +503,7 @@ func (e *Engine) runNode(ctx context.Context, st *runState, n *workflow.Node, by
 	}
 	return impl.Execute(ctx, &nodes.ExecContext{
 		Node: n, Def: &def, Items: in, Inputs: byHandle, Config: ms.config, Vars: ms.vars, OAuth: token,
-		Env: env, Logger: rc.log, Runtime: rc.rt,
+		Env: env, Logger: rc.log, Runtime: rc.rt, LogSink: rc.logSink(logs),
 	})
 }
 
@@ -580,6 +581,37 @@ func flatten(out nodes.Output) []nodes.Item {
 type moduleSettings struct{ config, vars map[string]any }
 
 // scrubber removes known secret values from messages.
+// Limits for the execution log of a single step.
+const (
+	maxStepLogs       = 500
+	maxLogMessageSize = 8 << 10
+)
+
+// logSink collects a node's log messages into the step. Messages are scrubbed
+// of known secrets because executions are visible to every workflow viewer.
+func (rc *runCtx) logSink(logs *[]store.LogEntry) func(level, message string) {
+	return func(level, message string) {
+		switch n := len(*logs); {
+		case n > maxStepLogs:
+			return
+		case n == maxStepLogs:
+			level, message = nodes.LogWarn, fmt.Sprintf("more than %d log messages, the rest were dropped", maxStepLogs)
+		}
+		message = rc.scrub.clean(message)
+		if len(message) > maxLogMessageSize {
+			message = truncateUTF8(message, maxLogMessageSize) + "…"
+		}
+		*logs = append(*logs, store.LogEntry{Time: time.Now().UTC(), Level: level, Message: message})
+	}
+}
+
+func truncateUTF8(s string, n int) string {
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
+}
+
 type scrubber struct{ values []string }
 
 func newScrubber(secrets map[string]map[string]string) *scrubber {

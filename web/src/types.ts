@@ -114,6 +114,13 @@ export interface Step {
   output?: Record<string, Record<string, unknown>[]>;
   truncated?: boolean;
   error?: string;
+  logs?: LogEntry[];
+}
+
+export interface LogEntry {
+  time: string;
+  level: "debug" | "info" | "warn" | "error";
+  message: string;
 }
 
 export interface Execution {

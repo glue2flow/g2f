@@ -183,6 +183,43 @@ type ExecContext struct {
 	Logger *slog.Logger
 	// Runtime is provided by the engine (sub-workflows, resume URL).
 	Runtime Runtime
+	// LogSink receives messages for the execution log shown in the editor.
+	// Use Log instead of calling it directly.
+	LogSink func(level, message string)
+}
+
+// Log levels for ExecContext.Log.
+const (
+	LogDebug = "debug"
+	LogInfo  = "info"
+	LogWarn  = "warn"
+	LogError = "error"
+)
+
+// Log writes message to the execution log of this node (visible to everyone
+// who can view the workflow's executions) and to the server log.
+func (c *ExecContext) Log(level, message string) {
+	if c.LogSink != nil {
+		c.LogSink(level, message)
+	}
+	if c.Logger == nil {
+		return
+	}
+	name := ""
+	if c.Node != nil {
+		name = c.Node.Name
+	}
+	attrs := []any{"node", name, "message", message}
+	switch level {
+	case LogError:
+		c.Logger.Error("workflow log", attrs...)
+	case LogWarn:
+		c.Logger.Warn("workflow log", attrs...)
+	case LogDebug:
+		c.Logger.Debug("workflow log", attrs...)
+	default:
+		c.Logger.Info("workflow log", attrs...)
+	}
 }
 
 // ItemEnv builds the expression scope for a single item.

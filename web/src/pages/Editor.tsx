@@ -20,6 +20,7 @@ import { FlowNode, type FlowNodeData, type FlowNodeType } from "../components/Fl
 import { defaultParams, ParamPanel } from "../components/ParamPanel";
 import { SharingDialog } from "../components/SharingDialog";
 import { ExecutionsPanel } from "../components/ExecutionsPanel";
+import { ResizableSide } from "../components/ResizableSide";
 import { TriggerInfo } from "../components/TriggerInfo";
 import { NodePalette } from "../components/NodePalette";
 import { atLeast, type ClientConfig, type Execution, type Graph, type NodeDef, type User, type Workflow } from "../types";
@@ -387,15 +388,17 @@ function EditorInner({ id, defs, user, config }: Props) {
         </div>
 
         {selected && (
-          <ParamPanel
-            key={selected.id}
-            nodeId={selected.id}
-            data={selected.data}
-            readOnly={!canEdit}
-            extra={<TriggerInfo workflow={wf} nodeId={selected.id} data={selected.data} config={config} dirty={dirty} />}
-            onChange={(p) => updateNode(selected.id, p)}
-            onDelete={() => deleteNode(selected.id)}
-          />
+          <ResizableSide>
+            <ParamPanel
+              key={selected.id}
+              nodeId={selected.id}
+              data={selected.data}
+              readOnly={!canEdit}
+              extra={<TriggerInfo workflow={wf} nodeId={selected.id} data={selected.data} config={config} dirty={dirty} />}
+              onChange={(p) => updateNode(selected.id, p)}
+              onDelete={() => deleteNode(selected.id)}
+            />
+          </ResizableSide>
         )}
       </div>
 

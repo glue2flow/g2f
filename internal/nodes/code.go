@@ -64,17 +64,21 @@ func (codeNode) Execute(ctx context.Context, ec *ExecContext) (Output, error) {
 
 	logs := 0
 	console := vm.NewObject()
-	_ = console.Set("log", func(call goja.FunctionCall) goja.Value {
-		if logs < maxCodeLogs {
-			parts := make([]string, len(call.Arguments))
-			for i, a := range call.Arguments {
-				parts[i] = jsString(a)
+	for name, level := range map[string]string{
+		"log": LogInfo, "info": LogInfo, "debug": LogDebug, "warn": LogWarn, "error": LogError,
+	} {
+		_ = console.Set(name, func(call goja.FunctionCall) goja.Value {
+			if logs < maxCodeLogs {
+				parts := make([]string, len(call.Arguments))
+				for i, a := range call.Arguments {
+					parts[i] = jsString(a)
+				}
+				ec.Log(level, strings.Join(parts, " "))
+				logs++
 			}
-			ec.Logger.Info("code node", "node", ec.Node.Name, "log", strings.Join(parts, " "))
-			logs++
-		}
-		return goja.Undefined()
-	})
+			return goja.Undefined()
+		})
+	}
 	_ = vm.Set("console", console)
 	for _, name := range []string{"nodes", "trigger", "workflow", "execution"} {
 		if err := setCopy(vm, name, ec.Env[name]); err != nil {

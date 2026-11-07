@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { Execution } from "../types";
+import type { Execution, LogEntry } from "../types";
 
 interface Props {
   executions: Execution[];
@@ -12,7 +12,11 @@ interface Props {
 
 export function ExecutionsPanel({ executions, selected, canCancel, onSelect, onRefresh, onCancel }: Props) {
   const [stepId, setStepId] = useState<string>();
-  const step = selected?.steps?.find((s) => s.nodeId === stepId) ?? selected?.steps?.find((s) => s.status === "error");
+  const logs = (selected?.steps ?? []).flatMap((s) => (s.logs ?? []).map((l) => ({ ...l, nodeName: s.nodeName })));
+  // The run log is the default view when there is one, unless a node failed.
+  const errorStep = selected?.steps?.find((s) => s.status === "error");
+  const showLog = logs.length > 0 && (stepId === LOG_TAB || (!stepId && !errorStep));
+  const step = showLog ? undefined : (selected?.steps?.find((s) => s.nodeId === stepId) ?? errorStep);
 
   return (
     <section className="exec-panel">
@@ -61,6 +65,11 @@ export function ExecutionsPanel({ executions, selected, canCancel, onSelect, onR
             </div>
             <div className="steps">
               <div className="step-tabs">
+                {logs.length > 0 && (
+                  <button className={`step-tab log-tab ${showLog ? "active" : ""}`} onClick={() => setStepId(LOG_TAB)}>
+                    Log <span className="count">{logs.length}</span>
+                  </button>
+                )}
                 {selected.steps?.map((s) => (
                   <button
                     key={s.nodeId}
@@ -71,12 +80,18 @@ export function ExecutionsPanel({ executions, selected, canCancel, onSelect, onR
                   </button>
                 ))}
               </div>
+              {showLog && (
+                <div className="step-body">
+                  <LogList entries={logs} />
+                </div>
+              )}
               {step && (
                 <div className="step-body">
                   <div className="muted small">
                     {step.status} · {step.inputCount} in · {step.durationMs} ms {step.truncated && "· output truncated"}
                   </div>
                   {step.error && <pre className="error-text">{step.error}</pre>}
+                  {step.logs && step.logs.length > 0 && <LogList entries={step.logs} />}
                   {step.output && <pre className="json">{JSON.stringify(step.output, null, 2)}</pre>}
                 </div>
               )}
@@ -85,6 +100,25 @@ export function ExecutionsPanel({ executions, selected, canCancel, onSelect, onR
         )}
       </div>
     </section>
+  );
+}
+
+const LOG_TAB = "\u0000log";
+
+function LogList({ entries }: { entries: (LogEntry & { nodeName?: string })[] }) {
+  return (
+    <ol className="log-list">
+      {entries.map((l, i) => (
+        <li key={i} className={`log-entry lv-${l.level}`}>
+          <time className="log-time" dateTime={l.time} title={new Date(l.time).toLocaleString()}>
+            {new Date(l.time).toLocaleTimeString([], { hour12: false })}
+          </time>
+          <span className="log-level">{l.level}</span>
+          {l.nodeName && <span className="log-node">{l.nodeName}</span>}
+          <pre className="log-msg">{l.message}</pre>
+        </li>
+      ))}
+    </ol>
   );
 }
 
