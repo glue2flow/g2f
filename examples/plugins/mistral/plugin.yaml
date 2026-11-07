@@ -1,0 +1,72 @@
+# Mistral AI plugin for glue2flow (WebAssembly, written in Go). Build plugin.wasm
+# from ./go, then zip plugin.yaml + plugin.wasm and import the zip (see README.md).
+module: mistral
+name: Mistral AI
+version: 1.0.0
+description: Send a prompt to Mistral AI and use the answer in your workflow (input -> output)
+color: "#FA520F"
+
+runtime: wasm
+wasm: plugin.wasm
+# The sandbox can only reach these hosts. Everything else is blocked.
+allowedHosts:
+  - api.mistral.ai
+timeout: 120s
+memoryMB: 64
+
+# Plugin configuration: set once per organization by an admin on the Plugins
+# page, stored encrypted. Only the plugin code sees these values.
+config:
+  - name: apiKey
+    label: Default API key
+    type: secret
+    description: Organization-wide Mistral API key, used when a node does not set its own.
+  - name: apiBaseUrl
+    label: API base URL
+    default: https://api.mistral.ai
+    description: Only change for a proxy or self-hosted gateway (and add its host to allowedHosts).
+
+vars:
+  - name: defaultModel
+    label: Default model
+    description: Model used by Chat nodes unless they set another one, e.g. mistral-small-latest.
+
+# Per-node parameters shared by all nodes.
+params:
+  - name: apiKey
+    label: API key
+    type: secret
+    description: Your own Mistral API key. Leave empty to use the organization's default key.
+
+nodes:
+  - type: chat
+    name: Chat
+    description: Send a prompt to a Mistral model and return the answer. Runs once per input item.
+    params:
+      - name: model
+        label: Model
+        required: true
+        default: "{{ vars.defaultModel }}"
+        placeholder: mistral-small-latest
+      - name: systemPrompt
+        label: System prompt
+        type: text
+        description: Optional instructions that set the behaviour of the model.
+      - name: prompt
+        label: Prompt
+        type: text
+        required: true
+        default: "{{ json.text }}"
+      - name: temperature
+        label: Temperature
+        placeholder: "0.7"
+        description: Sampling temperature between 0 and 1.5. Leave empty for the model default.
+      - name: maxTokens
+        label: Max tokens
+        placeholder: "1024"
+        description: Maximum length of the answer. Leave empty for no limit.
+      - name: jsonMode
+        label: Force JSON output
+        type: boolean
+        default: false
+        description: The model must answer with a valid JSON object (also mention JSON in the prompt).

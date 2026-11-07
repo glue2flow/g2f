@@ -1,4 +1,4 @@
-.PHONY: dev-db dev-server dev-web build test web image up down plugin-sample
+.PHONY: dev-db dev-server dev-web build test web image up down plugin-sample plugin-mistral
 
 # Development-only encryption key for secrets. Never use it in production.
 DEV_SECRET_KEY ?= ZGV2LWtleS1kZXYta2V5LWRldi1rZXktZGV2LWtleS0=
@@ -37,3 +37,7 @@ down:
 # Build the sample Telegram WebAssembly plugin -> examples/plugins/telegram/telegram.zip
 plugin-sample:
 	$(MAKE) -C examples/plugins/telegram go bundle
+
+# Build the Mistral AI WebAssembly plugin -> examples/plugins/mistral/mistral.zip
+plugin-mistral:
+	$(MAKE) -C examples/plugins/mistral go bundle

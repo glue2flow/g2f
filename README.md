@@ -50,7 +50,7 @@ internal/trigger/    scheduler (cron / one-time) and webhook endpoint
 internal/store/      PostgreSQL persistence + embedded migrations
 internal/api/        REST API, SPA hosting
 modules/             plugins loaded at startup (*.yaml, *.zip, folders)
-examples/plugins/    sample WebAssembly plugin (Telegram, in Go and JS)
+examples/plugins/    sample WebAssembly plugins (Telegram in Go and JS, Mistral AI in Go)
 web/                 React editor
 deploy/              Keycloak realm + Postgres init for docker-compose
 ```
