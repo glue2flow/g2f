@@ -21,6 +21,7 @@ import { defaultParams, ParamPanel } from "../components/ParamPanel";
 import { SharingDialog } from "../components/SharingDialog";
 import { ExecutionsPanel } from "../components/ExecutionsPanel";
 import { TriggerInfo } from "../components/TriggerInfo";
+import { NodePalette } from "../components/NodePalette";
 import { atLeast, type ClientConfig, type Execution, type Graph, type NodeDef, type User, type Workflow } from "../types";
 
 const nodeTypes = { g8g: FlowNode };
@@ -48,7 +49,11 @@ function toFlow(graph: Graph, defs: Map<string, NodeDef>): { nodes: FlowNodeType
       position: n.position,
       data: { type: n.type, name: n.name, params: n.params ?? {}, disabled: n.disabled, def: defs.get(n.type) },
     })),
-    edges: graph.edges.map((e) => ({ ...e, sourceHandle: e.sourceHandle ?? undefined, targetHandle: e.targetHandle ?? undefined })),
+    edges: graph.edges.map((e) => ({
+      ...e,
+      sourceHandle: e.sourceHandle ?? undefined,
+      targetHandle: e.targetHandle ?? undefined,
+    })),
   };
 }
 
@@ -105,7 +110,10 @@ function EditorInner({ id, defs, user, config }: Props) {
   }, [id, defMap, setNodes, setEdges]);
 
   const loadExecutions = useCallback(() => {
-    api.executions(id).then(setExecutions).catch(() => {});
+    api
+      .executions(id)
+      .then(setExecutions)
+      .catch(() => {});
   }, [id]);
 
   useEffect(() => {
@@ -271,10 +279,6 @@ function EditorInner({ id, defs, user, config }: Props) {
   if (!wf) return message ? <div className="alert error">{message.text}</div> : <div className="loading">Loading…</div>;
 
   const selected = nodes.find((n) => n.id === selectedId);
-  const grouped = defs.reduce<Record<string, NodeDef[]>>((acc, d) => {
-    (acc[d.category] ??= []).push(d);
-    return acc;
-  }, {});
   const hasTrigger = nodes.some((n) => n.data.def?.trigger);
 
   return (
@@ -312,7 +316,12 @@ function EditorInner({ id, defs, user, config }: Props) {
           </button>
         )}
         {canRun && (
-          <button className="btn primary" disabled={busy || !hasTrigger} onClick={run} title="Run from the selected trigger (or the first one)">
+          <button
+            className="btn primary"
+            disabled={busy || !hasTrigger}
+            onClick={run}
+            title="Run from the selected trigger (or the first one)"
+          >
             ▶ Run
           </button>
         )}
@@ -324,29 +333,7 @@ function EditorInner({ id, defs, user, config }: Props) {
       </div>
 
       <div className="editor-body">
-        {canEdit && (
-          <aside className="palette">
-            {Object.entries(grouped).map(([cat, list]) => (
-              <div key={cat} className="palette-group">
-                <div className="palette-cat">{cat}</div>
-                {list.map((d) => (
-                  <div
-                    key={d.type}
-                    className="palette-item"
-                    draggable
-                    title={d.description}
-                    onDragStart={(e) => e.dataTransfer.setData("application/g8g-node", d.type)}
-                    onDoubleClick={() => addNode(d)}
-                  >
-                    <span className="dot" style={{ background: d.color }} />
-                    {d.name}
-                  </div>
-                ))}
-              </div>
-            ))}
-            <p className="hint">Drag onto the canvas or double-click to add.</p>
-          </aside>
-        )}
+        {canEdit && <NodePalette defs={defs} onAdd={(d) => addNode(d)} />}
 
         <div
           className="canvas"
