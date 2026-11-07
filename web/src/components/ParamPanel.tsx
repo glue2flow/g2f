@@ -33,7 +33,7 @@ export function ParamPanel({ nodeId, data, readOnly, extra, onChange, onDelete }
       {def?.description && <p className="desc">{def.description}</p>}
       {extra}
       <div className="form">
-        {def?.params.map((p) => (
+        {def?.params.filter((p) => visible(p, def, data.params)).map((p) => (
           <Field key={p.name} def={p} value={data.params[p.name]} readOnly={readOnly} onChange={(v) => setParam(p.name, v)} />
         ))}
         {!def && <div className="alert error">This node type is not installed on the server.</div>}
@@ -106,6 +106,9 @@ function Field({ def, value, readOnly, onChange }: { def: ParamDef; value: unkno
         />
       );
       break;
+    case "datetime":
+      input = <input type="datetime-local" disabled={readOnly} value={String(v ?? "")} onChange={(e) => onChange(e.target.value)} />;
+      break;
     case "secret":
       input = <input type="password" autoComplete="off" disabled={readOnly} placeholder={def.placeholder} value={String(v ?? "")} onChange={(e) => onChange(e.target.value)} />;
       break;
@@ -158,4 +161,13 @@ export function defaultParams(def: NodeDef): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const p of def.params) if (p.default !== undefined) out[p.name] = p.default;
   return out;
+}
+
+/** Evaluates a parameter's showIf condition against the current values. */
+function visible(p: ParamDef, def: NodeDef, params: Record<string, unknown>): boolean {
+  if (!p.showIf) return true;
+  return Object.entries(p.showIf).every(([name, values]) => {
+    const v = params[name] ?? def.params.find((x) => x.name === name)?.default;
+    return values.includes(String(v ?? ""));
+  });
 }

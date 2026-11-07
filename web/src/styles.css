@@ -193,3 +193,11 @@ pre.json { margin: 6px 0 0; white-space: pre-wrap; word-break: break-word; }
 .radio-list { display: flex; flex-direction: column; gap: 6px; }
 .radio { display: flex; gap: 10px; align-items: flex-start; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; cursor: pointer; }
 .radio.checked { border-color: var(--primary); background: color-mix(in srgb, var(--primary) 6%, transparent); }
+
+/* Trigger info */
+.info-box .row { flex-wrap: wrap; gap: 4px; }
+.info-box code.url { flex: 1; min-width: 0; overflow-wrap: anywhere; padding: 4px 6px; background: var(--surface); border-radius: 4px; border: 1px solid var(--border); }
+.info-box details { margin-top: 6px; }
+.info-box summary { cursor: pointer; }
+.next-runs { margin: 4px 0 0; padding-left: 18px; font-variant-numeric: tabular-nums; }
+.new-menu { display: flex; gap: 6px; } .new-menu select { width: auto; }

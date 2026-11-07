@@ -93,7 +93,7 @@ func TestSkippedBranchAndError(t *testing.T) {
 			{ID: "t", Name: "Start", Type: "trigger.manual"},
 			{ID: "if", Name: "If", Type: "core.if", Params: map[string]any{"condition": "{{ false }}"}},
 			{ID: "yes", Name: "Yes", Type: "core.log"},
-			{ID: "no", Name: "No", Type: "core.set", Params: map[string]any{"fields": "{{ json.x.y.z }}"}},
+			{ID: "no", Name: "No", Type: "core.set", Params: map[string]any{"fields": "{{ [1][5] }}"}},
 		},
 		Edges: []workflow.Edge{
 			{ID: "1", Source: "t", Target: "if"},

@@ -13,6 +13,8 @@ import (
 func RegisterBuiltins(r *Registry) error {
 	for _, n := range []Node{
 		manualTrigger{},
+		scheduleTrigger{},
+		webhookTrigger{},
 		httpNode{},
 		setNode{},
 		ifNode{},
@@ -216,7 +218,7 @@ func (transformNode) Definition() Definition {
 		Type: "core.transform", Name: "Transform Items", Category: "Core", Source: "builtin",
 		Description: "Evaluate one expression over all items (variable `items`) and emit the result. " +
 			"Arrays become multiple items, e.g. {{ filter(items, .active) }} or {{ map(items, ({name: .login})) }} (wrap object literals in parentheses inside map/filter).",
-		Color:  "#8b5cf6", Inputs: []string{"main"}, Outputs: []string{"main"},
+		Color: "#8b5cf6", Inputs: []string{"main"}, Outputs: []string{"main"},
 		Params: []Param{{Name: "expression", Label: "Expression", Type: ParamText, Required: true, Default: "{{ items }}"}},
 	}
 }

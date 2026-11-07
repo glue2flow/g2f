@@ -86,6 +86,7 @@ func (s *Server) Handler() http.Handler {
 			r.Delete("/workflows/{id}", s.deleteWorkflow)
 			r.Post("/workflows/{id}/run", s.runWorkflow)
 			r.Get("/workflows/{id}/executions", s.listExecutions)
+			r.Get("/workflows/{id}/triggers", s.listTriggers)
 			r.Get("/executions/{id}", s.getExecution)
 		})
 	})

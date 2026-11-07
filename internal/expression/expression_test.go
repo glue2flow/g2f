@@ -18,6 +18,10 @@ func TestRender(t *testing.T) {
 		{"{{ json.tags }}", []any{"a", "b"}},
 		{"tags={{ json.tags }}", `tags=["a","b"]`},
 		{"{{ json.missing ?? 'x' }}", "x"},
+		{"{{ json.missing.deep.field }}", nil},
+		{"{{ json.missing.deep ?? 'fallback' }}", "fallback"},
+		{"{{ upper(json.name) }}", "ADA"},
+		{"{{ filter(json.tags, # == 'b') }}", []any{"b"}},
 	}
 	for _, c := range cases {
 		got, err := Render(c.in, env)

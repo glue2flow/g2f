@@ -41,6 +41,8 @@ const (
 	ParamSelect  ParamType = "select"
 	ParamJSON    ParamType = "json"
 	ParamSecret  ParamType = "secret"
+	// ParamDateTime is a local date-time string "YYYY-MM-DDTHH:MM".
+	ParamDateTime ParamType = "datetime"
 )
 
 type Option struct {
@@ -60,6 +62,9 @@ type Param struct {
 	Options     []Option  `json:"options,omitempty" yaml:"options"`
 	// NoExpression disables {{ }} evaluation (used for trigger settings).
 	NoExpression bool `json:"noExpression,omitempty" yaml:"noExpression"`
+	// ShowIf hides the field in the editor unless every listed parameter has
+	// one of the given values, e.g. {"auth": ["token", "hmac"]}.
+	ShowIf map[string][]string `json:"showIf,omitempty" yaml:"showIf"`
 }
 
 // Definition is the public description of a node type served to the editor.

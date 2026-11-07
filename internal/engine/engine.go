@@ -89,6 +89,8 @@ func (e *Engine) Start(ctx context.Context, req Request) (*store.Execution, erro
 	if err != nil {
 		return nil, err
 	}
+	// The goroutine keeps mutating exec; callers get a snapshot.
+	snapshot := *exec
 	e.wg.Add(1)
 	go func() {
 		defer e.wg.Done()
@@ -101,7 +103,7 @@ func (e *Engine) Start(ctx context.Context, req Request) (*store.Execution, erro
 		defer func() { <-e.sem }()
 		e.execute(e.baseCtx, exec, req, start)
 	}()
-	return exec, nil
+	return &snapshot, nil
 }
 
 // Run executes synchronously and returns the result, bounded by ctx.

@@ -18,6 +18,7 @@ import (
 	"github.com/wolfposd/g8g/internal/engine"
 	"github.com/wolfposd/g8g/internal/nodes"
 	"github.com/wolfposd/g8g/internal/store"
+	"github.com/wolfposd/g8g/internal/trigger"
 )
 
 // version is set at build time via -ldflags.
@@ -80,8 +81,16 @@ func run(log *slog.Logger) error {
 		Workers: cfg.Workers, Timeout: cfg.ExecutionTimeout, MaxStoredItems: cfg.MaxStoredItems,
 	})
 
+	sched := trigger.NewScheduler(st, eng, reg, log, trigger.SchedulerOptions{CatchUp: cfg.ScheduleCatchUp})
+	schedCtx, stopSched := context.WithCancel(context.Background())
+	defer stopSched()
+	schedDone := make(chan struct{})
+	go func() { defer close(schedDone); sched.Run(schedCtx) }()
+
 	srv := api.New(api.Deps{
 		Config: cfg, Store: st, Registry: reg, Engine: eng, Auth: authn, Logger: log,
+		Listener: sched,
+		Webhooks: trigger.NewWebhookHandler(st, eng, reg, log, cfg.WebhookMaxWait),
 	})
 	httpSrv := &http.Server{
 		Addr:              cfg.Listen,
@@ -104,6 +113,8 @@ func run(log *slog.Logger) error {
 	}
 
 	log.Info("shutting down")
+	stopSched()
+	<-schedDone
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	_ = httpSrv.Shutdown(shutdownCtx)

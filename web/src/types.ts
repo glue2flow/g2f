@@ -58,7 +58,7 @@ export interface Workflow {
   triggers?: string[];
 }
 
-export type ParamType = "string" | "text" | "number" | "boolean" | "select" | "json" | "secret";
+export type ParamType = "string" | "text" | "number" | "boolean" | "select" | "json" | "secret" | "datetime";
 
 export interface ParamDef {
   name: string;
@@ -70,6 +70,7 @@ export interface ParamDef {
   required?: boolean;
   options?: { label: string; value: string }[];
   noExpression?: boolean;
+  showIf?: Record<string, string[]>;
 }
 
 export interface NodeDef {
@@ -124,3 +125,13 @@ export interface ClientConfig {
 
 export const roleRank: Record<Role, number> = { viewer: 1, runner: 2, editor: 3, owner: 4 };
 export const atLeast = (r: Role | undefined, min: Role) => !!r && roleRank[r] >= roleRank[min];
+
+export interface TriggerInfo {
+  nodeId: string;
+  name: string;
+  kind: "manual" | "schedule" | "webhook";
+  listening: boolean;
+  error?: string;
+  webhook?: { url: string; method: string; auth: "none" | "token" | "hmac"; header?: string; respond: string };
+  schedule?: { mode: "cron" | "once"; timezone: string; next: string[] };
+}

@@ -12,6 +12,7 @@ import (
 	"sync"
 
 	"github.com/expr-lang/expr"
+	"github.com/expr-lang/expr/ast"
 	"github.com/expr-lang/expr/vm"
 )
 
@@ -24,12 +25,33 @@ func compile(code string) (*vm.Program, error) {
 	if p, ok := cache.Load(code); ok {
 		return p.(*vm.Program), nil
 	}
-	p, err := expr.Compile(code, expr.AllowUndefinedVariables())
+	p, err := expr.Compile(code, expr.AllowUndefinedVariables(), expr.Patch(nilSafe{}))
 	if err != nil {
 		return nil, err
 	}
 	cache.Store(code, p)
 	return p, nil
+}
+
+// nilSafe makes every member access optional, so `trigger.body.name` yields nil
+// instead of an error when body is missing (like `trigger.body?.name`).
+// Workflow data is loosely shaped; failing on absent fields is rarely useful.
+type nilSafe struct{}
+
+func (nilSafe) Visit(n *ast.Node) {
+	switch t := (*n).(type) {
+	case *ast.MemberNode:
+		t.Optional = true
+		ast.Patch(n, &ast.ChainNode{Node: t})
+	case *ast.CallNode:
+		// Method calls need a plain member callee.
+		if ch, ok := t.Callee.(*ast.ChainNode); ok {
+			if m, ok := ch.Node.(*ast.MemberNode); ok {
+				m.Optional = false
+				t.Callee = m
+			}
+		}
+	}
 }
 
 // Eval runs a bare expression (without braces).

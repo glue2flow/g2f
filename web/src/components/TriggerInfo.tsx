@@ -1,4 +1,6 @@
-import type { ClientConfig, Workflow } from "../types";
+import { useEffect, useState } from "react";
+import { api } from "../api";
+import type { ClientConfig, TriggerInfo as Info, Workflow } from "../types";
 import type { FlowNodeData } from "./FlowNode";
 
 interface Props {
@@ -9,10 +11,105 @@ interface Props {
   dirty: boolean;
 }
 
-/** Shows trigger-specific hints (how the selected trigger is invoked). */
-export function TriggerInfo({ data }: Props) {
-  if (data.def?.trigger === "manual") {
+/** Explains how the selected trigger is invoked: webhook URL, next schedule runs. */
+export function TriggerInfo({ workflow, nodeId, data, dirty }: Props) {
+  const kind = data.def?.trigger;
+  const [info, setInfo] = useState<Info>();
+
+  useEffect(() => {
+    if (kind !== "webhook" && kind !== "schedule") return;
+    api
+      .triggers(workflow.id)
+      .then((list) => setInfo(list.find((t) => t.nodeId === nodeId)))
+      .catch(() => setInfo(undefined));
+    // Refetch whenever a new version is saved.
+  }, [workflow.id, workflow.version, workflow.active, nodeId, kind]);
+
+  if (kind === "manual") {
     return <div className="info-box">Select this node and click ▶ Run to start the workflow from here.</div>;
+  }
+  if (kind !== "webhook" && kind !== "schedule") return null;
+  if (!info) {
+    return <div className="info-box">{dirty ? "Save the workflow to activate this trigger." : "Loading…"}</div>;
+  }
+
+  const status = info.listening ? (
+    <span className="chip on">listening</span>
+  ) : (
+    <span className="chip">inactive – activate the workflow</span>
+  );
+
+  if (info.error) {
+    return (
+      <div className="info-box">
+        {status} <span className="error-text">{info.error}</span>
+      </div>
+    );
+  }
+
+  if (info.webhook) {
+    const w = info.webhook;
+    const method = w.method === "ANY" ? "POST" : w.method;
+    const auth =
+      w.auth === "token"
+        ? ` \\\n  -H '${w.header}: <secret>'`
+        : w.auth === "hmac"
+          ? ` \\\n  -H "${w.header}: sha256=$(printf '%s' "$BODY" | openssl dgst -sha256 -hmac '<secret>' -r | cut -d' ' -f1)"`
+          : "";
+    const body = method === "GET" || method === "DELETE" ? "" : ` \\\n  -H 'Content-Type: application/json' -d "$BODY"`;
+    const curl = `${body ? `BODY='{"hello":"world"}'\n` : ""}curl -X ${method} '${w.url}'${auth}${body}`;
+    return (
+      <div className="info-box">
+        <div className="row">
+          {status}
+          <span className="chip">{w.method}</span>
+          <span className="chip">{w.respond === "lastNode" ? "returns result" : "202 async"}</span>
+        </div>
+        <div className="field-label" style={{ marginTop: 6 }}>
+          Webhook URL{dirty && <span className="muted"> (saved version)</span>}
+        </div>
+        <div className="row">
+          <code className="url">{w.url}</code>
+          <button className="btn small" onClick={() => navigator.clipboard?.writeText(w.url)}>
+            Copy
+          </button>
+        </div>
+        <details>
+          <summary className="small">curl example</summary>
+          <pre className="json">{curl}</pre>
+        </details>
+      </div>
+    );
+  }
+
+  if (info.schedule) {
+    const s = info.schedule;
+    const fmt = new Intl.DateTimeFormat(undefined, {
+      dateStyle: "medium",
+      timeStyle: "short",
+      timeZone: s.timezone,
+    });
+    return (
+      <div className="info-box">
+        <div className="row">
+          {status}
+          <span className="chip">{s.timezone}</span>
+        </div>
+        <div className="field-label" style={{ marginTop: 6 }}>
+          {s.mode === "once" ? "Runs at" : "Next runs"}
+          {dirty && <span className="muted"> (saved version)</span>}
+        </div>
+        {s.next.length === 0 ? (
+          <div className="muted">{s.mode === "once" ? "This time is in the past; it will not run." : "No upcoming runs."}</div>
+        ) : (
+          <ul className="next-runs">
+            {s.next.map((t) => (
+              <li key={t}>{fmt.format(new Date(t))}</li>
+            ))}
+          </ul>
+        )}
+      </div>
+    );
   }
   return null;
 }

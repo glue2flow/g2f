@@ -61,7 +61,7 @@ export function App({ config }: { config: ClientConfig }) {
         {editorMatch ? (
           <Editor key={editorMatch[1]} id={editorMatch[1]} defs={defs} user={user} config={config} />
         ) : (
-          <WorkflowList user={user} />
+          <WorkflowList user={user} defs={defs} />
         )}
       </main>
     </div>

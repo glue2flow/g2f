@@ -29,6 +29,10 @@ type Config struct {
 
 	Workers          int
 	ExecutionTimeout time.Duration
+	// ScheduleCatchUp: how late a missed one-time schedule may still fire.
+	ScheduleCatchUp time.Duration
+	// WebhookMaxWait bounds webhooks that respond with the workflow result.
+	WebhookMaxWait time.Duration
 	// MaxStoredItems caps how many items per node output are persisted with an execution.
 	MaxStoredItems int
 }
@@ -82,6 +86,13 @@ func Load() (*Config, error) {
 	}
 	if c.ExecutionTimeout, err = time.ParseDuration(env("G8G_EXECUTION_TIMEOUT", "5m")); err != nil {
 		return nil, fmt.Errorf("G8G_EXECUTION_TIMEOUT: %w", err)
+	}
+
+	if c.ScheduleCatchUp, err = time.ParseDuration(env("G8G_SCHEDULE_CATCHUP", "1h")); err != nil {
+		return nil, fmt.Errorf("G8G_SCHEDULE_CATCHUP: %w", err)
+	}
+	if c.WebhookMaxWait, err = time.ParseDuration(env("G8G_WEBHOOK_MAX_WAIT", "60s")); err != nil {
+		return nil, fmt.Errorf("G8G_WEBHOOK_MAX_WAIT: %w", err)
 	}
 
 	switch c.Auth.Mode {

@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import { navigate } from "../App";
-import type { Scope, User, Workflow } from "../types";
+import type { NodeDef, Scope, User, Workflow } from "../types";
 
 const scopeLabel: Record<Scope, string> = { private: "Private", group: "Groups", org: "Organization" };
 
-export function WorkflowList({ user }: { user: User }) {
+export function WorkflowList({ user, defs }: { user: User; defs: NodeDef[] }) {
   const [items, setItems] = useState<Workflow[]>();
   const [filter, setFilter] = useState<"all" | "mine" | Scope>("all");
   const [error, setError] = useState<string>();
@@ -22,7 +22,12 @@ export function WorkflowList({ user }: { user: User }) {
     [items, filter, user.sub],
   );
 
-  async function create() {
+  const triggerDefs = defs.filter((d) => d.trigger);
+
+  async function create(triggerType = "trigger.manual") {
+    const def = triggerDefs.find((d) => d.type === triggerType);
+    const params: Record<string, unknown> = {};
+    for (const p of def?.params ?? []) if (p.default !== undefined) params[p.name] = p.default;
     try {
       const wf = await api.createWorkflow({
         name: "Untitled workflow",
@@ -33,7 +38,7 @@ export function WorkflowList({ user }: { user: User }) {
         active: false,
         graph: {
           nodes: [
-            { id: "trigger", type: "trigger.manual", name: "Manual Trigger", position: { x: 80, y: 160 }, params: {} },
+            { id: "trigger", type: triggerType, name: def?.name ?? "Trigger", position: { x: 80, y: 160 }, params },
           ],
           edges: [],
         },
@@ -56,9 +61,24 @@ export function WorkflowList({ user }: { user: User }) {
           ))}
         </div>
         <div className="spacer" />
-        <button className="btn primary" onClick={create}>
-          + New workflow
-        </button>
+        <div className="new-menu">
+          <button className="btn primary" onClick={() => create()}>
+            + New workflow
+          </button>
+          <select
+            className="btn"
+            aria-label="New workflow with trigger"
+            value=""
+            onChange={(e) => e.target.value && create(e.target.value)}
+          >
+            <option value="">with trigger…</option>
+            {triggerDefs.map((d) => (
+              <option key={d.type} value={d.type}>
+                {d.name}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
       {error && <div className="alert error">{error}</div>}
       {!items ? (

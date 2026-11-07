@@ -1,5 +1,5 @@
 import Keycloak from "keycloak-js";
-import type { ClientConfig, Execution, NodeDef, User, Workflow } from "./types";
+import type { ClientConfig, Execution, NodeDef, TriggerInfo, User, Workflow } from "./types";
 
 let keycloak: Keycloak | null = null;
 
@@ -57,5 +57,6 @@ export const api = {
   run: (id: string, nodeId?: string, items?: unknown[]) =>
     request<Execution>("POST", `/api/workflows/${id}/run`, { nodeId, items }),
   executions: (id: string) => request<Execution[]>("GET", `/api/workflows/${id}/executions`),
+  triggers: (id: string) => request<TriggerInfo[]>("GET", `/api/workflows/${id}/triggers`),
   execution: (id: string) => request<Execution>("GET", `/api/executions/${id}`),
 };

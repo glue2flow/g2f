@@ -41,6 +41,7 @@ internal/workflow/   workflow model, graph validation, sharing / roles
 internal/expression/ {{ expr }} templates in node parameters
 internal/nodes/      node registry, built-in nodes, YAML module loader
 internal/engine/     executes graphs, records executions
+internal/trigger/    scheduler (cron / one-time) and webhook endpoint
 internal/store/      PostgreSQL persistence + embedded migrations
 internal/api/        REST API, SPA hosting
 modules/             declarative API modules (*.yaml)
@@ -58,6 +59,49 @@ route items to a specific handle; a node that receives no items is **skipped**.
 Each execution stores per-node status, duration and output (capped at
 `G8G_MAX_STORED_ITEMS` items per output), which the editor shows below the canvas.
 
+### Triggers
+
+Every workflow starts at a trigger node. A workflow may have several triggers.
+
+| Trigger | Fires when | Item emitted |
+| --- | --- | --- |
+| **Manual** | a user with role `runner`+ clicks ▶ Run, or `POST /api/workflows/{id}/run` | the node's test payload (or `items` from the request body) |
+| **Schedule** | the workflow is **active** and the time is due | `{firedAt, scheduledAt, timezone}` |
+| **Webhook** | the workflow is **active** and `/webhook/{workflowId}/{nodeId}` is called | `{method, headers, query, body, receivedAt}` |
+
+Any trigger can also be run manually from the editor (select it, then ▶ Run). Webhook and
+schedule triggers then use their test payload, so a flow can be tested before activation.
+
+**Schedule**
+- *Recurring*: 5-field cron (`*/15 * * * *`), or descriptors like `@hourly`, `@daily`, `@every 30m`. At most once per minute.
+- *Once*: a local date-time (`2026-12-24T18:00`).
+- Each schedule has an IANA timezone (`Europe/Berlin`), so it follows daylight saving time.
+- Each firing is claimed in PostgreSQL (`trigger_firings`) under a key derived from the scheduled time.
+  With several replicas, every replica runs the scheduler and exactly one executes each firing.
+  A one-time schedule never runs twice, even across restarts.
+- Missed recurring runs (server down) are skipped. A one-time run missed by less than
+  `G8G_SCHEDULE_CATCHUP` (default 1h) runs as soon as the server is back.
+
+**Webhook**
+- Method: `POST` (default), `GET`, `PUT`, `PATCH`, `DELETE` or `ANY`.
+- Authentication:
+  - `none`
+  - `token`: shared secret in a header (default `X-G8G-Token`, `Bearer ` prefix allowed)
+  - `hmac`: HMAC-SHA256 signature of the raw body in a header (default `X-Signature-256`,
+    value `sha256=<hex>`). Set the header to `X-Hub-Signature-256` for GitHub webhooks.
+- The secret header and cookies are removed before the request becomes workflow data.
+- Response:
+  - `immediately`: `202 {"executionId": ...}`
+  - `lastNode`: waits up to `G8G_WEBHOOK_MAX_WAIT` and returns the output of the last node
+    (one item as an object, otherwise an array). Errors return HTTP 500.
+- JSON and form bodies are parsed; anything else arrives as a string. Limit 5 MiB.
+- The editor shows the URL and a ready-to-use `curl` command for the selected webhook node.
+
+```bash
+curl -X POST http://localhost:8080/webhook/<workflow-id>/<node-id> \
+  -H 'X-G8G-Token: s3cret' -H 'Content-Type: application/json' -d '{"name":"Ada"}'
+```
+
 ### Expressions
 
 Any parameter can contain `{{ ... }}` expressions in the [expr language](https://expr-lang.org/docs/language-definition):
@@ -71,6 +115,8 @@ Any parameter can contain `{{ ... }}` expressions in the [expr language](https:/
 | `workflow.id`, `workflow.name`, `execution.id` | run metadata |
 | `params` | resolved node parameters (YAML modules only) |
 
+Member access is null-safe: `{{ trigger.body.name }}` is `nil` when `body` is missing, so
+`{{ trigger.body.name ?? 'anonymous' }}` works as a default.
 A parameter that is exactly one expression keeps its type (`{{ json.count + 1 }}` → number);
 mixed text yields a string. Inside `map`/`filter`, wrap object literals in parentheses:
 `{{ map(items, ({id: .id})) }}`.
@@ -128,7 +174,8 @@ nodes:
     output: "{{ response.body }}"   # optional; arrays become one item per element
 ```
 
-Parameter types: `string`, `text`, `number`, `boolean`, `select` (with `options`), `json`, `secret`.
+Parameter types: `string`, `text`, `number`, `boolean`, `select` (with `options`), `json`, `secret`, `datetime`.
+`showIf: {auth: [token, hmac]}` shows a field only for certain values of another parameter.
 
 For logic that does not fit a single HTTP request, implement the `nodes.Node` interface in Go
 (see `internal/nodes/builtin.go`) and register it in `RegisterBuiltins`.
@@ -151,6 +198,8 @@ For logic that does not fit a single HTTP request, implement the `nodes.Node` in
 | `G8G_WORKERS` | `16` | max concurrent executions |
 | `G8G_EXECUTION_TIMEOUT` | `5m` | per execution |
 | `G8G_MAX_STORED_ITEMS` | `100` | items stored per node output |
+| `G8G_SCHEDULE_CATCHUP` | `1h` | how late a missed one-time schedule may still run |
+| `G8G_WEBHOOK_MAX_WAIT` | `60s` | max wait for webhooks that respond with the result |
 | `G8G_STATIC_DIR` | `./web/dist` | built editor |
 | `G8G_MODULES_DIR` | `./modules` | YAML modules |
 
@@ -159,6 +208,8 @@ For logic that does not fit a single HTTP request, implement the `nodes.Node` in
 - Credential store (encrypted, shareable like workflows) instead of secrets in node parameters
 - WASM modules (wazero) for sandboxed custom code in any language
 - Code node (JavaScript via goja / QuickJS-WASM)
-- Horizontal scaling: run executions through a Postgres-backed job queue
+- Horizontal scaling: run executions through a Postgres-backed job queue (schedules are
+  already replica-safe; the restart recovery of running executions still assumes one instance)
+- Webhook rate limiting and a "test URL" that works while a workflow is inactive
 - Workflow version history and import/export
 - SSRF protection for HTTP nodes (block private networks by default)
