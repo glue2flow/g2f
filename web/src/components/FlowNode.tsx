@@ -26,15 +26,19 @@ export function FlowNode({ data, selected }: NodeProps<FlowNodeType>) {
 
   return (
     <div className={cls} style={{ "--node-color": color } as React.CSSProperties}>
-      {inputs.map((h, i) => (
-        <Handle
-          key={h}
-          id={h}
-          type="target"
-          position={Position.Left}
-          style={{ top: `${((i + 1) / (inputs.length + 1)) * 100}%` }}
-        />
-      ))}
+      {inputs.map((h, i) => {
+        const top = `${((i + 1) / (inputs.length + 1)) * 100}%`;
+        return (
+          <div key={h}>
+            <Handle id={h} type="target" position={Position.Left} style={{ top }} />
+            {inputs.length > 1 && (
+              <span className="handle-label in" style={{ top }}>
+                {h.toUpperCase()}
+              </span>
+            )}
+          </div>
+        );
+      })}
       <div className="flow-node-icon">{def?.trigger ? triggerIcon[def.trigger] : def?.name.slice(0, 1)}</div>
       <div className="flow-node-body">
         <div className="flow-node-name">{data.name}</div>

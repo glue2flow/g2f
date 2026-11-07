@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { NodeDef, ParamDef } from "../types";
+import { isSecretRef, type NodeDef, type ParamDef } from "../types";
 import type { FlowNodeData } from "./FlowNode";
 
 interface Props {
@@ -110,7 +110,7 @@ function Field({ def, value, readOnly, onChange }: { def: ParamDef; value: unkno
       input = <input type="datetime-local" disabled={readOnly} value={String(v ?? "")} onChange={(e) => onChange(e.target.value)} />;
       break;
     case "secret":
-      input = <input type="password" autoComplete="off" disabled={readOnly} placeholder={def.placeholder} value={String(v ?? "")} onChange={(e) => onChange(e.target.value)} />;
+      input = <SecretField value={value} readOnly={readOnly} placeholder={def.placeholder} onChange={onChange} />;
       break;
     default:
       input = <input disabled={readOnly} placeholder={def.placeholder} value={String(v ?? "")} onChange={(e) => onChange(e.target.value)} />;
@@ -170,4 +170,38 @@ function visible(p: ParamDef, def: NodeDef, params: Record<string, unknown>): bo
     const v = params[name] ?? def.params.find((x) => x.name === name)?.default;
     return values.includes(String(v ?? ""));
   });
+}
+
+/**
+ * Secrets are write-only: the server returns a placeholder for stored values,
+ * which is sent back unchanged to keep them. Typing replaces, Clear deletes.
+ */
+export function SecretField({ value, readOnly, placeholder, onChange }: { value: unknown; readOnly: boolean; placeholder?: string; onChange: (v: unknown) => void }) {
+  if (isSecretRef(value)) {
+    return (
+      <div className="secret-stored">
+        <span className="chip on">🔒 stored encrypted</span>
+        {!readOnly && (
+          <>
+            <button type="button" className="btn small" onClick={() => onChange("")}>
+              Replace
+            </button>
+            <button type="button" className="btn small danger" onClick={() => onChange(null)}>
+              Clear
+            </button>
+          </>
+        )}
+      </div>
+    );
+  }
+  return (
+    <input
+      type="password"
+      autoComplete="new-password"
+      disabled={readOnly}
+      placeholder={placeholder ?? "Enter secret – stored encrypted, never shown again"}
+      value={typeof value === "string" ? value : ""}
+      onChange={(e) => onChange(e.target.value)}
+    />
+  );
 }

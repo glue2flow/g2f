@@ -1,5 +1,5 @@
 import Keycloak from "keycloak-js";
-import type { ClientConfig, Execution, NodeDef, TriggerInfo, User, Workflow } from "./types";
+import type { ClientConfig, ConfigValue, Execution, ModuleInfo, NodeDef, TriggerInfo, User, Workflow } from "./types";
 
 let keycloak: Keycloak | null = null;
 
@@ -33,8 +33,14 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   if (keycloak) await keycloak.updateToken(30).catch(() => keycloak?.login());
   const headers: Record<string, string> = {};
   if (keycloak?.token) headers.Authorization = `Bearer ${keycloak.token}`;
-  if (body !== undefined) headers["Content-Type"] = "application/json";
-  const res = await fetch(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+  let payload: BodyInit | undefined;
+  if (body instanceof FormData) {
+    payload = body; // browser sets the multipart boundary
+  } else if (body !== undefined) {
+    headers["Content-Type"] = "application/json";
+    payload = JSON.stringify(body);
+  }
+  const res = await fetch(path, { method, headers, body: payload });
   if (res.status === 204) return undefined as T;
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new ApiError(res.status, data.error ?? res.statusText);
@@ -58,5 +64,15 @@ export const api = {
     request<Execution>("POST", `/api/workflows/${id}/run`, { nodeId, items }),
   executions: (id: string) => request<Execution[]>("GET", `/api/workflows/${id}/executions`),
   triggers: (id: string) => request<TriggerInfo[]>("GET", `/api/workflows/${id}/triggers`),
+  plugins: () => request<ModuleInfo[]>("GET", "/api/plugins"),
+  importPlugin: (file: File) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    return request<ModuleInfo>("POST", "/api/plugins", fd);
+  },
+  deletePlugin: (module: string) => request<void>("DELETE", `/api/plugins/${module}`),
+  pluginConfig: (module: string) => request<ConfigValue[]>("GET", `/api/plugins/${module}/config`),
+  setPluginConfig: (module: string, values: Record<string, unknown>) =>
+    request<ConfigValue[]>("PUT", `/api/plugins/${module}/config`, { values }),
   execution: (id: string) => request<Execution>("GET", `/api/executions/${id}`),
 };

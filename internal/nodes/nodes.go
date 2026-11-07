@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/wolfposd/g8g/internal/expression"
 	"github.com/wolfposd/g8g/internal/workflow"
@@ -78,7 +79,9 @@ type Definition struct {
 	Inputs      []string    `json:"inputs"`
 	Outputs     []string    `json:"outputs"`
 	Params      []Param     `json:"params"`
-	Source      string      `json:"source"` // builtin | module:<file>
+	// Module is the plugin module the node belongs to ("builtin" for Go nodes).
+	Module string `json:"module"`
+	Source string `json:"source"` // builtin | file:<name> | imported
 }
 
 func (d *Definition) Param(name string) *Param {
@@ -98,20 +101,29 @@ type Node interface {
 
 // ExecContext is what a node sees while it runs.
 type ExecContext struct {
-	Node   *workflow.Node
-	Def    *Definition
-	Items  []Item
+	Node *workflow.Node
+	Def  *Definition
+	// Items is the concatenation of all inputs.
+	Items []Item
+	// Inputs holds the items per input handle (e.g. "a" and "b" for logic gates).
+	Inputs map[string][]Item
+	// Config is the decrypted global configuration of the node's module for the
+	// workflow's organization. Exposed to expressions as `config`.
+	Config map[string]any
 	Env    expression.Env // shared scope: nodes, trigger, execution, workflow
 	Logger *slog.Logger
 }
 
 // ItemEnv builds the expression scope for a single item.
 func (c *ExecContext) ItemEnv(item Item, index int) expression.Env {
-	env := make(expression.Env, len(c.Env)+3)
+	env := make(expression.Env, len(c.Env)+4)
 	maps.Copy(env, c.Env)
 	env["json"] = item
 	env["index"] = index
 	env["items"] = c.Items
+	if c.Config != nil {
+		env["config"] = c.Config
+	}
 	return env
 }
 
@@ -198,14 +210,37 @@ func truthy(v any) bool {
 	return true
 }
 
-// Registry holds all known node types.
-type Registry struct {
-	mu    sync.RWMutex
-	nodes map[string]Node
+// ModuleInfo describes a group of nodes installed together (a plugin).
+type ModuleInfo struct {
+	Module       string     `json:"module"`
+	Name         string     `json:"name"`
+	Version      string     `json:"version,omitempty"`
+	Description  string     `json:"description,omitempty"`
+	Color        string     `json:"color,omitempty"`
+	Runtime      string     `json:"runtime"` // builtin | http | wasm
+	Source       string     `json:"source"`  // builtin | file:<name> | imported
+	Config       []Param    `json:"config"`  // global (per organization) settings
+	AllowedHosts []string   `json:"allowedHosts,omitempty"`
+	Nodes        []string   `json:"nodes"`
+	InstalledBy  string     `json:"installedBy,omitempty"`
+	InstalledAt  *time.Time `json:"installedAt,omitempty"`
 }
 
-func NewRegistry() *Registry { return &Registry{nodes: map[string]Node{}} }
+// BuiltinModule is the module name of nodes implemented in Go.
+const BuiltinModule = "builtin"
 
+// Registry holds all known node types, grouped by module.
+type Registry struct {
+	mu      sync.RWMutex
+	nodes   map[string]Node
+	modules map[string]*ModuleInfo
+}
+
+func NewRegistry() *Registry {
+	return &Registry{nodes: map[string]Node{}, modules: map[string]*ModuleInfo{}}
+}
+
+// Register adds a single builtin node.
 func (r *Registry) Register(n Node) error {
 	d := n.Definition()
 	if d.Type == "" {
@@ -217,7 +252,78 @@ func (r *Registry) Register(n Node) error {
 		return fmt.Errorf("node type %q registered twice", d.Type)
 	}
 	r.nodes[d.Type] = n
+	m := r.modules[BuiltinModule]
+	if m == nil {
+		m = &ModuleInfo{Module: BuiltinModule, Name: "Built-in", Runtime: "builtin", Source: "builtin", Config: []Param{}}
+		r.modules[BuiltinModule] = m
+	}
+	m.Nodes = append(m.Nodes, d.Type)
 	return nil
+}
+
+// RegisterModule installs (or atomically replaces) all nodes of a module.
+func (r *Registry) RegisterModule(info ModuleInfo, list []Node) error {
+	if info.Module == "" || info.Module == BuiltinModule {
+		return fmt.Errorf("invalid module name %q", info.Module)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	old := r.modules[info.Module]
+	info.Nodes = nil
+	for _, n := range list {
+		t := n.Definition().Type
+		if existing, ok := r.nodes[t]; ok && existing.Definition().Module != info.Module {
+			return fmt.Errorf("node type %q already provided by module %q", t, existing.Definition().Module)
+		}
+		info.Nodes = append(info.Nodes, t)
+	}
+	if old != nil {
+		for _, t := range old.Nodes {
+			delete(r.nodes, t)
+		}
+	}
+	for _, n := range list {
+		r.nodes[n.Definition().Type] = n
+	}
+	if info.Config == nil {
+		info.Config = []Param{}
+	}
+	r.modules[info.Module] = &info
+	return nil
+}
+
+// UnregisterModule removes a module and its nodes.
+func (r *Registry) UnregisterModule(module string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if m := r.modules[module]; m != nil && module != BuiltinModule {
+		for _, t := range m.Nodes {
+			delete(r.nodes, t)
+		}
+		delete(r.modules, module)
+	}
+}
+
+func (r *Registry) Module(name string) (*ModuleInfo, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	m, ok := r.modules[name]
+	if !ok {
+		return nil, false
+	}
+	c := *m
+	return &c, true
+}
+
+func (r *Registry) Modules() []ModuleInfo {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make([]ModuleInfo, 0, len(r.modules))
+	for _, m := range r.modules {
+		out = append(out, *m)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Module < out[j].Module })
+	return out
 }
 
 func (r *Registry) Get(typ string) (Node, bool) {
@@ -256,7 +362,7 @@ func (r *Registry) Definitions() []Definition {
 }
 
 func categoryRank(c string) string {
-	order := []string{"Triggers", "Core"}
+	order := []string{"Triggers", "Core", "Logic"}
 	if i := slices.Index(order, c); i >= 0 {
 		return strconv.Itoa(i)
 	}
@@ -267,4 +373,25 @@ func categoryRank(c string) string {
 // when a workflow is saved.
 type Validator interface {
 	Validate(n *workflow.Node) error
+}
+
+// SecretRef is the placeholder the API returns for a stored secret parameter.
+// Sending it back on save keeps the stored value.
+var SecretRef = map[string]any{"$secret": "stored"}
+
+// IsSecretRef reports whether v is the stored-secret placeholder.
+func IsSecretRef(v any) bool {
+	m, ok := v.(map[string]any)
+	return ok && m["$secret"] != nil
+}
+
+// SecretParams lists the names of secret parameters of a definition.
+func (d *Definition) SecretParams() []string {
+	var out []string
+	for _, p := range d.Params {
+		if p.Type == ParamSecret {
+			out = append(out, p.Name)
+		}
+	}
+	return out
 }

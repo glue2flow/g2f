@@ -20,6 +20,9 @@ func RegisterBuiltins(r *Registry) error {
 		ifNode{},
 		transformNode{},
 		logNode{},
+		gateNode{gateAnd},
+		gateNode{gateOr},
+		gateNode{gateXor},
 	} {
 		if err := r.Register(n); err != nil {
 			return err
@@ -38,7 +41,7 @@ type manualTrigger struct{}
 
 func (manualTrigger) Definition() Definition {
 	return Definition{
-		Type: "trigger.manual", Name: "Manual Trigger", Category: "Triggers", Source: "builtin",
+		Type: "trigger.manual", Name: "Manual Trigger", Category: "Triggers", Source: "builtin", Module: BuiltinModule,
 		Description: "Start the workflow by clicking Run in the editor or via the API.",
 		Color:       "#6366f1", Trigger: TriggerManual, Inputs: []string{}, Outputs: []string{"main"},
 		Params: []Param{{
@@ -69,7 +72,7 @@ type httpNode struct{}
 
 func (httpNode) Definition() Definition {
 	return Definition{
-		Type: "core.http", Name: "HTTP Request", Category: "Core", Source: "builtin",
+		Type: "core.http", Name: "HTTP Request", Category: "Core", Source: "builtin", Module: BuiltinModule,
 		Description: "Call any HTTP API. Runs once per input item.",
 		Color:       "#0ea5e9", Inputs: []string{"main"}, Outputs: []string{"main"},
 		Params: []Param{
@@ -141,7 +144,7 @@ type setNode struct{}
 
 func (setNode) Definition() Definition {
 	return Definition{
-		Type: "core.set", Name: "Set Fields", Category: "Core", Source: "builtin",
+		Type: "core.set", Name: "Set Fields", Category: "Core", Source: "builtin", Module: BuiltinModule,
 		Description: "Add or overwrite fields on each item. Values may use {{ expressions }}.",
 		Color:       "#10b981", Inputs: []string{"main"}, Outputs: []string{"main"},
 		Params: []Param{
@@ -183,7 +186,7 @@ type ifNode struct{}
 
 func (ifNode) Definition() Definition {
 	return Definition{
-		Type: "core.if", Name: "If", Category: "Core", Source: "builtin",
+		Type: "core.if", Name: "If", Category: "Core", Source: "builtin", Module: BuiltinModule,
 		Description: "Route each item to the true or false output.",
 		Color:       "#f59e0b", Inputs: []string{"main"}, Outputs: []string{"true", "false"},
 		Params: []Param{{
@@ -215,7 +218,7 @@ type transformNode struct{}
 
 func (transformNode) Definition() Definition {
 	return Definition{
-		Type: "core.transform", Name: "Transform Items", Category: "Core", Source: "builtin",
+		Type: "core.transform", Name: "Transform Items", Category: "Core", Source: "builtin", Module: BuiltinModule,
 		Description: "Evaluate one expression over all items (variable `items`) and emit the result. " +
 			"Arrays become multiple items, e.g. {{ filter(items, .active) }} or {{ map(items, ({name: .login})) }} (wrap object literals in parentheses inside map/filter).",
 		Color: "#8b5cf6", Inputs: []string{"main"}, Outputs: []string{"main"},
@@ -260,7 +263,7 @@ type logNode struct{}
 
 func (logNode) Definition() Definition {
 	return Definition{
-		Type: "core.log", Name: "Log", Category: "Core", Source: "builtin",
+		Type: "core.log", Name: "Log", Category: "Core", Source: "builtin", Module: BuiltinModule,
 		Description: "Write a message to the server log and pass items through unchanged.",
 		Color:       "#64748b", Inputs: []string{"main"}, Outputs: []string{"main"},
 		Params: []Param{{Name: "message", Label: "Message", Type: ParamString, Default: "{{ json }}"}},

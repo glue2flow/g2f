@@ -10,6 +10,7 @@ export interface User {
   groups: string[];
   roles: string[];
   admin: boolean;
+  pluginAdmin: boolean;
 }
 
 export interface Share {
@@ -83,6 +84,7 @@ export interface NodeDef {
   inputs: string[];
   outputs: string[];
   params: ParamDef[];
+  module: string;
   source: string;
 }
 
@@ -135,3 +137,28 @@ export interface TriggerInfo {
   webhook?: { url: string; method: string; auth: "none" | "token" | "hmac"; header?: string; respond: string };
   schedule?: { mode: "cron" | "once"; timezone: string; next: string[] };
 }
+
+export interface ModuleInfo {
+  module: string;
+  name: string;
+  version?: string;
+  description?: string;
+  color?: string;
+  runtime: "builtin" | "http" | "wasm";
+  source: string;
+  config: ParamDef[];
+  allowedHosts?: string[];
+  nodes: string[];
+  installedBy?: string;
+  installedAt?: string;
+}
+
+export interface ConfigValue extends ParamDef {
+  set: boolean;
+  value?: unknown;
+}
+
+/** Placeholder the API returns instead of a stored secret. Sending it back keeps the value. */
+export const SECRET_REF = { $secret: "stored" } as const;
+export const isSecretRef = (v: unknown): boolean =>
+  typeof v === "object" && v !== null && "$secret" in (v as Record<string, unknown>);

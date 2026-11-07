@@ -201,3 +201,24 @@ pre.json { margin: 6px 0 0; white-space: pre-wrap; word-break: break-word; }
 .info-box summary { cursor: pointer; }
 .next-runs { margin: 4px 0 0; padding-left: 18px; font-variant-numeric: tabular-nums; }
 .new-menu { display: flex; gap: 6px; } .new-menu select { width: auto; }
+
+/* Navigation */
+.nav { display: flex; gap: 4px; margin-left: 8px; }
+.nav a { color: var(--muted); text-decoration: none; padding: 4px 10px; border-radius: 6px; }
+.nav a.active, .nav a:hover { color: var(--text); background: color-mix(in srgb, var(--primary) 10%, transparent); }
+
+/* Gate input labels */
+.handle-label.in { left: -6px; right: auto; transform: translate(-100%, -50%); padding: 0 4px 0 0; }
+
+/* Secrets */
+.secret-stored { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+
+/* Plugins */
+.alert.info { background: color-mix(in srgb, var(--success) 12%, transparent); color: var(--success); }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; display: flex; flex-direction: column; gap: 6px; }
+.card-head { display: flex; gap: 8px; align-items: center; }
+.card .desc { margin: 0; }
+.card-actions { display: flex; gap: 6px; margin-top: auto; padding-top: 6px; }
+.chip.rt-wasm { background: color-mix(in srgb, #8b5cf6 20%, transparent); }
+.chip.rt-http { background: color-mix(in srgb, #0ea5e9 20%, transparent); }

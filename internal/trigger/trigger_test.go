@@ -262,7 +262,7 @@ func serveWebhook(t *testing.T, wf *workflow.Workflow, method, path, body string
 	reg := registry(t)
 	st := newFakeStore(wf)
 	eng := engine.New(reg, st, discard, engine.Options{})
-	h := NewWebhookHandler(st, eng, reg, discard, 5*time.Second)
+	h := NewWebhookHandler(st, eng, reg, nil, discard, 5*time.Second)
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	for k, v := range hdr {

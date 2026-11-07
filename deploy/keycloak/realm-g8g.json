@@ -11,6 +11,10 @@
       {
         "name": "g8g-admin",
         "description": "Full access to all workflows of the user's organization"
+      },
+      {
+        "name": "g8g-plugin-admin",
+        "description": "May import and uninstall plugins for the whole installation"
       }
     ]
   },
@@ -59,7 +63,8 @@
       ],
       "realmRoles": [
         "default-roles-g8g",
-        "g8g-admin"
+        "g8g-admin",
+        "g8g-plugin-admin"
       ]
     },
     {

@@ -27,6 +27,13 @@ type Config struct {
 
 	Auth AuthConfig
 
+	// SecretKey (base64, 32 bytes) encrypts node secrets and plugin config.
+	SecretKey string
+	// SecretKeysOld are previous keys, still accepted for decryption (rotation).
+	SecretKeysOld []string
+	// PluginSync is how often imported plugins are re-read from the database.
+	PluginSync time.Duration
+
 	Workers          int
 	ExecutionTimeout time.Duration
 	// ScheduleCatchUp: how late a missed one-time schedule may still fire.
@@ -49,7 +56,9 @@ type AuthConfig struct {
 	GroupsClaim string
 	OrgClaim    string
 	AdminRole   string
-	DefaultOrg  string
+	// PluginAdminRole may install plugins for the whole installation.
+	PluginAdminRole string
+	DefaultOrg      string
 
 	// Development user used when Mode == AuthNone.
 	DevUser   string
@@ -58,22 +67,25 @@ type AuthConfig struct {
 
 func Load() (*Config, error) {
 	c := &Config{
-		Listen:      env("G8G_LISTEN", ":8080"),
-		DatabaseURL: env("G8G_DATABASE_URL", "postgres://g8g:g8g@localhost:5432/g8g?sslmode=disable"),
-		PublicURL:   strings.TrimRight(env("G8G_PUBLIC_URL", "http://localhost:8080"), "/"),
-		StaticDir:   env("G8G_STATIC_DIR", "./web/dist"),
-		ModulesDir:  env("G8G_MODULES_DIR", "./modules"),
+		Listen:        env("G8G_LISTEN", ":8080"),
+		DatabaseURL:   env("G8G_DATABASE_URL", "postgres://g8g:g8g@localhost:5432/g8g?sslmode=disable"),
+		PublicURL:     strings.TrimRight(env("G8G_PUBLIC_URL", "http://localhost:8080"), "/"),
+		StaticDir:     env("G8G_STATIC_DIR", "./web/dist"),
+		ModulesDir:    env("G8G_MODULES_DIR", "./modules"),
+		SecretKey:     env("G8G_SECRET_KEY", ""),
+		SecretKeysOld: splitList(env("G8G_SECRET_KEYS_OLD", "")),
 		Auth: AuthConfig{
-			Mode:        AuthMode(env("G8G_AUTH_MODE", string(AuthOIDC))),
-			Issuer:      strings.TrimRight(env("G8G_OIDC_ISSUER", ""), "/"),
-			JWKSURL:     env("G8G_OIDC_JWKS_URL", ""),
-			ClientID:    env("G8G_OIDC_CLIENT_ID", "g8g"),
-			GroupsClaim: env("G8G_OIDC_GROUPS_CLAIM", "groups"),
-			OrgClaim:    env("G8G_OIDC_ORG_CLAIM", "org"),
-			AdminRole:   env("G8G_OIDC_ADMIN_ROLE", "g8g-admin"),
-			DefaultOrg:  env("G8G_DEFAULT_ORG", "default"),
-			DevUser:     env("G8G_DEV_USER", "dev"),
-			DevGroups:   splitList(env("G8G_DEV_GROUPS", "/engineering")),
+			Mode:            AuthMode(env("G8G_AUTH_MODE", string(AuthOIDC))),
+			Issuer:          strings.TrimRight(env("G8G_OIDC_ISSUER", ""), "/"),
+			JWKSURL:         env("G8G_OIDC_JWKS_URL", ""),
+			ClientID:        env("G8G_OIDC_CLIENT_ID", "g8g"),
+			GroupsClaim:     env("G8G_OIDC_GROUPS_CLAIM", "groups"),
+			OrgClaim:        env("G8G_OIDC_ORG_CLAIM", "org"),
+			AdminRole:       env("G8G_OIDC_ADMIN_ROLE", "g8g-admin"),
+			PluginAdminRole: env("G8G_OIDC_PLUGIN_ADMIN_ROLE", "g8g-plugin-admin"),
+			DefaultOrg:      env("G8G_DEFAULT_ORG", "default"),
+			DevUser:         env("G8G_DEV_USER", "dev"),
+			DevGroups:       splitList(env("G8G_DEV_GROUPS", "/engineering")),
 		},
 	}
 
@@ -93,6 +105,13 @@ func Load() (*Config, error) {
 	}
 	if c.WebhookMaxWait, err = time.ParseDuration(env("G8G_WEBHOOK_MAX_WAIT", "60s")); err != nil {
 		return nil, fmt.Errorf("G8G_WEBHOOK_MAX_WAIT: %w", err)
+	}
+
+	if c.PluginSync, err = time.ParseDuration(env("G8G_PLUGIN_SYNC", "30s")); err != nil {
+		return nil, fmt.Errorf("G8G_PLUGIN_SYNC: %w", err)
+	}
+	if c.SecretKey == "" {
+		return nil, fmt.Errorf("G8G_SECRET_KEY is required (generate one with: openssl rand -base64 32)")
 	}
 
 	switch c.Auth.Mode {

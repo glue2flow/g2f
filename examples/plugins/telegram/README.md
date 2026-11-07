@@ -1,0 +1,133 @@
+# Telegram – sample WebAssembly plugin
+
+A g8g plugin with two nodes, **Send Message** and **Get Bot Info**, implemented twice:
+in [Go](go/main.go) and in [JavaScript](js/index.js). Both compile to the same kind of
+WebAssembly module and work with the same [`plugin.yaml`](plugin.yaml).
+
+```
+telegram/
+├── plugin.yaml     manifest: module, nodes, parameters, config, sandbox settings
+├── go/main.go      Go implementation (Extism Go PDK)
+├── js/index.js     JavaScript implementation (Extism JS PDK)
+├── js/index.d.ts   declares the exported function for the JS compiler
+└── Makefile        build + bundle
+```
+
+## How a WASM plugin works
+
+g8g runs plugins with [Extism](https://extism.org) on [wazero](https://wazero.io), a
+pure-Go WebAssembly runtime (no CGO, no external runtime). Each node run gets a fresh,
+sandboxed instance:
+
+- no file system or environment access
+- outbound HTTP only to the hosts listed in `allowedHosts` (and only via the PDK's HTTP API)
+- memory limit (`memoryMB`) and time limit (`timeout`)
+
+The plugin exports one function, `execute`. g8g calls it with JSON on the input:
+
+```json
+{
+  "node": "sendMessage",
+  "items": [
+    { "json": { "chat": "1234" }, "params": { "chatId": "1234", "text": "Hi", "botToken": "…" }, "input": "main" }
+  ],
+  "config": { "botToken": "…", "apiBaseUrl": "https://api.telegram.org" },
+  "workflow": { "id": "…", "name": "Notify" },
+  "execution": { "id": "…" }
+}
+```
+
+- `items[].json`: the incoming data item.
+- `items[].params`: the node's parameters for that item, with `{{ expressions }}` already
+  evaluated and secrets decrypted.
+- `config`: the module's global configuration for the workflow's organization.
+
+The plugin writes `{"items": [...]}` (or `{"outputs": {"main": [...], "other": [...]}}`
+for several outputs) to the output. Errors go through the PDK's error function
+(`pdk.SetError` / `throw`) or `{"error": "message"}`. g8g strips URL paths from plugin
+errors and scrubs known secret values from all error messages before storing them.
+
+## Secrets and configuration
+
+The manifest declares two kinds of settings:
+
+| Kind | Declared in | Set by | Scope | Example here |
+| --- | --- | --- | --- | --- |
+| **Global config** | `config:` | organization admin, on the *Plugins* page | one value per organization | `botToken` (default bot), `apiBaseUrl` |
+| **Node parameter** with `type: secret` | `params:` | workflow editor, in the node panel | one value per node | `botToken` (a user's own bot) |
+
+Both are encrypted at rest (AES-256-GCM, key `G8G_SECRET_KEY`) and write-only: the API
+never returns them. The editor shows "stored encrypted" with *Replace* / *Clear*. The
+plugin receives the decrypted values only while it runs. This sample uses the node's token
+when it is set and falls back to the organization's default bot.
+
+## Build
+
+### Go (standard toolchain, Go ≥ 1.24)
+
+```bash
+make go          # GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o plugin.wasm ./go
+```
+
+`//go:wasmexport execute` exports the function and `-buildmode=c-shared` builds a WASI
+"reactor" module. Output is about 3 MB.
+
+### Go with TinyGo (smaller, ≈ 0.5 MB)
+
+```bash
+make tinygo      # tinygo build -target wasip1 -buildmode=c-shared -o plugin.wasm ./go
+```
+
+### JavaScript
+
+Install the [Extism JS PDK compiler](https://github.com/extism/js-pdk#install-the-compiler)
+(`extism-js`). It needs [binaryen](https://github.com/WebAssembly/binaryen) (`wasm-merge`,
+`wasm-opt`) on your `PATH`:
+
+```bash
+curl -O https://raw.githubusercontent.com/extism/js-pdk/main/install.sh && bash install.sh
+make js          # extism-js js/index.js -i js/index.d.ts -o plugin.wasm
+```
+
+The compiler embeds a QuickJS engine plus your code into the module. The PDK provides
+`Host.inputString()`, `Host.outputString()`, `Http.request()` and `Config.get()`.
+`index.d.ts` must declare every exported function. For TypeScript or npm dependencies,
+bundle to a single CommonJS file first (e.g. with esbuild) and compile the bundle.
+
+### Package
+
+```bash
+make bundle      # -> telegram.zip containing plugin.yaml and plugin.wasm
+```
+
+## Install
+
+As a user with the `g8g-plugin-admin` role (`alice` in the demo realm), choose one:
+
+- **UI:** *Plugins* → *Import plugin* → choose `telegram.zip`.
+- **API:**
+  ```bash
+  curl -X POST http://localhost:8080/api/plugins \
+    -H "Authorization: Bearer $TOKEN" -F file=@telegram.zip
+  ```
+- **Directory:** copy the folder (with a built `plugin.wasm`) or the zip into
+  `G8G_MODULES_DIR`. Plugins installed this way cannot be changed through the UI.
+
+Imported plugins are stored in PostgreSQL and loaded by every g8g replica
+(`G8G_PLUGIN_SYNC`). Importing the same module again replaces it (upgrade).
+
+Then, as an organization admin, open *Plugins* → *Telegram* → *Configure* and set a
+default bot token. Or give each *Send Message* node its own token.
+
+## Test a plugin without g8g
+
+The [Extism CLI](https://github.com/extism/cli) can call the function directly:
+
+```bash
+extism call plugin.wasm execute --wasi --allow-host api.telegram.org --input '{
+  "node": "getMe", "config": {}, "items": [{"json": {}, "params": {"botToken": "123:ABC"}}]
+}'
+```
+
+g8g's own test suite builds the Go version of this plugin and runs it against a fake
+Telegram API (`internal/plugin/plugin_test.go`).

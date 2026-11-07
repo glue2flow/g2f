@@ -1,8 +1,11 @@
-.PHONY: dev-db dev-server dev-web build test web image up down
+.PHONY: dev-db dev-server dev-web build test web image up down plugin-sample
+
+# Development-only encryption key for secrets. Never use it in production.
+DEV_SECRET_KEY ?= ZGV2LWtleS1kZXYta2V5LWRldi1rZXktZGV2LWtleS0=
 
 # Local development without Keycloak (auth disabled, user "dev" in org "default").
 dev-server:
-	G8G_AUTH_MODE=none G8G_LISTEN=:8080 go run ./cmd/g8g
+	G8G_AUTH_MODE=none G8G_LISTEN=:8080 G8G_SECRET_KEY=$(DEV_SECRET_KEY) go run ./cmd/g8g
 
 dev-web:
 	cd web && npm install && npm run dev
@@ -30,3 +33,7 @@ up:
 
 down:
 	docker compose down
+
+# Build the sample Telegram WebAssembly plugin -> examples/plugins/telegram/telegram.zip
+plugin-sample:
+	$(MAKE) -C examples/plugins/telegram go bundle

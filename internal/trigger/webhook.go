@@ -10,6 +10,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"maps"
 	"mime"
 	"net/http"
 	"net/url"
@@ -29,15 +30,17 @@ type WebhookHandler struct {
 	eng   Engine
 	reg   *nodes.Registry
 	log   *slog.Logger
+	// secrets provides the node's encrypted parameters (the webhook secret).
+	secrets engine.SecretSource
 	// MaxWait bounds "respond with last node" requests.
 	maxWait time.Duration
 }
 
-func NewWebhookHandler(st Store, eng Engine, reg *nodes.Registry, log *slog.Logger, maxWait time.Duration) *WebhookHandler {
+func NewWebhookHandler(st Store, eng Engine, reg *nodes.Registry, sec engine.SecretSource, log *slog.Logger, maxWait time.Duration) *WebhookHandler {
 	if maxWait <= 0 {
 		maxWait = time.Minute
 	}
-	return &WebhookHandler{store: st, eng: eng, reg: reg, log: log.With("component", "webhook"), maxWait: maxWait}
+	return &WebhookHandler{store: st, eng: eng, reg: reg, secrets: sec, log: log.With("component", "webhook"), maxWait: maxWait}
 }
 
 // URL returns the public URL of a webhook trigger.
@@ -75,7 +78,20 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusNotFound, "workflow is not active")
 		return
 	}
-	cfg, err := nodes.ParseWebhook(node.Params)
+	params := node.Params
+	if h.secrets != nil {
+		sec, err := h.secrets.NodeSecrets(r.Context(), wf.ID)
+		if err != nil {
+			h.log.Error("load webhook secret", "err", err)
+			jsonError(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+		params = maps.Clone(node.Params)
+		for k, v := range sec[node.ID] {
+			params[k] = v
+		}
+	}
+	cfg, err := nodes.ParseWebhook(params)
 	if err != nil {
 		jsonError(w, http.StatusInternalServerError, "webhook misconfigured: "+err.Error())
 		return
@@ -140,6 +156,9 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func verify(cfg *nodes.Webhook, r *http.Request, body []byte) bool {
+	if cfg.Auth != "none" && cfg.Secret == "" {
+		return false // fail closed if the secret could not be loaded
+	}
 	switch cfg.Auth {
 	case "token":
 		got := r.Header.Get(cfg.Header)

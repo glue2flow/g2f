@@ -3,84 +3,30 @@ package nodes
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
-
-	"gopkg.in/yaml.v3"
 
 	"github.com/wolfposd/g8g/internal/expression"
 )
 
-// Manifest is a YAML file describing one API module with one or more nodes.
-// Each node maps its parameters onto an HTTP request; no Go code is required.
-// See "Writing modules" in README.md for the format.
-type Manifest struct {
-	Module      string         `yaml:"module"`
-	Name        string         `yaml:"name"`
-	Description string         `yaml:"description"`
-	Color       string         `yaml:"color"`
-	BaseURL     string         `yaml:"baseUrl"`
-	Params      []Param        `yaml:"params"`  // shared by all nodes (e.g. token)
-	Headers     map[string]any `yaml:"headers"` // shared headers
-	Nodes       []ManifestNode `yaml:"nodes"`
-}
-
-type ManifestNode struct {
-	Type        string          `yaml:"type"`
-	Name        string          `yaml:"name"`
-	Description string          `yaml:"description"`
-	Params      []Param         `yaml:"params"`
-	Request     ManifestRequest `yaml:"request"`
-	// Output is an optional expression over `response` that produces the
-	// emitted item(s). Defaults to {{ response.body }}.
-	Output string `yaml:"output"`
-	// FailOnError fails the node on HTTP status >= 400 (default true).
-	FailOnError *bool `yaml:"failOnError"`
-}
-
-type ManifestRequest struct {
-	Method  string         `yaml:"method"`
-	Path    string         `yaml:"path"` // appended to baseUrl
-	URL     string         `yaml:"url"`  // absolute URL, overrides baseUrl+path
-	Headers map[string]any `yaml:"headers"`
-	Query   map[string]any `yaml:"query"`
-	Body    any            `yaml:"body"`
-	Timeout string         `yaml:"timeout"`
-}
-
-// LoadModules registers all *.yaml / *.yml manifests from dir.
-func LoadModules(r *Registry, dir string) (int, error) {
-	files, err := filepath.Glob(filepath.Join(dir, "*.y*ml"))
-	if err != nil {
-		return 0, err
+// HTTPModuleNodes builds the nodes of an "http" runtime manifest: each node maps
+// its parameters onto one HTTP request, no code required.
+func HTTPModuleNodes(m *Manifest, source string) ([]Node, error) {
+	if m.Runtime != "http" {
+		return nil, fmt.Errorf("module %s is not an http module", m.Module)
 	}
-	count := 0
-	for _, f := range files {
-		raw, err := os.ReadFile(f)
-		if err != nil {
-			return count, err
-		}
-		var m Manifest
-		if err := yaml.Unmarshal(raw, &m); err != nil {
-			return count, fmt.Errorf("%s: %w", f, err)
-		}
-		if m.Module == "" {
-			return count, fmt.Errorf("%s: 'module' is required", f)
-		}
-		for _, mn := range m.Nodes {
-			n, err := newDeclarativeNode(&m, mn, filepath.Base(f))
-			if err != nil {
-				return count, fmt.Errorf("%s: %w", f, err)
+	out := make([]Node, 0, len(m.Nodes))
+	for _, n := range m.Nodes {
+		var timeout time.Duration
+		if n.Request.Timeout != "" {
+			var err error
+			if timeout, err = time.ParseDuration(n.Request.Timeout); err != nil {
+				return nil, fmt.Errorf("node %s: timeout: %w", n.Type, err)
 			}
-			if err := r.Register(n); err != nil {
-				return count, fmt.Errorf("%s: %w", f, err)
-			}
-			count++
 		}
+		out = append(out, &declarativeNode{def: m.NodeDefinition(n, source), module: m, spec: n, timeout: timeout})
 	}
-	return count, nil
+	return out, nil
 }
 
 type declarativeNode struct {
@@ -90,63 +36,31 @@ type declarativeNode struct {
 	timeout time.Duration
 }
 
-func newDeclarativeNode(m *Manifest, n ManifestNode, file string) (*declarativeNode, error) {
-	if n.Type == "" || n.Name == "" {
-		return nil, fmt.Errorf("node needs 'type' and 'name'")
-	}
-	typ := n.Type
-	if !strings.HasPrefix(typ, m.Module+".") {
-		typ = m.Module + "." + typ
-	}
-	if n.Request.URL == "" && m.BaseURL == "" {
-		return nil, fmt.Errorf("node %s: request.url or module baseUrl required", typ)
-	}
-	params := append(append([]Param{}, m.Params...), n.Params...)
-	for i := range params {
-		if params[i].Type == "" {
-			params[i].Type = ParamString
-		}
-		if params[i].Label == "" {
-			params[i].Label = params[i].Name
-		}
-	}
-	var timeout time.Duration
-	if n.Request.Timeout != "" {
-		var err error
-		if timeout, err = time.ParseDuration(n.Request.Timeout); err != nil {
-			return nil, fmt.Errorf("node %s: timeout: %w", typ, err)
-		}
-	}
-	category := m.Name
-	if category == "" {
-		category = m.Module
-	}
-	return &declarativeNode{
-		module: m, spec: n, timeout: timeout,
-		def: Definition{
-			Type: typ, Name: n.Name, Category: category, Description: n.Description,
-			Color: m.Color, Inputs: []string{"main"}, Outputs: []string{"main"},
-			Params: params, Source: "module:" + file,
-		},
-	}, nil
-}
-
 func (d *declarativeNode) Definition() Definition { return d.def }
+
+// ResolveParams evaluates all parameters of the node for one item and checks
+// required ones. Shared by the http and wasm runtimes.
+func ResolveParams(ec *ExecContext, item Item, index int) (map[string]any, error) {
+	params := map[string]any{}
+	for _, p := range ec.Def.Params {
+		v, err := ec.Param(p.Name, item, index)
+		if err != nil {
+			return nil, err
+		}
+		if p.Required && (v == nil || v == "") {
+			return nil, fmt.Errorf("parameter %q is required", p.Label)
+		}
+		params[p.Name] = v
+	}
+	return params, nil
+}
 
 func (d *declarativeNode) Execute(ctx context.Context, ec *ExecContext) (Output, error) {
 	var out []Item
 	for i, item := range ec.Items {
-		// Resolve node params first, then expose them as `params` to the request template.
-		params := map[string]any{}
-		for _, p := range d.def.Params {
-			v, err := ec.Param(p.Name, item, i)
-			if err != nil {
-				return nil, err
-			}
-			if p.Required && (v == nil || v == "") {
-				return nil, fmt.Errorf("parameter %q is required", p.Label)
-			}
-			params[p.Name] = v
+		params, err := ResolveParams(ec, item, i)
+		if err != nil {
+			return nil, err
 		}
 		env := ec.ItemEnv(item, i)
 		env["params"] = params
@@ -215,8 +129,7 @@ func anyMap(m map[string]any) any {
 	return normalizeYAML(m)
 }
 
-// normalizeYAML converts map[any]any (possible in older yaml decoders) and
-// nested values into JSON-compatible types.
+// normalizeYAML converts map[any]any and nested values into JSON-compatible types.
 func normalizeYAML(v any) any {
 	switch t := v.(type) {
 	case map[string]any:

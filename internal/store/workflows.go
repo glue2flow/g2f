@@ -88,39 +88,54 @@ func (s *Store) ListActiveWorkflows(ctx context.Context) ([]*workflow.Workflow, 
 	return out, rows.Err()
 }
 
-func (s *Store) CreateWorkflow(ctx context.Context, w *workflow.Workflow) error {
-	w.ID = uuid.NewString()
+// CreateWorkflow inserts w (assigning an ID if empty) and its secrets atomically.
+func (s *Store) CreateWorkflow(ctx context.Context, w *workflow.Workflow, secrets []SecretOp) error {
+	if w.ID == "" {
+		w.ID = uuid.NewString()
+	}
 	w.Version = 1
 	shares, graph, err := marshalWF(w)
 	if err != nil {
 		return err
 	}
-	return s.pool.QueryRow(ctx, `INSERT INTO workflows
-		(id, org_id, name, description, owner_sub, owner_name, scope, org_role, shares, graph, active, version)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
-		RETURNING created_at, updated_at`,
-		w.ID, w.OrgID, w.Name, w.Description, w.OwnerSub, w.OwnerName, w.Scope, w.OrgRole,
-		shares, graph, w.Active, w.Version,
-	).Scan(&w.CreatedAt, &w.UpdatedAt)
+	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		err := tx.QueryRow(ctx, `INSERT INTO workflows
+			(id, org_id, name, description, owner_sub, owner_name, scope, org_role, shares, graph, active, version)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+			RETURNING created_at, updated_at`,
+			w.ID, w.OrgID, w.Name, w.Description, w.OwnerSub, w.OwnerName, w.Scope, w.OrgRole,
+			shares, graph, w.Active, w.Version,
+		).Scan(&w.CreatedAt, &w.UpdatedAt)
+		if err != nil {
+			return err
+		}
+		return applySecretOps(ctx, tx, w, secrets)
+	})
 }
 
-// UpdateWorkflow saves w if its Version matches the stored one and bumps the version.
-func (s *Store) UpdateWorkflow(ctx context.Context, w *workflow.Workflow) error {
+// UpdateWorkflow saves w and its secret changes if w.Version matches the stored
+// version, then bumps the version. Secrets of removed nodes are deleted.
+func (s *Store) UpdateWorkflow(ctx context.Context, w *workflow.Workflow, secrets []SecretOp) error {
 	shares, graph, err := marshalWF(w)
 	if err != nil {
 		return err
 	}
-	err = s.pool.QueryRow(ctx, `UPDATE workflows SET
-		name=$3, description=$4, scope=$5, org_role=$6, shares=$7, graph=$8, active=$9,
-		version=version+1, updated_at=now()
-		WHERE id=$1 AND version=$2
-		RETURNING version, updated_at`,
-		w.ID, w.Version, w.Name, w.Description, w.Scope, w.OrgRole, shares, graph, w.Active,
-	).Scan(&w.Version, &w.UpdatedAt)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return ErrConflict
-	}
-	return err
+	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		err := tx.QueryRow(ctx, `UPDATE workflows SET
+			name=$3, description=$4, scope=$5, org_role=$6, shares=$7, graph=$8, active=$9,
+			version=version+1, updated_at=now()
+			WHERE id=$1 AND version=$2
+			RETURNING version, updated_at`,
+			w.ID, w.Version, w.Name, w.Description, w.Scope, w.OrgRole, shares, graph, w.Active,
+		).Scan(&w.Version, &w.UpdatedAt)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrConflict
+		}
+		if err != nil {
+			return err
+		}
+		return applySecretOps(ctx, tx, w, secrets)
+	})
 }
 
 func (s *Store) DeleteWorkflow(ctx context.Context, id string) error {

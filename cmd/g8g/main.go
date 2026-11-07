@@ -17,6 +17,8 @@ import (
 	"github.com/wolfposd/g8g/internal/config"
 	"github.com/wolfposd/g8g/internal/engine"
 	"github.com/wolfposd/g8g/internal/nodes"
+	"github.com/wolfposd/g8g/internal/plugin"
+	"github.com/wolfposd/g8g/internal/secrets"
 	"github.com/wolfposd/g8g/internal/store"
 	"github.com/wolfposd/g8g/internal/trigger"
 )
@@ -59,15 +61,25 @@ func run(log *slog.Logger) error {
 		log.Warn("marked interrupted executions as failed", "count", n)
 	}
 
+	box, err := secrets.NewBox(cfg.SecretKey, cfg.SecretKeysOld)
+	if err != nil {
+		return err
+	}
+
 	reg := nodes.NewRegistry()
 	if err := nodes.RegisterBuiltins(reg); err != nil {
 		return err
 	}
-	count, err := nodes.LoadModules(reg, cfg.ModulesDir)
+	plugins := plugin.NewManager(reg, st, log)
+	count, err := plugins.LoadDir(ctx, cfg.ModulesDir)
 	if err != nil {
 		return fmt.Errorf("load modules: %w", err)
 	}
-	log.Info("node registry ready", "declarativeNodes", count, "total", len(reg.Definitions()))
+	if err := plugins.Sync(ctx); err != nil {
+		return fmt.Errorf("load imported plugins: %w", err)
+	}
+	log.Info("node registry ready", "modulesFromDir", count, "modules", len(reg.Modules()), "nodes", len(reg.Definitions()))
+	sec := secrets.NewService(box, st, reg)
 
 	authn, err := auth.New(ctx, cfg.Auth)
 	if err != nil {
@@ -78,6 +90,7 @@ func run(log *slog.Logger) error {
 	}
 
 	eng := engine.New(reg, st, log, engine.Options{
+		Secrets: sec,
 		Workers: cfg.Workers, Timeout: cfg.ExecutionTimeout, MaxStoredItems: cfg.MaxStoredItems,
 	})
 
@@ -90,8 +103,11 @@ func run(log *slog.Logger) error {
 	srv := api.New(api.Deps{
 		Config: cfg, Store: st, Registry: reg, Engine: eng, Auth: authn, Logger: log,
 		Listener: sched,
-		Webhooks: trigger.NewWebhookHandler(st, eng, reg, log, cfg.WebhookMaxWait),
+		Webhooks: trigger.NewWebhookHandler(st, eng, reg, sec, log, cfg.WebhookMaxWait),
+		Secrets:  sec,
+		Plugins:  plugins,
 	})
+	go plugins.Run(schedCtx, cfg.PluginSync)
 	httpSrv := &http.Server{
 		Addr:              cfg.Listen,
 		Handler:           srv.Handler(),

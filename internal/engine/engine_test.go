@@ -40,8 +40,10 @@ func newEngine(t *testing.T) *Engine {
 	if err := nodes.RegisterBuiltins(reg); err != nil {
 		t.Fatal(err)
 	}
-	return New(reg, &memStore{execs: map[string]store.Execution{}}, slog.New(slog.NewTextHandler(io.Discard, nil)), Options{})
+	return New(reg, &memStore{execs: map[string]store.Execution{}}, discardLog(), Options{})
 }
+
+func discardLog() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
 
 func TestBranchingRun(t *testing.T) {
 	e := newEngine(t)

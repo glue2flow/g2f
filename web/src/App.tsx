@@ -3,6 +3,7 @@ import { api, logout } from "./api";
 import type { ClientConfig, NodeDef, User } from "./types";
 import { WorkflowList } from "./pages/WorkflowList";
 import { Editor } from "./pages/Editor";
+import { Plugins } from "./pages/Plugins";
 
 /** Minimal hash router: #/ and #/w/<id>. */
 function useRoute(): string {
@@ -25,6 +26,8 @@ export function App({ config }: { config: ClientConfig }) {
   const [defs, setDefs] = useState<NodeDef[]>();
   const [error, setError] = useState<string>();
 
+  const loadDefs = () => api.nodes().then(setDefs);
+
   useEffect(() => {
     Promise.all([api.me(), api.nodes()])
       .then(([u, d]) => {
@@ -46,6 +49,14 @@ export function App({ config }: { config: ClientConfig }) {
           <img src="/favicon.svg" alt="" /> g8g
         </a>
         <span className="org-chip" title="Organization">{user.org}</span>
+        <nav className="nav">
+          <a href="#/" className={route === "/" || route.startsWith("/w/") ? "active" : ""}>
+            Workflows
+          </a>
+          <a href="#/plugins" className={route === "/plugins" ? "active" : ""}>
+            Plugins
+          </a>
+        </nav>
         <div className="spacer" />
         <span className="user" title={user.groups.join("\n")}>
           {user.name || user.username}
@@ -60,6 +71,8 @@ export function App({ config }: { config: ClientConfig }) {
       <main className="content">
         {editorMatch ? (
           <Editor key={editorMatch[1]} id={editorMatch[1]} defs={defs} user={user} config={config} />
+        ) : route === "/plugins" ? (
+          <Plugins user={user} onChanged={loadDefs} />
         ) : (
           <WorkflowList user={user} defs={defs} />
         )}

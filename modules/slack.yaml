@@ -1,4 +1,5 @@
 module: slack
+version: 1.0.0
 name: Slack
 description: Post messages through Slack incoming webhooks
 color: "#4a154b"

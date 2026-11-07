@@ -43,6 +43,11 @@ func (s *Server) listTriggers(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// Secrets are not in the graph; mark stored ones so validation sees them.
+	if err := s.secrets.MarkStored(r.Context(), wf); err != nil {
+		s.storeError(w, err)
+		return
+	}
 	out := []triggerInfo{}
 	for _, n := range wf.Graph.Nodes {
 		kind := s.reg.TriggerKind(n.Type)

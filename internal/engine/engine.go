@@ -12,7 +12,10 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"runtime/debug"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -22,6 +25,12 @@ import (
 	"github.com/wolfposd/g8g/internal/workflow"
 )
 
+// SecretSource provides decrypted node secrets and plugin configuration.
+type SecretSource interface {
+	NodeSecrets(ctx context.Context, workflowID string) (map[string]map[string]string, error)
+	ModuleConfig(ctx context.Context, org, module string) (map[string]any, error)
+}
+
 // ExecStore is the persistence the engine needs.
 type ExecStore interface {
 	CreateExecution(ctx context.Context, e *store.Execution) error
@@ -29,6 +38,8 @@ type ExecStore interface {
 }
 
 type Options struct {
+	// Secrets is optional; without it nodes see no secrets and no plugin config.
+	Secrets        SecretSource
 	Workers        int
 	Timeout        time.Duration
 	MaxStoredItems int
@@ -219,14 +230,26 @@ func (e *Engine) execute(ctx context.Context, exec *store.Execution, req Request
 		"trigger":   map[string]any{},
 	}
 	nodeOutputs := env["nodes"].(map[string]any)
-	inputs := map[string][]nodes.Item{start.ID: req.Items}
+
+	var secrets map[string]map[string]string
+	if e.opts.Secrets != nil {
+		if secrets, err = e.opts.Secrets.NodeSecrets(ctx, req.Workflow.ID); err != nil {
+			return e.finish(exec, nil, fmt.Errorf("load secrets: %w", err))
+		}
+	}
+	configs := map[string]map[string]any{} // module -> config, loaded lazily
+	scrub := newScrubber(secrets)
+
+	// inputs: node id -> input handle -> items
+	inputs := map[string]map[string][]nodes.Item{start.ID: {workflow.DefaultHandle: req.Items}}
 	received := map[string]bool{start.ID: true}
 	var last []nodes.Item
 
 	for _, id := range order {
 		n := g.Node(id)
 		step := store.Step{NodeID: n.ID, NodeName: n.Name, NodeType: n.Type, StartedAt: time.Now().UTC()}
-		in := inputs[id]
+		byHandle := inputs[id]
+		in := concatInputs(byHandle)
 		step.InputCount = len(in)
 
 		if !received[id] || (id != start.ID && len(in) == 0) {
@@ -239,14 +262,16 @@ func (e *Engine) execute(ctx context.Context, exec *store.Execution, req Request
 		if n.Disabled {
 			out = nodes.Output{workflow.DefaultHandle: in}
 		} else {
-			out, err = e.runNode(ctx, n, in, env, log)
+			out, err = e.runNode(ctx, req.Workflow, withSecrets(n, secrets[n.ID]), byHandle, in, env, configs, scrub, log)
 		}
 		step.DurationMs = time.Since(step.StartedAt).Milliseconds()
 		if err != nil {
+			// Error messages are stored and shown to viewers: never include secrets.
+			msg := scrub.clean(err.Error())
 			step.Status = "error"
-			step.Error = err.Error()
+			step.Error = msg
 			exec.Steps = append(exec.Steps, step)
-			return e.finish(exec, nil, fmt.Errorf("node %q: %w", n.Name, err))
+			return e.finish(exec, nil, fmt.Errorf("node %q: %s", n.Name, msg))
 		}
 		step.Status = "success"
 		step.Output, step.Truncated = e.truncate(out)
@@ -264,18 +289,87 @@ func (e *Engine) execute(ctx context.Context, exec *store.Execution, req Request
 				continue
 			}
 			received[edge.Target] = true
-			inputs[edge.Target] = append(inputs[edge.Target], out[edge.Handle()]...)
+			th := e.targetHandle(g, edge)
+			if inputs[edge.Target] == nil {
+				inputs[edge.Target] = map[string][]nodes.Item{}
+			}
+			inputs[edge.Target][th] = append(inputs[edge.Target][th], out[edge.Handle()]...)
 		}
 	}
 	return e.finish(exec, last, nil)
 }
 
-func (e *Engine) runNode(ctx context.Context, n *workflow.Node, in []nodes.Item, env expression.Env, log *slog.Logger) (out nodes.Output, err error) {
+// targetHandle returns the input handle an edge feeds; edges without one go to
+// the target's first input.
+func (e *Engine) targetHandle(g *workflow.Graph, edge workflow.Edge) string {
+	if edge.TargetHandle != "" {
+		return edge.TargetHandle
+	}
+	if t := g.Node(edge.Target); t != nil {
+		if impl, ok := e.reg.Get(t.Type); ok {
+			if ins := impl.Definition().Inputs; len(ins) > 0 {
+				return ins[0]
+			}
+		}
+	}
+	return workflow.DefaultHandle
+}
+
+func concatInputs(byHandle map[string][]nodes.Item) []nodes.Item {
+	if len(byHandle) == 1 {
+		for _, items := range byHandle {
+			return items
+		}
+	}
+	keys := make([]string, 0, len(byHandle))
+	for k := range byHandle {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var all []nodes.Item
+	for _, k := range keys {
+		all = append(all, byHandle[k]...)
+	}
+	return all
+}
+
+// withSecrets returns a copy of n whose params include its decrypted secrets.
+func withSecrets(n *workflow.Node, secrets map[string]string) *workflow.Node {
+	if len(secrets) == 0 {
+		return n
+	}
+	c := *n
+	c.Params = make(map[string]any, len(n.Params)+len(secrets))
+	maps.Copy(c.Params, n.Params)
+	for k, v := range secrets {
+		c.Params[k] = v
+	}
+	return &c
+}
+
+func (e *Engine) runNode(ctx context.Context, wf *workflow.Workflow, n *workflow.Node, byHandle map[string][]nodes.Item,
+	in []nodes.Item, env expression.Env, configs map[string]map[string]any, scrub *scrubber, log *slog.Logger) (out nodes.Output, err error) {
 	impl, ok := e.reg.Get(n.Type)
 	if !ok {
 		return nil, fmt.Errorf("unknown node type %q", n.Type)
 	}
 	def := impl.Definition()
+	var config map[string]any
+	if mod := def.Module; mod != "" && mod != nodes.BuiltinModule && e.opts.Secrets != nil {
+		if config, ok = configs[mod]; !ok {
+			if config, err = e.opts.Secrets.ModuleConfig(ctx, wf.OrgID, mod); err != nil {
+				return nil, fmt.Errorf("load %s config: %w", mod, err)
+			}
+			configs[mod] = config
+			if info, ok := e.reg.Module(mod); ok {
+				for _, p := range info.Config {
+					if s, isStr := config[p.Name].(string); isStr && p.Type == nodes.ParamSecret {
+						scrub.add(s)
+					}
+				}
+			}
+		}
+	}
 	defer func() {
 		if r := recover(); r != nil {
 			log.Error("node panic", "node", n.Name, "panic", r, "stack", string(debug.Stack()))
@@ -289,7 +383,7 @@ func (e *Engine) runNode(ctx context.Context, n *workflow.Node, in []nodes.Item,
 		in = []nodes.Item{}
 	}
 	return impl.Execute(ctx, &nodes.ExecContext{
-		Node: n, Def: &def, Items: in, Env: env, Logger: log,
+		Node: n, Def: &def, Items: in, Inputs: byHandle, Config: config, Env: env, Logger: log,
 	})
 }
 
@@ -342,4 +436,30 @@ func flatten(out nodes.Output) []nodes.Item {
 		}
 	}
 	return all
+}
+
+// scrubber removes known secret values from messages.
+type scrubber struct{ values []string }
+
+func newScrubber(secrets map[string]map[string]string) *scrubber {
+	s := &scrubber{}
+	for _, params := range secrets {
+		for _, v := range params {
+			s.add(v)
+		}
+	}
+	return s
+}
+
+func (s *scrubber) add(v string) {
+	if len(v) >= 4 {
+		s.values = append(s.values, v)
+	}
+}
+
+func (s *scrubber) clean(msg string) string {
+	for _, v := range s.values {
+		msg = strings.ReplaceAll(msg, v, "••••••")
+	}
+	return msg
 }

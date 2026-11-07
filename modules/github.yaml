@@ -1,6 +1,7 @@
 # Declarative module: every node maps its parameters to one HTTP request.
 # Parameters are available as `params`, the incoming item as `json`.
 module: github
+version: 1.0.0
 name: GitHub
 description: GitHub REST API
 color: "#24292f"

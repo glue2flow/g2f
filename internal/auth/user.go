@@ -17,6 +17,8 @@ type User struct {
 	Groups   []string `json:"groups"`
 	Roles    []string `json:"roles"`
 	Admin    bool     `json:"admin"`
+	// PluginAdmin may import and delete plugins (installation-wide).
+	PluginAdmin bool `json:"pluginAdmin"`
 
 	// memberOf contains Groups plus all of their ancestor paths, so that a
 	// member of /engineering/backend also matches a share for /engineering.

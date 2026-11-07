@@ -2,12 +2,14 @@ package api
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"slices"
 	"strconv"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 
 	"github.com/wolfposd/g8g/internal/auth"
 	"github.com/wolfposd/g8g/internal/engine"
@@ -83,8 +85,9 @@ func (s *Server) getWorkflow(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !wf.Access.AtLeast(workflow.RoleEditor) {
-		redactSecrets(s.reg, wf)
+	if err := s.secrets.MarkStored(r.Context(), wf); err != nil {
+		s.storeError(w, err)
+		return
 	}
 	writeJSON(w, http.StatusOK, wf)
 }
@@ -97,19 +100,24 @@ func (s *Server) createWorkflow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	wf := &workflow.Workflow{
-		OrgID: u.Org, OwnerSub: u.Sub, OwnerName: u.Name,
+		ID: uuid.NewString(), OrgID: u.Org, OwnerSub: u.Sub, OwnerName: u.Name,
 	}
 	if err := s.apply(wf, &in, true); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := s.store.CreateWorkflow(r.Context(), wf); err != nil {
+	ops, err := s.secrets.ExtractNodeSecrets(wf)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := s.store.CreateWorkflow(r.Context(), wf, ops); err != nil {
 		s.storeError(w, err)
 		return
 	}
 	s.notifyChanged(wf)
 	wf.Access = workflow.RoleOwner
-	writeJSON(w, http.StatusCreated, wf)
+	s.respondWorkflow(w, r, http.StatusCreated, wf)
 }
 
 func (s *Server) updateWorkflow(w http.ResponseWriter, r *http.Request) {
@@ -135,12 +143,17 @@ func (s *Server) updateWorkflow(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := s.store.UpdateWorkflow(r.Context(), wf); err != nil {
+	ops, err := s.secrets.ExtractNodeSecrets(wf)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := s.store.UpdateWorkflow(r.Context(), wf, ops); err != nil {
 		s.storeError(w, err)
 		return
 	}
 	s.notifyChanged(wf)
-	writeJSON(w, http.StatusOK, wf)
+	s.respondWorkflow(w, r, http.StatusOK, wf)
 }
 
 func (s *Server) deleteWorkflow(w http.ResponseWriter, r *http.Request) {
@@ -183,8 +196,30 @@ func (s *Server) apply(wf *workflow.Workflow, in *workflowInput, sharing bool) e
 	return nil
 }
 
-// validateNodes lets node types check their own parameters (e.g. cron syntax).
+// respondWorkflow writes wf with stored secrets marked (never their values).
+func (s *Server) respondWorkflow(w http.ResponseWriter, r *http.Request, status int, wf *workflow.Workflow) {
+	if err := s.secrets.MarkStored(r.Context(), wf); err != nil {
+		s.storeError(w, err)
+		return
+	}
+	writeJSON(w, status, wf)
+}
+
+// validateNodes checks edge handles against node definitions and lets node
+// types check their own parameters (e.g. cron syntax).
 func (s *Server) validateNodes(g *workflow.Graph) error {
+	for i := range g.Edges {
+		e := &g.Edges[i]
+		src, _ := s.reg.Get(g.Node(e.Source).Type)
+		dst, _ := s.reg.Get(g.Node(e.Target).Type)
+		var err error
+		if e.SourceHandle, err = pickHandle(e.SourceHandle, src.Definition().Outputs, "output", g.Node(e.Source).Name); err != nil {
+			return err
+		}
+		if e.TargetHandle, err = pickHandle(e.TargetHandle, dst.Definition().Inputs, "input", g.Node(e.Target).Name); err != nil {
+			return err
+		}
+	}
 	for i := range g.Nodes {
 		n := &g.Nodes[i]
 		impl, _ := s.reg.Get(n.Type)
@@ -195,6 +230,21 @@ func (s *Server) validateNodes(g *workflow.Graph) error {
 		}
 	}
 	return nil
+}
+
+// pickHandle defaults an empty handle when the node has exactly one, and
+// rejects handles the node does not have.
+func pickHandle(h string, handles []string, kind, node string) (string, error) {
+	if h == "" {
+		if len(handles) == 1 {
+			return handles[0], nil
+		}
+		return "", fmt.Errorf("connection to %q must name the %s (%s)", node, kind, strings.Join(handles, ", "))
+	}
+	if !slices.Contains(handles, h) {
+		return "", fmt.Errorf("node %q has no %s %q", node, kind, h)
+	}
+	return h, nil
 }
 
 func sharingChanged(wf *workflow.Workflow, in *workflowInput) bool {
@@ -212,24 +262,6 @@ func sharingChanged(wf *workflow.Workflow, in *workflowInput) bool {
 func (s *Server) notifyChanged(wf *workflow.Workflow) {
 	if s.listener != nil {
 		s.listener.WorkflowChanged(wf)
-	}
-}
-
-// redactSecrets blanks secret parameters for users who cannot edit.
-func redactSecrets(reg *nodes.Registry, wf *workflow.Workflow) {
-	for i := range wf.Graph.Nodes {
-		n := &wf.Graph.Nodes[i]
-		impl, ok := reg.Get(n.Type)
-		if !ok {
-			continue
-		}
-		for _, p := range impl.Definition().Params {
-			if p.Type == nodes.ParamSecret {
-				if _, set := n.Params[p.Name]; set {
-					n.Params[p.Name] = "••••••"
-				}
-			}
-		}
 	}
 }
 

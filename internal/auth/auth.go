@@ -56,13 +56,14 @@ func (a *Authenticator) Middleware(next http.Handler) http.Handler {
 func (a *Authenticator) Authenticate(r *http.Request) (*User, error) {
 	if a.cfg.Mode == config.AuthNone {
 		return &User{
-			Sub:      "dev-" + a.cfg.DevUser,
-			Username: a.cfg.DevUser,
-			Name:     a.cfg.DevUser,
-			Org:      a.cfg.DefaultOrg,
-			Groups:   a.cfg.DevGroups,
-			Roles:    []string{a.cfg.AdminRole},
-			Admin:    true,
+			Sub:         "dev-" + a.cfg.DevUser,
+			Username:    a.cfg.DevUser,
+			Name:        a.cfg.DevUser,
+			Org:         a.cfg.DefaultOrg,
+			Groups:      a.cfg.DevGroups,
+			Roles:       []string{a.cfg.AdminRole, a.cfg.PluginAdminRole},
+			Admin:       true,
+			PluginAdmin: true,
 		}, nil
 	}
 
@@ -104,6 +105,7 @@ func (a *Authenticator) userFromClaims(sub string, c map[string]any) *User {
 		u.Roles = strList(ra["roles"])
 	}
 	u.Admin = slices.Contains(u.Roles, a.cfg.AdminRole)
+	u.PluginAdmin = slices.Contains(u.Roles, a.cfg.PluginAdminRole)
 	return u
 }
 

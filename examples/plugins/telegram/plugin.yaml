@@ -1,0 +1,66 @@
+# Sample WebAssembly plugin for g8g. Build plugin.wasm from ./go or ./js, then
+# zip plugin.yaml + plugin.wasm and import the zip (see README.md).
+module: telegram
+name: Telegram
+version: 1.0.0
+description: Send messages with a Telegram bot (sample WebAssembly plugin)
+color: "#229ED9"
+
+runtime: wasm
+wasm: plugin.wasm
+# The sandbox can only reach these hosts. Everything else is blocked.
+allowedHosts:
+  - api.telegram.org
+timeout: 20s
+memoryMB: 32
+
+# Global configuration: set once per organization by an admin on the Plugins
+# page. Stored encrypted; secrets are write-only. Available as `config`.
+config:
+  - name: botToken
+    label: Default bot token
+    type: secret
+    description: Organization-wide bot, used when a node does not set its own token.
+  - name: apiBaseUrl
+    label: Bot API base URL
+    default: https://api.telegram.org
+    description: Only change for a self-hosted Bot API server (and add its host to allowedHosts).
+
+# Per-node parameters shared by all nodes. "secret" parameters are stored
+# encrypted per node instance, e.g. every user enters their own bot token.
+params:
+  - name: botToken
+    label: Bot token
+    type: secret
+    description: Token from @BotFather. Leave empty to use the organization's default bot.
+
+nodes:
+  - type: sendMessage
+    name: Send Message
+    description: Send a text message to a chat. Runs once per input item.
+    params:
+      - name: chatId
+        label: Chat ID
+        required: true
+        placeholder: "{{ json.chatId }}"
+      - name: text
+        label: Text
+        type: text
+        required: true
+        default: "Hello from {{ workflow.name }}"
+      - name: parseMode
+        label: Parse mode
+        type: select
+        default: none
+        options:
+          - { label: Plain text, value: none }
+          - { label: MarkdownV2, value: MarkdownV2 }
+          - { label: HTML, value: HTML }
+      - name: silent
+        label: Send silently
+        type: boolean
+        default: false
+
+  - type: getMe
+    name: Get Bot Info
+    description: Return the bot's profile. Useful to check that the token works.

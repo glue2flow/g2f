@@ -18,7 +18,7 @@ type scheduleTrigger struct{}
 
 func (scheduleTrigger) Definition() Definition {
 	return Definition{
-		Type: "trigger.schedule", Name: "Schedule Trigger", Category: "Triggers", Source: "builtin",
+		Type: "trigger.schedule", Name: "Schedule Trigger", Category: "Triggers", Source: "builtin", Module: BuiltinModule,
 		Description: "Run on a cron schedule or once at a specific time. Only fires while the workflow is active.",
 		Color:       "#10b981", Trigger: TriggerSchedule, Inputs: []string{}, Outputs: []string{"main"},
 		Params: []Param{
@@ -163,7 +163,7 @@ type webhookTrigger struct{}
 
 func (webhookTrigger) Definition() Definition {
 	return Definition{
-		Type: "trigger.webhook", Name: "Webhook Trigger", Category: "Triggers", Source: "builtin",
+		Type: "trigger.webhook", Name: "Webhook Trigger", Category: "Triggers", Source: "builtin", Module: BuiltinModule,
 		Description: "Start the workflow with an HTTP request to its webhook URL. Only active workflows accept calls.",
 		Color:       "#f59e0b", Trigger: TriggerWebhook, Inputs: []string{}, Outputs: []string{"main"},
 		Params: []Param{
@@ -214,11 +214,14 @@ func (webhookTrigger) Execute(_ context.Context, ec *ExecContext) (Output, error
 
 // Webhook is the parsed configuration of a webhook trigger.
 type Webhook struct {
-	Method  string // POST, GET, ... or ANY
-	Auth    string // none | token | hmac
-	Secret  string
-	Header  string
-	Respond string // immediately | lastNode
+	Method string // POST, GET, ... or ANY
+	Auth   string // none | token | hmac
+	Secret string
+	// SecretStored is set when params carry nodes.SecretRef instead of the value
+	// (validation before the encrypted value is loaded).
+	SecretStored bool
+	Header       string
+	Respond      string // immediately | lastNode
 }
 
 func ParseWebhook(params map[string]any) (*Webhook, error) {
@@ -248,7 +251,10 @@ func ParseWebhook(params map[string]any) (*Webhook, error) {
 	default:
 		return nil, fmt.Errorf("invalid authentication %q", w.Auth)
 	}
-	if w.Auth != "none" && w.Secret == "" {
+	if IsSecretRef(params["secret"]) {
+		w.SecretStored = true
+	}
+	if w.Auth != "none" && w.Secret == "" && !w.SecretStored {
 		return nil, errors.New("a secret is required when authentication is enabled")
 	}
 	if w.Respond != "immediately" && w.Respond != "lastNode" {

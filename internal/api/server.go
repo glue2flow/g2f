@@ -18,6 +18,8 @@ import (
 	"github.com/wolfposd/g8g/internal/config"
 	"github.com/wolfposd/g8g/internal/engine"
 	"github.com/wolfposd/g8g/internal/nodes"
+	"github.com/wolfposd/g8g/internal/plugin"
+	"github.com/wolfposd/g8g/internal/secrets"
 	"github.com/wolfposd/g8g/internal/store"
 	"github.com/wolfposd/g8g/internal/workflow"
 )
@@ -38,6 +40,8 @@ type Server struct {
 	log      *slog.Logger
 	listener ChangeListener
 	webhooks http.Handler
+	secrets  *secrets.Service
+	plugins  *plugin.Manager
 }
 
 type Deps struct {
@@ -51,12 +55,15 @@ type Deps struct {
 	Listener ChangeListener
 	// Webhooks handles /webhook/*; optional.
 	Webhooks http.Handler
+	Secrets  *secrets.Service
+	Plugins  *plugin.Manager
 }
 
 func New(d Deps) *Server {
 	return &Server{
 		cfg: d.Config, store: d.Store, reg: d.Registry, engine: d.Engine,
 		auth: d.Auth, log: d.Logger, listener: d.Listener, webhooks: d.Webhooks,
+		secrets: d.Secrets, plugins: d.Plugins,
 	}
 }
 
@@ -88,6 +95,12 @@ func (s *Server) Handler() http.Handler {
 			r.Get("/workflows/{id}/executions", s.listExecutions)
 			r.Get("/workflows/{id}/triggers", s.listTriggers)
 			r.Get("/executions/{id}", s.getExecution)
+
+			r.Get("/plugins", s.listPlugins)
+			r.Post("/plugins", s.importPlugin)
+			r.Delete("/plugins/{module}", s.deletePlugin)
+			r.Get("/plugins/{module}/config", s.getPluginConfig)
+			r.Put("/plugins/{module}/config", s.putPluginConfig)
 		})
 	})
 
