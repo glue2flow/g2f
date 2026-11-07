@@ -1,11 +1,16 @@
 :root {
-  --bg: #f6f7f9;
+  /* Palette from the app icon (img/appicon.png): orange #fc8300 with white. */
+  --bg: #f7f6f4;
   --surface: #ffffff;
-  --border: #e3e6ea;
-  --text: #1c2026;
-  --muted: #6b7280;
-  --primary: #4f46e5;
-  --primary-ink: #ffffff;
+  --border: #e8e4de;
+  --text: #1f1a14;
+  --muted: #6f675d;
+  /* Surfaces in brand orange (buttons, badges, selection). */
+  --primary: #fc8300;
+  /* Text on orange: white on #fc8300 is too low in contrast for labels. */
+  --primary-ink: #1f1300;
+  /* Orange for text and lines on light backgrounds (WCAG AA on white). */
+  --primary-text: #b45309;
   --danger: #dc2626;
   --success: #16a34a;
   --warn: #d97706;
@@ -14,25 +19,36 @@
   font-size: 14px;
   color: var(--text);
   background: var(--bg);
+  /* Checkboxes, radios and range inputs in brand orange. */
+  accent-color: var(--primary);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #0f1115;
-    --surface: #171a20;
-    --border: #2a2f38;
-    --text: #e6e8eb;
-    --muted: #9aa3ae;
-    --primary: #818cf8;
-    --primary-ink: #0f1115;
+    --bg: #121110;
+    --surface: #1b1917;
+    --border: #302c27;
+    --text: #ece8e3;
+    --muted: #a59c91;
+    --primary: #ff9419;
+    --primary-ink: #1a0f00;
+    --primary-text: #ffad4d;
   }
   .react-flow {
     --xy-background-color: var(--bg);
     --xy-minimap-background-color: var(--surface);
     --xy-controls-button-background-color: var(--surface);
     --xy-controls-button-color: var(--text);
-    --xy-edge-stroke: #6b7280;
+    --xy-edge-stroke: #7a7168;
+    --xy-minimap-mask-background-color-default: rgb(0 0 0 / 0.55);
+    --xy-minimap-node-background-color-default: #4a443d;
   }
+}
+
+.react-flow {
+  --xy-edge-stroke-selected-default: var(--primary);
+  --xy-connectionline-stroke-default: var(--primary);
+  --xy-minimap-mask-stroke-color-default: var(--primary);
 }
 
 * { box-sizing: border-box; }
@@ -53,7 +69,7 @@ input[type="checkbox"], input[type="radio"] { width: auto; }
 .app { display: flex; flex-direction: column; height: 100vh; }
 .topbar { display: flex; align-items: center; gap: 12px; padding: 8px 16px; background: var(--surface); border-bottom: 1px solid var(--border); }
 .brand { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 16px; color: inherit; text-decoration: none; }
-.brand img { width: 22px; height: 22px; }
+.brand img { width: 26px; height: 26px; border-radius: 6px; }
 .content { flex: 1; min-height: 0; overflow: auto; }
 .spacer { flex: 1; }
 .row { display: flex; gap: 8px; align-items: center; }
@@ -66,6 +82,7 @@ input[type="checkbox"], input[type="radio"] { width: auto; }
 .badge { margin-left: 6px; font-size: 11px; padding: 1px 6px; border-radius: 10px; background: var(--primary); color: var(--primary-ink); }
 .org-chip { font-size: 12px; padding: 2px 8px; border-radius: 10px; border: 1px solid var(--border); color: var(--muted); }
 
+a.btn { color: var(--text); }
 .btn { border: 1px solid var(--border); background: var(--surface); padding: 6px 12px; border-radius: 6px; cursor: pointer; text-decoration: none; white-space: nowrap; }
 .btn:hover:not(:disabled) { border-color: var(--primary); }
 .btn:disabled { opacity: 0.5; cursor: default; }
@@ -205,7 +222,7 @@ pre.json { margin: 6px 0 0; white-space: pre-wrap; word-break: break-word; }
 /* Navigation */
 .nav { display: flex; gap: 4px; margin-left: 8px; }
 .nav a { color: var(--muted); text-decoration: none; padding: 4px 10px; border-radius: 6px; }
-.nav a.active, .nav a:hover { color: var(--text); background: color-mix(in srgb, var(--primary) 10%, transparent); }
+.nav a.active, .nav a:hover { color: var(--primary-text); background: color-mix(in srgb, var(--primary) 12%, transparent); }
 
 /* Gate input labels */
 .handle-label.in { left: -6px; right: auto; transform: translate(-100%, -50%); padding: 0 4px 0 0; }

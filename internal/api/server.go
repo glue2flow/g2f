@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -129,6 +130,11 @@ func (s *Server) requestLogger(next http.Handler) http.Handler {
 				"duration", time.Since(start).Round(time.Millisecond))
 		}
 	})
+}
+
+func init() {
+	// Not in Go's built-in table; browsers expect this type for the PWA manifest.
+	_ = mime.AddExtensionType(".webmanifest", "application/manifest+json")
 }
 
 // spa serves the built editor and falls back to index.html for client routes.

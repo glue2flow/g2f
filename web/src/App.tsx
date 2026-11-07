@@ -46,7 +46,7 @@ export function App({ config }: { config: ClientConfig }) {
     <div className="app">
       <header className="topbar">
         <a className="brand" href="#/">
-          <img src="/favicon.svg" alt="" /> g8g
+          <img src="/appicon-64.png" alt="" /> g8g
         </a>
         <span className="org-chip" title="Organization">{user.org}</span>
         <nav className="nav">
