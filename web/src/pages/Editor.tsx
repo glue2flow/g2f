@@ -305,10 +305,27 @@ function EditorInner({ id, defs, user, config }: Props) {
         <div className="spacer" />
         {message && <span className={message.kind === "error" ? "error-text small" : "muted small"}>{message.text}</span>}
         {canEdit && (
-          <label className="switch" title="Active workflows react to schedules and webhooks">
-            <input type="checkbox" checked={wf.active} disabled={busy} onChange={(e) => save({ active: e.target.checked })} />
-            <span>{wf.active ? "Active" : "Inactive"}</span>
-          </label>
+          <div className="active-toggle" title="Active workflows react to schedules and webhooks">
+            <span className="muted small">Active</span>
+            <div className="pill-toggle" role="group">
+              <button
+                type="button"
+                className={wf.active ? "yes sel" : "yes"}
+                disabled={busy}
+                onClick={() => !wf.active && save({ active: true })}
+              >
+                yes
+              </button>
+              <button
+                type="button"
+                className={!wf.active ? "no sel" : "no"}
+                disabled={busy}
+                onClick={() => wf.active && save({ active: false })}
+              >
+                no
+              </button>
+            </div>
+          </div>
         )}
         {canEdit && (
           <button className="btn" disabled={!dirty || busy} onClick={() => save()}>

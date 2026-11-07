@@ -283,3 +283,10 @@ textarea.code { font-size: 12px; line-height: 1.5; tab-size: 2; white-space: pre
 .table.compact-rows tbody tr { cursor: default; }
 .table.compact-rows .title-input { max-width: 220px; }
 .list-head .btn .dot { display: inline-block; margin-right: 4px; vertical-align: middle; }
+
+.active-toggle { display: flex; align-items: center; gap: 8px; }
+.pill-toggle { display: inline-flex; border: 1px solid var(--border); border-radius: 999px; overflow: hidden; }
+.pill-toggle button { border: 0; background: transparent; color: var(--muted); font-size: 12px; padding: 3px 12px; cursor: pointer; }
+.pill-toggle button:disabled { cursor: default; opacity: 0.7; }
+.pill-toggle button.yes.sel { background: var(--success); color: #fff; }
+.pill-toggle button.no.sel { background: var(--danger); color: #fff; }
