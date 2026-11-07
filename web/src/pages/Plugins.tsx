@@ -69,7 +69,7 @@ export function Plugins({ user, config, onChanged }: { user: User; config: Clien
       </div>
       <p className="muted small">
         Import a <code>.yaml</code> manifest (HTTP nodes) or a <code>.zip</code> with <code>plugin.yaml</code> and a WebAssembly
-        module. See <code>examples/plugins/telegram</code>. Importing requires the <code>g8g-plugin-admin</code> role; global
+        module. See <code>examples/plugins/telegram</code>. Importing requires the <code>g2f-plugin-admin</code> role; global
         plugin settings are configured per organization by admins.
       </p>
       {error && <div className="alert error">{error}</div>}

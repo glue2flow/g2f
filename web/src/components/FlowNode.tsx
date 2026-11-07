@@ -11,7 +11,7 @@ export interface FlowNodeData extends Record<string, unknown> {
   itemCount?: number;
 }
 
-export type FlowNodeType = Node<FlowNodeData, "g8g">;
+export type FlowNodeType = Node<FlowNodeData, "g2f">;
 
 const triggerIcon: Record<string, string> = { manual: "▶", schedule: "⏱", webhook: "⚡", call: "↪", error: "⚠" };
 

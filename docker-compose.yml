@@ -1,4 +1,4 @@
-# Sample stack: g8g + PostgreSQL + Keycloak (with a pre-configured demo realm).
+# Sample stack: glue2flow (g2f) + PostgreSQL + Keycloak (with a pre-configured demo realm).
 #
 #   docker compose up --build
 #   open http://localhost:8080   (login: alice / alice, bob / bob, carol / carol)
@@ -7,20 +7,20 @@
 #
 # NOT production-ready: default passwords, Keycloak in dev mode, plain HTTP.
 
-name: g8g
+name: g2f
 
 services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: g8g
-      POSTGRES_PASSWORD: g8g
-      POSTGRES_DB: g8g
+      POSTGRES_USER: g2f
+      POSTGRES_PASSWORD: g2f
+      POSTGRES_DB: g2f
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./deploy/postgres/init.sql:/docker-entrypoint-initdb.d/10-keycloak.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U g8g -d g8g"]
+      test: ["CMD-SHELL", "pg_isready -U g2f -d g2f"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -40,33 +40,33 @@ services:
       KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
       KC_HEALTH_ENABLED: "true"
     volumes:
-      - ./deploy/keycloak/realm-g8g.json:/opt/keycloak/data/import/realm-g8g.json:ro
+      - ./deploy/keycloak/realm-g2f.json:/opt/keycloak/data/import/realm-g2f.json:ro
     ports:
       - "8081:8080"
     depends_on:
       postgres:
         condition: service_healthy
 
-  g8g:
+  g2f:
     build: .
-    image: g8g:latest
+    image: g2f:latest
     environment:
-      G8G_DATABASE_URL: postgres://g8g:g8g@postgres:5432/g8g?sslmode=disable
-      G8G_PUBLIC_URL: http://localhost:8080
-      G8G_AUTH_MODE: oidc
+      G2F_DATABASE_URL: postgres://g2f:g2f@postgres:5432/g2f?sslmode=disable
+      G2F_PUBLIC_URL: http://localhost:8080
+      G2F_AUTH_MODE: oidc
       # Expected token issuer (as seen by the browser) ...
-      G8G_OIDC_ISSUER: http://localhost:8081/realms/g8g
+      G2F_OIDC_ISSUER: http://localhost:8081/realms/g2f
       # ... while signing keys are fetched over the internal network.
-      G8G_OIDC_JWKS_URL: http://keycloak:8080/realms/g8g/protocol/openid-connect/certs
-      G8G_OIDC_CLIENT_ID: g8g
-      G8G_OIDC_GROUPS_CLAIM: groups
-      G8G_OIDC_ORG_CLAIM: org
-      G8G_OIDC_ADMIN_ROLE: g8g-admin
-      G8G_OIDC_PLUGIN_ADMIN_ROLE: g8g-plugin-admin
+      G2F_OIDC_JWKS_URL: http://keycloak:8080/realms/g2f/protocol/openid-connect/certs
+      G2F_OIDC_CLIENT_ID: g2f
+      G2F_OIDC_GROUPS_CLAIM: groups
+      G2F_OIDC_ORG_CLAIM: org
+      G2F_OIDC_ADMIN_ROLE: g2f-admin
+      G2F_OIDC_PLUGIN_ADMIN_ROLE: g2f-plugin-admin
       # Encrypts node secrets and plugin settings. DEMO KEY - generate your own:
       #   openssl rand -base64 32
-      # Rotate by moving the old key to G8G_SECRET_KEYS_OLD (comma separated).
-      G8G_SECRET_KEY: ${G8G_SECRET_KEY:-ZzhnLWRlbW8ta2V5LU5PVC1mb3ItcHJvZHVjdGlvbiE=}
+      # Rotate by moving the old key to G2F_SECRET_KEYS_OLD (comma separated).
+      G2F_SECRET_KEY: ${G2F_SECRET_KEY:-ZzhnLWRlbW8ta2V5LU5PVC1mb3ItcHJvZHVjdGlvbiE=}
     ports:
       - "8080:8080"
     depends_on:

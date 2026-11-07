@@ -1,4 +1,4 @@
-// Command g8g runs the workflow automation server.
+// Command g2f runs the glue2flow workflow automation server.
 package main
 
 import (
@@ -28,7 +28,7 @@ import (
 var version = "dev"
 
 func main() {
-	// `g8g healthcheck` lets distroless containers run a HEALTHCHECK without curl.
+	// `g2f healthcheck` lets distroless containers run a HEALTHCHECK without curl.
 	if len(os.Args) > 1 && os.Args[1] == "healthcheck" {
 		os.Exit(healthcheck())
 	}
@@ -87,7 +87,7 @@ func run(log *slog.Logger) error {
 		return err
 	}
 	if cfg.Auth.Mode == config.AuthNone {
-		log.Warn("AUTHENTICATION DISABLED (G8G_AUTH_MODE=none) - do not use in production")
+		log.Warn("AUTHENTICATION DISABLED (G2F_AUTH_MODE=none) - do not use in production")
 	}
 
 	oauthMgr := oauth.NewManager(st, box, reg, sec, cfg.PublicURL)
@@ -153,7 +153,7 @@ func run(log *slog.Logger) error {
 }
 
 func healthcheck() int {
-	addr := os.Getenv("G8G_LISTEN")
+	addr := os.Getenv("G2F_LISTEN")
 	if addr == "" || addr[0] == ':' {
 		addr = "127.0.0.1" + addr
 		if addr == "127.0.0.1" {

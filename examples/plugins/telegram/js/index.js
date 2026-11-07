@@ -1,4 +1,4 @@
-// Telegram plugin for g8g, written in JavaScript and compiled to WebAssembly
+// Telegram plugin for glue2flow, written in JavaScript and compiled to WebAssembly
 // with the Extism JS PDK (QuickJS inside the wasm module):
 //
 //   extism-js index.js -i index.d.ts -o ../plugin.wasm
@@ -6,7 +6,7 @@
 // Globals provided by the PDK: Host (input/output), Http (sandboxed requests
 // to the manifest's allowedHosts), Config, Var. See index.d.ts for the export.
 
-/** Entry point called by g8g once per node run. */
+/** Entry point called by glue2flow once per node run. */
 function execute() {
   const req = JSON.parse(Host.inputString());
   const items = req.items.map((it, i) => {

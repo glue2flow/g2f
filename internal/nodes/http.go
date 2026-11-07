@@ -75,7 +75,7 @@ func doHTTP(ctx context.Context, r httpRequest) (Item, error) {
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", "g8g-workflow/1.0")
+	req.Header.Set("User-Agent", "glue2flow/1.0")
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
 	}

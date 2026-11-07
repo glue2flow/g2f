@@ -50,7 +50,7 @@ func TestErrorDispatcher(t *testing.T) {
 	for _, c := range cases {
 		eng := &recordingEngine{ch: make(chan engine.Request, 10)}
 		d := NewErrorDispatcher(errStore{[]*workflow.Workflow{selfHandler, watcher, inactive, unrelated}}, eng,
-			registry(t), discard, "https://g8g.test")
+			registry(t), discard, "https://g2f.test")
 		d.WorkflowFailed(&store.Execution{ID: "x1", TriggerType: c.trigger, Error: "node \"HTTP\": boom",
 			Steps: []store.Step{{NodeName: "HTTP", Status: "error"}}, StartedAt: time.Now()}, failed)
 		close(eng.ch)
@@ -78,14 +78,14 @@ func (f *fakeResumer) Resume(_ context.Context, id string, item nodes.Item) (*st
 }
 
 func TestResumeHandler(t *testing.T) {
-	signer := NewResumeSigner("k", "https://g8g.test/")
+	signer := NewResumeSigner("k", "https://g2f.test/")
 	res := &fakeResumer{}
 	h := NewResumeHandler(signer, res, discard)
 	url := signer.URL("e1")
-	if !strings.HasPrefix(url, "https://g8g.test/webhook-resume/e1/") {
+	if !strings.HasPrefix(url, "https://g2f.test/webhook-resume/e1/") {
 		t.Fatalf("url %s", url)
 	}
-	path := strings.TrimPrefix(url, "https://g8g.test")
+	path := strings.TrimPrefix(url, "https://g2f.test")
 
 	do := func(p string) int {
 		rec := httptest.NewRecorder()
@@ -101,7 +101,7 @@ func TestResumeHandler(t *testing.T) {
 	if code := do("/webhook-resume/e1/deadbeef"); code != 404 {
 		t.Fatalf("bad signature: %d", code)
 	}
-	if code := do(strings.TrimPrefix(signer.URL("e2"), "https://g8g.test")); code != 410 {
+	if code := do(strings.TrimPrefix(signer.URL("e2"), "https://g2f.test")); code != 410 {
 		t.Fatalf("not waiting: %d", code)
 	}
 	if NewResumeSigner("other-key", "x").sign("e1") == signer.sign("e1") {

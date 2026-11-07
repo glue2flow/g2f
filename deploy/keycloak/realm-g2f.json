@@ -1,7 +1,7 @@
 {
-  "realm": "g8g",
+  "realm": "g2f",
   "enabled": true,
-  "displayName": "g8g",
+  "displayName": "glue2flow",
   "sslRequired": "none",
   "registrationAllowed": false,
   "loginWithEmailAllowed": true,
@@ -9,11 +9,11 @@
   "roles": {
     "realm": [
       {
-        "name": "g8g-admin",
+        "name": "g2f-admin",
         "description": "Full access to all workflows of the user's organization"
       },
       {
-        "name": "g8g-plugin-admin",
+        "name": "g2f-plugin-admin",
         "description": "May import and uninstall plugins for the whole installation"
       }
     ]
@@ -62,9 +62,9 @@
         "/engineering/backend"
       ],
       "realmRoles": [
-        "default-roles-g8g",
-        "g8g-admin",
-        "g8g-plugin-admin"
+        "default-roles-g2f",
+        "g2f-admin",
+        "g2f-plugin-admin"
       ]
     },
     {
@@ -90,7 +90,7 @@
         "/engineering/frontend"
       ],
       "realmRoles": [
-        "default-roles-g8g"
+        "default-roles-g2f"
       ]
     },
     {
@@ -116,7 +116,7 @@
         "/sales"
       ],
       "realmRoles": [
-        "default-roles-g8g"
+        "default-roles-g2f"
       ]
     },
     {
@@ -142,14 +142,14 @@
         "/engineering"
       ],
       "realmRoles": [
-        "default-roles-g8g"
+        "default-roles-g2f"
       ]
     }
   ],
   "clients": [
     {
-      "clientId": "g8g",
-      "name": "g8g workflow editor",
+      "clientId": "g2f",
+      "name": "glue2flow workflow editor",
       "enabled": true,
       "publicClient": true,
       "protocol": "openid-connect",

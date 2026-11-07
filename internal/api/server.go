@@ -163,7 +163,7 @@ func (s *Server) spa(w http.ResponseWriter, r *http.Request) {
 	}
 	index := filepath.Join(dir, "index.html")
 	if _, err := os.Stat(index); err != nil {
-		http.Error(w, "editor not built: run `npm run build` in web/ or set G8G_STATIC_DIR", http.StatusNotFound)
+		http.Error(w, "editor not built: run `npm run build` in web/ or set G2F_STATIC_DIR", http.StatusNotFound)
 		return
 	}
 	w.Header().Set("Cache-Control", "no-cache")

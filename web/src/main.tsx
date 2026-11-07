@@ -16,5 +16,5 @@ initAuth()
     ),
   )
   .catch((err) => {
-    root.render(<div className="fatal">Could not start g8g: {String(err?.message ?? err)}</div>);
+    root.render(<div className="fatal">Could not start glue2flow: {String(err?.message ?? err)}</div>);
   });

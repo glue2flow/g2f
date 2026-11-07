@@ -11,7 +11,7 @@ import (
 	"github.com/dop251/goja"
 )
 
-// CodeNodeEnabled can be switched off by administrators (G8G_DISABLE_CODE_NODE).
+// CodeNodeEnabled can be switched off by administrators (G2F_DISABLE_CODE_NODE).
 var CodeNodeEnabled = true
 
 const (

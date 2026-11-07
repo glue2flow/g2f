@@ -24,7 +24,7 @@ import { TriggerInfo } from "../components/TriggerInfo";
 import { NodePalette } from "../components/NodePalette";
 import { atLeast, type ClientConfig, type Execution, type Graph, type NodeDef, type User, type Workflow } from "../types";
 
-const nodeTypes = { g8g: FlowNode };
+const nodeTypes = { g2f: FlowNode };
 
 interface Props {
   id: string;
@@ -45,7 +45,7 @@ function toFlow(graph: Graph, defs: Map<string, NodeDef>): { nodes: FlowNodeType
   return {
     nodes: graph.nodes.map((n) => ({
       id: n.id,
-      type: "g8g",
+      type: "g2f",
       position: n.position,
       data: { type: n.type, name: n.name, params: n.params ?? {}, disabled: n.disabled, def: defs.get(n.type) },
     })),
@@ -185,7 +185,7 @@ function EditorInner({ id, defs, user, config }: Props) {
       ...ns.map((n) => ({ ...n, selected: false })),
       {
         id: nid,
-        type: "g8g",
+        type: "g2f",
         position: pos,
         selected: true,
         data: { type: def.type, name: uniqueName(def.name), params: defaultParams(def), def },
@@ -343,7 +343,7 @@ function EditorInner({ id, defs, user, config }: Props) {
           }}
           onDrop={(e) => {
             e.preventDefault();
-            const def = defMap.get(e.dataTransfer.getData("application/g8g-node"));
+            const def = defMap.get(e.dataTransfer.getData("application/g2f-node"));
             if (def && canEdit) addNode(def, screenToFlowPosition({ x: e.clientX, y: e.clientY }));
           }}
         >

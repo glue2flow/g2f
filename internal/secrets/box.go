@@ -6,7 +6,7 @@
 //
 // Format: "<keyID>:<base64(nonce || ciphertext)>". keyID identifies which key
 // sealed the value, which allows key rotation: configure the new key as
-// G8G_SECRET_KEY and keep previous keys in G8G_SECRET_KEYS_OLD.
+// G2F_SECRET_KEY and keep previous keys in G2F_SECRET_KEYS_OLD.
 package secrets
 
 import (
@@ -34,12 +34,12 @@ func NewBox(current string, old []string) (*Box, error) {
 	b := &Box{keys: map[string]cipher.AEAD{}}
 	id, err := b.add(current)
 	if err != nil {
-		return nil, fmt.Errorf("G8G_SECRET_KEY: %w", err)
+		return nil, fmt.Errorf("G2F_SECRET_KEY: %w", err)
 	}
 	b.current = id
 	for _, k := range old {
 		if _, err := b.add(k); err != nil {
-			return nil, fmt.Errorf("G8G_SECRET_KEYS_OLD: %w", err)
+			return nil, fmt.Errorf("G2F_SECRET_KEYS_OLD: %w", err)
 		}
 	}
 	return b, nil

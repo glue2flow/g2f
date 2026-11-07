@@ -125,7 +125,7 @@ func (s *Server) deleteConnection(w http.ResponseWriter, r *http.Request) {
 
 var callbackPage = template.Must(template.New("cb").Parse(`<!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>g8g – {{if .OK}}Account connected{{else}}Connection failed{{end}}</title>
+<title>glue2flow – {{if .OK}}Account connected{{else}}Connection failed{{end}}</title>
 <style>
  body{font-family:system-ui,sans-serif;background:#f7f6f4;color:#1f1a14;display:grid;place-items:center;min-height:100vh;margin:0;padding:16px}
  .card{background:#fff;border:1px solid #e8e4de;border-radius:12px;padding:24px 28px;max-width:420px;text-align:center}
@@ -139,7 +139,7 @@ var callbackPage = template.Must(template.New("cb").Parse(`<!doctype html>
 </div>
 <script>
  (function(){
-  var msg = {type: "g8g-oauth", ok: {{.OK}}, connectionId: {{.ID}}, error: {{.Error}}};
+  var msg = {type: "g2f-oauth", ok: {{.OK}}, connectionId: {{.ID}}, error: {{.Error}}};
   if (window.opener) { window.opener.postMessage(msg, {{.Origin}}); {{if .OK}}setTimeout(function(){ window.close(); }, 1200);{{end}} }
  })();
 </script></body></html>`))

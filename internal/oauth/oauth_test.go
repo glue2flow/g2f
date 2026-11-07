@@ -160,7 +160,7 @@ nodes:
 		t.Fatal(err)
 	}
 	st := &memStore{conns: map[string]*store.Connection{}}
-	mgr := NewManager(st, box, reg, settings{"clientId": "app-id", "clientSecret": "app-secret"}, "https://g8g.test")
+	mgr := NewManager(st, box, reg, settings{"clientId": "app-id", "clientSecret": "app-secret"}, "https://g2f.test")
 	return mgr, st
 }
 
@@ -173,7 +173,7 @@ func connect(t *testing.T, mgr *Manager, p *fakeProvider) *store.Connection {
 	}
 	au, _ := url.Parse(raw)
 	q := au.Query()
-	if q.Get("client_id") != "app-id" || q.Get("redirect_uri") != "https://g8g.test/oauth/callback" ||
+	if q.Get("client_id") != "app-id" || q.Get("redirect_uri") != "https://g2f.test/oauth/callback" ||
 		q.Get("scope") != "sheets email" || q.Get("access_type") != "offline" || q.Get("code_challenge_method") != "S256" {
 		t.Fatalf("authorize URL %s", raw)
 	}

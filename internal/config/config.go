@@ -49,7 +49,7 @@ type Config struct {
 type AuthConfig struct {
 	Mode AuthMode
 
-	// Issuer is the expected "iss" claim, e.g. http://localhost:8081/realms/g8g.
+	// Issuer is the expected "iss" claim, e.g. http://localhost:8081/realms/g2f.
 	Issuer string
 	// JWKSURL optionally overrides where signing keys are fetched from. Useful in
 	// docker-compose where the browser and the backend reach Keycloak via different hosts.
@@ -69,62 +69,62 @@ type AuthConfig struct {
 
 func Load() (*Config, error) {
 	c := &Config{
-		Listen:        env("G8G_LISTEN", ":8080"),
-		DatabaseURL:   env("G8G_DATABASE_URL", "postgres://g8g:g8g@localhost:5432/g8g?sslmode=disable"),
-		PublicURL:     strings.TrimRight(env("G8G_PUBLIC_URL", "http://localhost:8080"), "/"),
-		StaticDir:     env("G8G_STATIC_DIR", "./web/dist"),
-		ModulesDir:    env("G8G_MODULES_DIR", "./modules"),
-		SecretKey:     env("G8G_SECRET_KEY", ""),
-		SecretKeysOld: splitList(env("G8G_SECRET_KEYS_OLD", "")),
+		Listen:        env("G2F_LISTEN", ":8080"),
+		DatabaseURL:   env("G2F_DATABASE_URL", "postgres://g2f:g2f@localhost:5432/g2f?sslmode=disable"),
+		PublicURL:     strings.TrimRight(env("G2F_PUBLIC_URL", "http://localhost:8080"), "/"),
+		StaticDir:     env("G2F_STATIC_DIR", "./web/dist"),
+		ModulesDir:    env("G2F_MODULES_DIR", "./modules"),
+		SecretKey:     env("G2F_SECRET_KEY", ""),
+		SecretKeysOld: splitList(env("G2F_SECRET_KEYS_OLD", "")),
 		Auth: AuthConfig{
-			Mode:            AuthMode(env("G8G_AUTH_MODE", string(AuthOIDC))),
-			Issuer:          strings.TrimRight(env("G8G_OIDC_ISSUER", ""), "/"),
-			JWKSURL:         env("G8G_OIDC_JWKS_URL", ""),
-			ClientID:        env("G8G_OIDC_CLIENT_ID", "g8g"),
-			GroupsClaim:     env("G8G_OIDC_GROUPS_CLAIM", "groups"),
-			OrgClaim:        env("G8G_OIDC_ORG_CLAIM", "org"),
-			AdminRole:       env("G8G_OIDC_ADMIN_ROLE", "g8g-admin"),
-			PluginAdminRole: env("G8G_OIDC_PLUGIN_ADMIN_ROLE", "g8g-plugin-admin"),
-			DefaultOrg:      env("G8G_DEFAULT_ORG", "default"),
-			DevUser:         env("G8G_DEV_USER", "dev"),
-			DevGroups:       splitList(env("G8G_DEV_GROUPS", "/engineering")),
+			Mode:            AuthMode(env("G2F_AUTH_MODE", string(AuthOIDC))),
+			Issuer:          strings.TrimRight(env("G2F_OIDC_ISSUER", ""), "/"),
+			JWKSURL:         env("G2F_OIDC_JWKS_URL", ""),
+			ClientID:        env("G2F_OIDC_CLIENT_ID", "g2f"),
+			GroupsClaim:     env("G2F_OIDC_GROUPS_CLAIM", "groups"),
+			OrgClaim:        env("G2F_OIDC_ORG_CLAIM", "org"),
+			AdminRole:       env("G2F_OIDC_ADMIN_ROLE", "g2f-admin"),
+			PluginAdminRole: env("G2F_OIDC_PLUGIN_ADMIN_ROLE", "g2f-plugin-admin"),
+			DefaultOrg:      env("G2F_DEFAULT_ORG", "default"),
+			DevUser:         env("G2F_DEV_USER", "dev"),
+			DevGroups:       splitList(env("G2F_DEV_GROUPS", "/engineering")),
 		},
 	}
 
 	var err error
-	if c.Workers, err = envInt("G8G_WORKERS", 16); err != nil {
+	if c.Workers, err = envInt("G2F_WORKERS", 16); err != nil {
 		return nil, err
 	}
-	if c.MaxStoredItems, err = envInt("G8G_MAX_STORED_ITEMS", 100); err != nil {
+	if c.MaxStoredItems, err = envInt("G2F_MAX_STORED_ITEMS", 100); err != nil {
 		return nil, err
 	}
-	if c.ExecutionTimeout, err = time.ParseDuration(env("G8G_EXECUTION_TIMEOUT", "5m")); err != nil {
-		return nil, fmt.Errorf("G8G_EXECUTION_TIMEOUT: %w", err)
+	if c.ExecutionTimeout, err = time.ParseDuration(env("G2F_EXECUTION_TIMEOUT", "5m")); err != nil {
+		return nil, fmt.Errorf("G2F_EXECUTION_TIMEOUT: %w", err)
 	}
 
-	if c.ScheduleCatchUp, err = time.ParseDuration(env("G8G_SCHEDULE_CATCHUP", "1h")); err != nil {
-		return nil, fmt.Errorf("G8G_SCHEDULE_CATCHUP: %w", err)
+	if c.ScheduleCatchUp, err = time.ParseDuration(env("G2F_SCHEDULE_CATCHUP", "1h")); err != nil {
+		return nil, fmt.Errorf("G2F_SCHEDULE_CATCHUP: %w", err)
 	}
-	if c.WebhookMaxWait, err = time.ParseDuration(env("G8G_WEBHOOK_MAX_WAIT", "60s")); err != nil {
-		return nil, fmt.Errorf("G8G_WEBHOOK_MAX_WAIT: %w", err)
+	if c.WebhookMaxWait, err = time.ParseDuration(env("G2F_WEBHOOK_MAX_WAIT", "60s")); err != nil {
+		return nil, fmt.Errorf("G2F_WEBHOOK_MAX_WAIT: %w", err)
 	}
 
-	if c.PluginSync, err = time.ParseDuration(env("G8G_PLUGIN_SYNC", "30s")); err != nil {
-		return nil, fmt.Errorf("G8G_PLUGIN_SYNC: %w", err)
+	if c.PluginSync, err = time.ParseDuration(env("G2F_PLUGIN_SYNC", "30s")); err != nil {
+		return nil, fmt.Errorf("G2F_PLUGIN_SYNC: %w", err)
 	}
-	c.DisableCodeNode = env("G8G_DISABLE_CODE_NODE", "false") == "true"
+	c.DisableCodeNode = env("G2F_DISABLE_CODE_NODE", "false") == "true"
 	if c.SecretKey == "" {
-		return nil, fmt.Errorf("G8G_SECRET_KEY is required (generate one with: openssl rand -base64 32)")
+		return nil, fmt.Errorf("G2F_SECRET_KEY is required (generate one with: openssl rand -base64 32)")
 	}
 
 	switch c.Auth.Mode {
 	case AuthOIDC:
 		if c.Auth.Issuer == "" {
-			return nil, fmt.Errorf("G8G_OIDC_ISSUER is required when G8G_AUTH_MODE=oidc")
+			return nil, fmt.Errorf("G2F_OIDC_ISSUER is required when G2F_AUTH_MODE=oidc")
 		}
 	case AuthNone:
 	default:
-		return nil, fmt.Errorf("G8G_AUTH_MODE must be 'oidc' or 'none', got %q", c.Auth.Mode)
+		return nil, fmt.Errorf("G2F_AUTH_MODE must be 'oidc' or 'none', got %q", c.Auth.Mode)
 	}
 	return c, nil
 }

@@ -1,4 +1,4 @@
-// Telegram plugin for g8g, written in Go and compiled to WebAssembly.
+// Telegram plugin for glue2flow, written in Go and compiled to WebAssembly.
 //
 // Build with the standard Go toolchain (1.24+):
 //
@@ -18,7 +18,7 @@ import (
 	"github.com/extism/go-pdk"
 )
 
-// request is the JSON the g8g host sends to `execute` (see internal/plugin/wasm.go).
+// request is the JSON the glue2flow host sends to `execute` (see internal/plugin/wasm.go).
 type request struct {
 	Node   string         `json:"node"`
 	Items  []item         `json:"items"`

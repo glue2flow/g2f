@@ -5,14 +5,14 @@ DEV_SECRET_KEY ?= ZGV2LWtleS1kZXYta2V5LWRldi1rZXktZGV2LWtleS0=
 
 # Local development without Keycloak (auth disabled, user "dev" in org "default").
 dev-server:
-	G8G_AUTH_MODE=none G8G_LISTEN=:8080 G8G_SECRET_KEY=$(DEV_SECRET_KEY) go run ./cmd/g8g
+	G2F_AUTH_MODE=none G2F_LISTEN=:8080 G2F_SECRET_KEY=$(DEV_SECRET_KEY) go run ./cmd/g2f
 
 dev-web:
 	cd web && npm install && npm run dev
 
 dev-db:
-	docker run -d --name g8g-postgres -p 5432:5432 \
-		-e POSTGRES_USER=g8g -e POSTGRES_PASSWORD=g8g -e POSTGRES_DB=g8g postgres:16-alpine
+	docker run -d --name g2f-postgres -p 5432:5432 \
+		-e POSTGRES_USER=g2f -e POSTGRES_PASSWORD=g2f -e POSTGRES_DB=g2f postgres:16-alpine
 
 test:
 	go vet ./...
@@ -23,10 +23,10 @@ web:
 	cd web && npm ci && npm run build
 
 build: web
-	CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o bin/g8g ./cmd/g8g
+	CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o bin/g2f ./cmd/g2f
 
 image:
-	docker build -t g8g:latest .
+	docker build -t g2f:latest .
 
 up:
 	docker compose up --build -d

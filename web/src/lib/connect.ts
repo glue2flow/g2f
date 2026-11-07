@@ -6,14 +6,14 @@ import { api } from "../api";
  */
 export async function connectAccount(module: string, name?: string): Promise<string> {
   const { url } = await api.authorizeConnection(module, name);
-  const popup = window.open(url, "g8g-oauth", "width=560,height=720");
+  const popup = window.open(url, "g2f-oauth", "width=560,height=720");
   if (!popup) {
     window.location.href = url; // popup blocked: full-page redirect
     return new Promise(() => {});
   }
   return new Promise((resolve, reject) => {
     const onMessage = (e: MessageEvent) => {
-      if (e.origin !== window.location.origin || e.data?.type !== "g8g-oauth") return;
+      if (e.origin !== window.location.origin || e.data?.type !== "g2f-oauth") return;
       cleanup();
       if (e.data.ok) resolve(e.data.connectionId);
       else reject(new Error(e.data.error || "Connection failed"));

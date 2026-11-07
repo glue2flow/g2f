@@ -1,6 +1,6 @@
 # Telegram – sample WebAssembly plugin
 
-A g8g plugin with two nodes, **Send Message** and **Get Bot Info**, implemented twice:
+A glue2flow plugin with two nodes, **Send Message** and **Get Bot Info**, implemented twice:
 in [Go](go/main.go) and in [JavaScript](js/index.js). Both compile to the same kind of
 WebAssembly module and work with the same [`plugin.yaml`](plugin.yaml).
 
@@ -15,7 +15,7 @@ telegram/
 
 ## How a WASM plugin works
 
-g8g runs plugins with [Extism](https://extism.org) on [wazero](https://wazero.io), a
+glue2flow runs plugins with [Extism](https://extism.org) on [wazero](https://wazero.io), a
 pure-Go WebAssembly runtime (no CGO, no external runtime). Each node run gets a fresh,
 sandboxed instance:
 
@@ -23,7 +23,7 @@ sandboxed instance:
 - outbound HTTP only to the hosts listed in `allowedHosts` (and only via the PDK's HTTP API)
 - memory limit (`memoryMB`) and time limit (`timeout`)
 
-The plugin exports one function, `execute`. g8g calls it with JSON on the input:
+The plugin exports one function, `execute`. glue2flow calls it with JSON on the input:
 
 ```json
 {
@@ -46,7 +46,7 @@ The plugin exports one function, `execute`. g8g calls it with JSON on the input:
 
 The plugin writes `{"items": [...]}` (or `{"outputs": {"main": [...], "other": [...]}}`
 for several outputs) to the output. Errors go through the PDK's error function
-(`pdk.SetError` / `throw`) or `{"error": "message"}`. g8g strips URL paths from plugin
+(`pdk.SetError` / `throw`) or `{"error": "message"}`. glue2flow strips URL paths from plugin
 errors and scrubs known secret values from all error messages before storing them.
 
 ## Secrets and configuration
@@ -67,7 +67,7 @@ The base URL is config as well, since it only matters for building that URL.
 Vars are for values editors should be able to use. The *Chat ID* field defaults to
 `{{ vars.defaultChatId }}`, so an organization can set one alert chat for all nodes.
 
-Secrets are encrypted at rest (AES-256-GCM, key `G8G_SECRET_KEY`) and write-only: the API
+Secrets are encrypted at rest (AES-256-GCM, key `G2F_SECRET_KEY`) and write-only: the API
 never returns them. The editor shows "stored encrypted" with *Replace* / *Clear*. The plugin
 receives the decrypted values only while it runs. This sample uses the node's token when it
 is set and falls back to the organization's default bot.
@@ -113,7 +113,7 @@ make bundle      # -> telegram.zip containing plugin.yaml and plugin.wasm
 
 ## Install
 
-As a user with the `g8g-plugin-admin` role (`alice` in the demo realm), choose one:
+As a user with the `g2f-plugin-admin` role (`alice` in the demo realm), choose one:
 
 - **UI:** *Plugins* → *Import plugin* → choose `telegram.zip`.
 - **API:**
@@ -122,15 +122,15 @@ As a user with the `g8g-plugin-admin` role (`alice` in the demo realm), choose o
     -H "Authorization: Bearer $TOKEN" -F file=@telegram.zip
   ```
 - **Directory:** copy the folder (with a built `plugin.wasm`) or the zip into
-  `G8G_MODULES_DIR`. Plugins installed this way cannot be changed through the UI.
+  `G2F_MODULES_DIR`. Plugins installed this way cannot be changed through the UI.
 
-Imported plugins are stored in PostgreSQL and loaded by every g8g replica
-(`G8G_PLUGIN_SYNC`). Importing the same module again replaces it (upgrade).
+Imported plugins are stored in PostgreSQL and loaded by every glue2flow replica
+(`G2F_PLUGIN_SYNC`). Importing the same module again replaces it (upgrade).
 
 Then, as an organization admin, open *Plugins* → *Telegram* → *Settings* and set a
 default bot token (and optionally a default chat ID). Or give each *Send Message* node its own token.
 
-## Test a plugin without g8g
+## Test a plugin without glue2flow
 
 The [Extism CLI](https://github.com/extism/cli) can call the function directly:
 
@@ -140,5 +140,5 @@ extism call plugin.wasm execute --wasi --allow-host api.telegram.org --input '{
 }'
 ```
 
-g8g's own test suite builds the Go version of this plugin and runs it against a fake
+glue2flow's own test suite builds the Go version of this plugin and runs it against a fake
 Telegram API (`internal/plugin/plugin_test.go`).

@@ -6,7 +6,7 @@ interface Props {
   onAdd: (def: NodeDef) => void;
 }
 
-const STORAGE_KEY = "g8g.palette.collapsed";
+const STORAGE_KEY = "g2f.palette.collapsed";
 
 function loadCollapsed(): Set<string> {
   try {
@@ -214,7 +214,7 @@ export function NodePalette({ defs, onAdd }: Props) {
                         role="treeitem"
                         draggable
                         title={d.description}
-                        onDragStart={(e) => e.dataTransfer.setData("application/g8g-node", d.type)}
+                        onDragStart={(e) => e.dataTransfer.setData("application/g2f-node", d.type)}
                         onDoubleClick={() => onAdd(d)}
                         onMouseEnter={() => searching && setActive(i)}
                       >

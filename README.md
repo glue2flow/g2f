@@ -1,6 +1,6 @@
-# g8g
+# glue2flow
 
-An open-source, self-hosted workflow automation tool in the spirit of n8n / Power Automate:
+**glue2flow** (short: **g2f**) is an open-source, self-hosted workflow automation tool in the spirit of n8n / Power Automate:
 a visual editor with boxes and arrows, a small Go engine, Keycloak authentication, and
 workflows that can be private, shared with groups, or available to the whole organization.
 
@@ -19,7 +19,7 @@ docker compose up --build
 
 | URL | What | Login |
 | --- | --- | --- |
-| http://localhost:8080 | g8g editor | `alice`/`alice` (org admin + plugin admin, /engineering/backend), `bob`/`bob` (/engineering/frontend), `carol`/`carol` (/sales), `dave`/`dave` (other org) |
+| http://localhost:8080 | glue2flow editor | `alice`/`alice` (org admin + plugin admin, /engineering/backend), `bob`/`bob` (/engineering/frontend), `carol`/`carol` (/sales), `dave`/`dave` (other org) |
 | http://localhost:8081 | Keycloak admin | `admin`/`admin` |
 
 The compose file is a demo: default passwords, Keycloak in dev mode, plain HTTP.
@@ -28,7 +28,7 @@ The compose file is a demo: default passwords, Keycloak in dev mode, plain HTTP.
 
 ```bash
 make dev-db       # PostgreSQL in Docker on :5432
-make dev-server   # Go API on :8080 with auth disabled (G8G_AUTH_MODE=none)
+make dev-server   # Go API on :8080 with auth disabled (G2F_AUTH_MODE=none)
 make dev-web      # Vite dev server on :5173, proxies /api and /webhook to :8080
 make test         # go vet, go test, TypeScript typecheck
 make plugin-sample   # build examples/plugins/telegram/telegram.zip
@@ -37,7 +37,7 @@ make plugin-sample   # build examples/plugins/telegram/telegram.zip
 ## Architecture
 
 ```
-cmd/g8g/             entrypoint (server + `g8g healthcheck`)
+cmd/g2f/             entrypoint (server + `g2f healthcheck`)
 internal/config/     environment configuration
 internal/auth/       OIDC token validation, User (groups, org, admin role)
 internal/workflow/   workflow model, graph validation, sharing / roles
@@ -63,7 +63,7 @@ items arriving on its incoming arrows. Nodes with several outputs (e.g. `If` →
 route items to a specific handle; a node that receives no items is **skipped**.
 
 Each execution stores per-node status, duration and output (capped at
-`G8G_MAX_STORED_ITEMS` items per output), which the editor shows below the canvas.
+`G2F_MAX_STORED_ITEMS` items per output), which the editor shows below the canvas.
 
 ### Built-in nodes
 
@@ -91,7 +91,7 @@ after a timeout (default 10 s).
 - *Once per item*: use `item` and `index`, return an object, or `null` to drop the item.
 
 `nodes`, `trigger`, `workflow`, `execution` and `console.log()` are available. Administrators
-can turn the node off with `G8G_DISABLE_CODE_NODE=true`. Memory use of scripts is not limited.
+can turn the node off with `G2F_DISABLE_CODE_NODE=true`. Memory use of scripts is not limited.
 
 ```js
 return items.filter(i => i.total > 100).map(i => ({ id: i.id, vip: true }));
@@ -106,7 +106,7 @@ minutes, days or weeks survive restarts and deployments. Three modes:
   the request (`query`, `body`, `headers`) becomes the Wait node's output.
 
 Unanswered webhook waits continue on the `timeout` output after the configured hours. Resume
-URLs are HMAC-signed with a key derived from `G8G_SECRET_KEY`. Waiting runs show a *Cancel*
+URLs are HMAC-signed with a key derived from `G2F_SECRET_KEY`. Waiting runs show a *Cancel*
 button, and the execution timeout only counts active time. Every replica polls for due waits;
 each resume is claimed atomically, so it happens exactly once.
 
@@ -121,7 +121,7 @@ continues with that workflow's last output. Modes:
 - *per item*;
 - *per batch of N*, with an optional pause between runs.
 
-The per-item and batch modes are how g8g loops: the engine runs acyclic graphs, and a loop body
+The per-item and batch modes are how glue2flow loops: the engine runs acyclic graphs, and a loop body
 becomes a reusable sub-workflow. Each call is its own execution (`triggered by workflow: …`).
 Calls stay within the organization and nest at most 5 levels deep. Saving requires the
 `runner` role on the called workflow. Wait nodes are not allowed in called workflows.
@@ -166,26 +166,26 @@ schedule triggers then use their test payload, so a flow can be tested before ac
   With several replicas, every replica runs the scheduler and exactly one executes each firing.
   A one-time schedule never runs twice, even across restarts.
 - Missed recurring runs (server down) are skipped. A one-time run missed by less than
-  `G8G_SCHEDULE_CATCHUP` (default 1h) runs as soon as the server is back.
+  `G2F_SCHEDULE_CATCHUP` (default 1h) runs as soon as the server is back.
 
 **Webhook**
 - Method: `POST` (default), `GET`, `PUT`, `PATCH`, `DELETE` or `ANY`.
 - Authentication:
   - `none`
-  - `token`: shared secret in a header (default `X-G8G-Token`, `Bearer ` prefix allowed)
+  - `token`: shared secret in a header (default `X-G2F-Token`, `Bearer ` prefix allowed)
   - `hmac`: HMAC-SHA256 signature of the raw body in a header (default `X-Signature-256`,
     value `sha256=<hex>`). Set the header to `X-Hub-Signature-256` for GitHub webhooks.
 - The secret header and cookies are removed before the request becomes workflow data.
 - Response:
   - `immediately`: `202 {"executionId": ...}`
-  - `lastNode`: waits up to `G8G_WEBHOOK_MAX_WAIT` and returns the output of the last node
+  - `lastNode`: waits up to `G2F_WEBHOOK_MAX_WAIT` and returns the output of the last node
     (one item as an object, otherwise an array). Errors return HTTP 500.
 - JSON and form bodies are parsed; anything else arrives as a string. Limit 5 MiB.
 - The editor shows the URL and a ready-to-use `curl` command for the selected webhook node.
 
 ```bash
 curl -X POST http://localhost:8080/webhook/<workflow-id>/<node-id> \
-  -H 'X-G8G-Token: s3cret' -H 'Content-Type: application/json' -d '{"name":"Ada"}'
+  -H 'X-G2F-Token: s3cret' -H 'Content-Type: application/json' -d '{"name":"Ada"}'
 ```
 
 ### Expressions
@@ -218,21 +218,21 @@ Each workflow has an **owner**, an **organization** and a **scope**:
 | `org` | everyone in the organization with the default `orgRole`; group shares can grant more |
 
 Roles: `viewer` (see workflow and runs) < `runner` (+ run manually) < `editor` (+ edit, activate)
-< `owner` (+ delete, change sharing). Users with the realm role `g8g-admin` are owners of every
+< `owner` (+ delete, change sharing). Users with the realm role `g2f-admin` are owners of every
 workflow in their organization. Workflows are never visible across organizations.
 Secret parameters are never returned by the API, whatever the role (see [Secrets](#secrets)).
 
 ### Keycloak setup
 
-g8g reads these claims from the access token (claim names are configurable):
+glue2flow reads these claims from the access token (claim names are configurable):
 
 | Claim | Source in Keycloak | Env var |
 | --- | --- | --- |
-| `groups` | *Group Membership* mapper with **full group path** on | `G8G_OIDC_GROUPS_CLAIM` |
-| `org` | *User Attribute* mapper for attribute `org`, or the `organization` claim of Keycloak Organizations (both formats supported) | `G8G_OIDC_ORG_CLAIM` |
-| `realm_access.roles` | realm role `g8g-admin` | `G8G_OIDC_ADMIN_ROLE` |
+| `groups` | *Group Membership* mapper with **full group path** on | `G2F_OIDC_GROUPS_CLAIM` |
+| `org` | *User Attribute* mapper for attribute `org`, or the `organization` claim of Keycloak Organizations (both formats supported) | `G2F_OIDC_ORG_CLAIM` |
+| `realm_access.roles` | realm role `g2f-admin` | `G2F_OIDC_ADMIN_ROLE` |
 
-`deploy/keycloak/realm-g8g.json` has a complete example: a public client `g8g` with PKCE,
+`deploy/keycloak/realm-g2f.json` has a complete example: a public client `g2f` with PKCE,
 both mappers, groups, and demo users.
 
 ## Secrets
@@ -258,11 +258,11 @@ Secret values never stay in the workflow JSON:
   (URL, `Authorization` header, `X-…` headers, request body). Vars cannot be secrets.
   Secret config entries are write-only.
 
-All of these are encrypted with AES-256-GCM using `G8G_SECRET_KEY`. Each ciphertext is bound to its
+All of these are encrypted with AES-256-GCM using `G2F_SECRET_KEY`. Each ciphertext is bound to its
 location (workflow/node/parameter, or org/module/key), so it cannot be copied into another
 row. Error messages are scrubbed of known secret values before they are stored.
 
-Key rotation: set a new `G8G_SECRET_KEY` and put the old one into `G8G_SECRET_KEYS_OLD`.
+Key rotation: set a new `G2F_SECRET_KEY` and put the old one into `G2F_SECRET_KEYS_OLD`.
 Old values stay readable; values are re-encrypted with the new key when they are saved again.
 
 ```bash
@@ -276,10 +276,10 @@ HubSpot. The host runs the whole OAuth2 flow and stores the tokens, and plugins 
 valid access token while a node runs.
 
 1. **Admin, once per organization:** register an OAuth app at the provider with the redirect
-   URI `<G8G_PUBLIC_URL>/oauth/callback` (shown in the plugin's *Settings* dialog), then enter
+   URI `<G2F_PUBLIC_URL>/oauth/callback` (shown in the plugin's *Settings* dialog), then enter
    the client ID and secret in *Plugins → Settings*. They are plugin `config`, encrypted.
 2. **User:** *Connections → Connect …*, or *＋ Connect* next to a node's **Account** field. A
-   popup opens the provider's consent page and returns to g8g.
+   popup opens the provider's consent page and returns to glue2flow.
 3. **Workflows:** every node of an OAuth2 plugin has an **Account** field. Workflows store only
    the connection id.
 
@@ -322,10 +322,10 @@ A plugin (module) is a set of nodes described by a manifest. There are two runti
 
 Install plugins in one of two ways:
 
-- **At startup:** put them into `G8G_MODULES_DIR`: `*.yaml`, `*.zip` bundles, or folders with
+- **At startup:** put them into `G2F_MODULES_DIR`: `*.yaml`, `*.zip` bundles, or folders with
   `plugin.yaml` (+ `.wasm`). These are read-only in the UI.
 - **At runtime:** import them on the *Plugins* page or with `POST /api/plugins` (multipart
-  field `file`), as a user with the `g8g-plugin-admin` realm role. Imported plugins are
+  field `file`), as a user with the `g2f-plugin-admin` realm role. Imported plugins are
   stored in PostgreSQL and loaded by all replicas. Re-importing a module upgrades it, and
   `DELETE /api/plugins/{module}` uninstalls it.
 
@@ -406,29 +406,29 @@ in `RegisterBuiltins`.
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `G8G_LISTEN` | `:8080` | listen address |
-| `G8G_DATABASE_URL` | `postgres://g8g:g8g@localhost:5432/g8g?sslmode=disable` | PostgreSQL URL |
-| `G8G_PUBLIC_URL` | `http://localhost:8080` | external URL (used for webhook URLs) |
-| `G8G_SECRET_KEY` | – (required) | base64 32-byte key encrypting secrets |
-| `G8G_SECRET_KEYS_OLD` | – | previous keys (comma separated), for rotation |
-| `G8G_AUTH_MODE` | `oidc` | `oidc` or `none` (development only) |
-| `G8G_OIDC_ISSUER` | – | expected token issuer, e.g. `https://sso.example.com/realms/g8g` |
-| `G8G_OIDC_JWKS_URL` | `<issuer>/protocol/openid-connect/certs` | where to fetch signing keys |
-| `G8G_OIDC_CLIENT_ID` | `g8g` | client id (checked against `azp`/`aud`) |
-| `G8G_OIDC_GROUPS_CLAIM` | `groups` | |
-| `G8G_OIDC_ORG_CLAIM` | `org` | |
-| `G8G_OIDC_ADMIN_ROLE` | `g8g-admin` | organization admin |
-| `G8G_OIDC_PLUGIN_ADMIN_ROLE` | `g8g-plugin-admin` | may import plugins (installation-wide) |
-| `G8G_DEFAULT_ORG` | `default` | org for users without an org claim |
-| `G8G_WORKERS` | `16` | max concurrent executions |
-| `G8G_EXECUTION_TIMEOUT` | `5m` | per execution (active time; waiting does not count) |
-| `G8G_MAX_STORED_ITEMS` | `100` | items stored per node output |
-| `G8G_SCHEDULE_CATCHUP` | `1h` | how late a missed one-time schedule may still run |
-| `G8G_WEBHOOK_MAX_WAIT` | `60s` | max wait for webhooks that respond with the result |
-| `G8G_STATIC_DIR` | `./web/dist` | built editor |
-| `G8G_MODULES_DIR` | `./modules` | plugins loaded at startup |
-| `G8G_PLUGIN_SYNC` | `30s` | how often imported plugins are reloaded from the database |
-| `G8G_DISABLE_CODE_NODE` | `false` | turn off the JavaScript Code node |
+| `G2F_LISTEN` | `:8080` | listen address |
+| `G2F_DATABASE_URL` | `postgres://g2f:g2f@localhost:5432/g2f?sslmode=disable` | PostgreSQL URL |
+| `G2F_PUBLIC_URL` | `http://localhost:8080` | external URL (used for webhook URLs) |
+| `G2F_SECRET_KEY` | – (required) | base64 32-byte key encrypting secrets |
+| `G2F_SECRET_KEYS_OLD` | – | previous keys (comma separated), for rotation |
+| `G2F_AUTH_MODE` | `oidc` | `oidc` or `none` (development only) |
+| `G2F_OIDC_ISSUER` | – | expected token issuer, e.g. `https://sso.example.com/realms/g2f` |
+| `G2F_OIDC_JWKS_URL` | `<issuer>/protocol/openid-connect/certs` | where to fetch signing keys |
+| `G2F_OIDC_CLIENT_ID` | `g2f` | client id (checked against `azp`/`aud`) |
+| `G2F_OIDC_GROUPS_CLAIM` | `groups` | |
+| `G2F_OIDC_ORG_CLAIM` | `org` | |
+| `G2F_OIDC_ADMIN_ROLE` | `g2f-admin` | organization admin |
+| `G2F_OIDC_PLUGIN_ADMIN_ROLE` | `g2f-plugin-admin` | may import plugins (installation-wide) |
+| `G2F_DEFAULT_ORG` | `default` | org for users without an org claim |
+| `G2F_WORKERS` | `16` | max concurrent executions |
+| `G2F_EXECUTION_TIMEOUT` | `5m` | per execution (active time; waiting does not count) |
+| `G2F_MAX_STORED_ITEMS` | `100` | items stored per node output |
+| `G2F_SCHEDULE_CATCHUP` | `1h` | how late a missed one-time schedule may still run |
+| `G2F_WEBHOOK_MAX_WAIT` | `60s` | max wait for webhooks that respond with the result |
+| `G2F_STATIC_DIR` | `./web/dist` | built editor |
+| `G2F_MODULES_DIR` | `./modules` | plugins loaded at startup |
+| `G2F_PLUGIN_SYNC` | `30s` | how often imported plugins are reloaded from the database |
+| `G2F_DISABLE_CODE_NODE` | `false` | turn off the JavaScript Code node |
 
 ## Roadmap
 

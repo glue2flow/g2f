@@ -28,7 +28,7 @@ const sampleDir = "../../examples/plugins/telegram"
 
 // buildSample compiles the Go Telegram sample to WebAssembly once per test run.
 var buildSample = sync.OnceValues(func() ([]byte, error) {
-	out := filepath.Join(os.TempDir(), "g8g-telegram-test.wasm")
+	out := filepath.Join(os.TempDir(), "g2f-telegram-test.wasm")
 	cmd := exec.Command("go", "build", "-buildmode=c-shared", "-o", out, ".")
 	cmd.Dir = filepath.Join(sampleDir, "go")
 	cmd.Env = append(os.Environ(), "GOOS=wasip1", "GOARCH=wasm")

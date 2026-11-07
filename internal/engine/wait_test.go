@@ -124,7 +124,7 @@ func waitEngine(t *testing.T, st *waitStore) *Engine {
 	}
 	return New(reg, st, discardLog(), Options{
 		Workflows: st,
-		ResumeURL: func(id string) string { return "https://g8g.test/webhook-resume/" + id + "/sig" },
+		ResumeURL: func(id string) string { return "https://g2f.test/webhook-resume/" + id + "/sig" },
 	})
 }
 
@@ -179,7 +179,7 @@ func TestWaitWebhookResume(t *testing.T) {
 		t.Fatalf("wait not recorded: %+v", exec)
 	}
 	link := stepOf(exec, "ask").Output["main"][0]["link"]
-	if link != "https://g8g.test/webhook-resume/"+exec.ID+"/sig" {
+	if link != "https://g2f.test/webhook-resume/"+exec.ID+"/sig" {
 		t.Fatalf("resume URL not available before the Wait node: %v", link)
 	}
 	if stepOf(exec, "w").Status != "waiting" {

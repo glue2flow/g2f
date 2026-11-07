@@ -126,7 +126,7 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			jsonError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		w.Header().Set("X-G8G-Execution-Id", exec.ID)
+		w.Header().Set("X-G2F-Execution-Id", exec.ID)
 		writeJSON(w, http.StatusAccepted, map[string]string{"executionId": exec.ID, "status": string(exec.Status)})
 		return
 	}
@@ -139,7 +139,7 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	w.Header().Set("X-G8G-Execution-Id", res.Execution.ID)
+	w.Header().Set("X-G2F-Execution-Id", res.Execution.ID)
 	if res.Execution.Status == store.StatusWaiting {
 		writeJSON(w, http.StatusAccepted, map[string]string{"executionId": res.Execution.ID, "status": "waiting"})
 		return

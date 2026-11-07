@@ -25,7 +25,7 @@ type ResumeSigner struct {
 
 // NewResumeSigner derives its key from the server secret key.
 func NewResumeSigner(secretKey, publicURL string) *ResumeSigner {
-	sum := sha256.Sum256([]byte("g8g-resume-url\x00" + secretKey))
+	sum := sha256.Sum256([]byte("g2f-resume-url\x00" + secretKey))
 	return &ResumeSigner{key: sum[:], publicURL: strings.TrimRight(publicURL, "/")}
 }
 

@@ -29,7 +29,7 @@ func New(ctx context.Context, cfg config.AuthConfig) (*Authenticator, error) {
 	jwks := cfg.JWKSURL
 	if jwks == "" {
 		// Keycloak's well-known location; avoids a discovery round trip at startup
-		// so g8g can boot before Keycloak is reachable.
+		// so glue2flow can boot before Keycloak is reachable.
 		jwks = cfg.Issuer + "/protocol/openid-connect/certs"
 	}
 	keySet := oidc.NewRemoteKeySet(ctx, jwks)
@@ -45,7 +45,7 @@ func (a *Authenticator) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		u, err := a.Authenticate(r)
 		if err != nil {
-			w.Header().Set("WWW-Authenticate", `Bearer realm="g8g"`)
+			w.Header().Set("WWW-Authenticate", `Bearer realm="g2f"`)
 			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 			return
 		}

@@ -1,4 +1,4 @@
-# Sample WebAssembly plugin for g8g. Build plugin.wasm from ./go or ./js, then
+# Sample WebAssembly plugin for glue2flow. Build plugin.wasm from ./go or ./js, then
 # zip plugin.yaml + plugin.wasm and import the zip (see README.md).
 module: telegram
 name: Telegram

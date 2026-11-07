@@ -1,11 +1,11 @@
-# Google Sheets via OAuth2. Users connect their own Google account; g8g stores
+# Google Sheets via OAuth2. Users connect their own Google account; glue2flow stores
 # and refreshes the tokens and adds them to requests to sheets.googleapis.com.
 #
 # Setup (once per organization, by an admin):
 #   1. Google Cloud console -> APIs & Services: enable the "Google Sheets API".
 #   2. Credentials -> Create OAuth client ID -> "Web application".
-#      Authorized redirect URI: <G8G_PUBLIC_URL>/oauth/callback
-#   3. g8g -> Plugins -> Google Sheets -> Settings: enter client ID and secret.
+#      Authorized redirect URI: <G2F_PUBLIC_URL>/oauth/callback
+#   3. glue2flow -> Plugins -> Google Sheets -> Settings: enter client ID and secret.
 module: google-sheets
 name: Google Sheets
 version: 1.0.0

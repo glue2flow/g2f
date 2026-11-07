@@ -290,7 +290,7 @@ func TestWebhook(t *testing.T) {
 		{"wrong method", webhookWF(true, nil), "GET", nil, 405},
 		{"no auth, async", webhookWF(true, nil), "POST", nil, 202},
 		{"token missing", webhookWF(true, map[string]any{"auth": "token", "secret": "s3cret"}), "POST", nil, 401},
-		{"token ok", webhookWF(true, map[string]any{"auth": "token", "secret": "s3cret"}), "POST", map[string]string{"X-G8G-Token": "s3cret"}, 202},
+		{"token ok", webhookWF(true, map[string]any{"auth": "token", "secret": "s3cret"}), "POST", map[string]string{"X-G2F-Token": "s3cret"}, 202},
 		{"hmac bad", webhookWF(true, map[string]any{"auth": "hmac", "secret": "k3y"}), "POST", map[string]string{"X-Signature-256": "sha256=00"}, 401},
 		{"hmac ok", webhookWF(true, map[string]any{"auth": "hmac", "secret": "k3y"}), "POST", map[string]string{"X-Signature-256": sig}, 202},
 		{"any method", webhookWF(true, map[string]any{"method": "ANY"}), "PUT", nil, 202},
@@ -307,7 +307,7 @@ func TestWebhook(t *testing.T) {
 
 func TestWebhookRespondLastNode(t *testing.T) {
 	wf := webhookWF(true, map[string]any{"respond": "lastNode", "auth": "token", "secret": "s"})
-	rec := serveWebhook(t, wf, "POST", "/webhook/wf/hook?x=42", `{"name":"Ada"}`, map[string]string{"X-G8G-Token": "s"})
+	rec := serveWebhook(t, wf, "POST", "/webhook/wf/hook?x=42", `{"name":"Ada"}`, map[string]string{"X-G2F-Token": "s"})
 	if rec.Code != 200 {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body)
 	}
@@ -318,20 +318,20 @@ func TestWebhookRespondLastNode(t *testing.T) {
 	if got["hello"] != "Ada" || got["q"] != "42" {
 		t.Fatalf("unexpected response %v", got)
 	}
-	if rec.Header().Get("X-G8G-Execution-Id") == "" {
+	if rec.Header().Get("X-G2F-Execution-Id") == "" {
 		t.Fatal("missing execution id header")
 	}
 }
 
 func TestWebhookStripsSecretHeader(t *testing.T) {
-	cfg := &nodes.Webhook{Auth: "token", Header: "X-G8G-Token"}
+	cfg := &nodes.Webhook{Auth: "token", Header: "X-G2F-Token"}
 	r := httptest.NewRequest(http.MethodPost, "/webhook/a/b", nil)
-	r.Header.Set("X-G8G-Token", "secret")
+	r.Header.Set("X-G2F-Token", "secret")
 	r.Header.Set("Cookie", "session=1")
 	r.Header.Set("X-Other", "ok")
 	item := requestItem(r, nil, cfg)
 	h := item["headers"].(map[string]any)
-	if _, ok := h["x-g8g-token"]; ok {
+	if _, ok := h["x-g2f-token"]; ok {
 		t.Fatal("secret header leaked into item")
 	}
 	if _, ok := h["cookie"]; ok {

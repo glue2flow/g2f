@@ -1,6 +1,6 @@
 {
-  "name": "g8g",
-  "short_name": "g8g",
+  "name": "glue2flow",
+  "short_name": "g2f",
   "description": "Workflow automation",
   "icons": [
     { "src": "/android-chrome-192x192.png", "sizes": "192x192", "type": "image/png" },

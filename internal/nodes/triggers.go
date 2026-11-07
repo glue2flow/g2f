@@ -180,8 +180,8 @@ func (webhookTrigger) Definition() Definition {
 				Description: "Token value, or HMAC key."},
 			{Name: "header", Label: "Header name", Type: ParamString, NoExpression: true,
 				ShowIf:      map[string][]string{"auth": {"token", "hmac"}},
-				Placeholder: "X-G8G-Token / X-Signature-256",
-				Description: "Defaults to X-G8G-Token (token) or X-Signature-256 (hmac, value 'sha256=<hex>'). Use X-Hub-Signature-256 for GitHub."},
+				Placeholder: "X-G2F-Token / X-Signature-256",
+				Description: "Defaults to X-G2F-Token (token) or X-Signature-256 (hmac, value 'sha256=<hex>'). Use X-Hub-Signature-256 for GitHub."},
 			{Name: "respond", Label: "Respond", Type: ParamSelect, Default: "immediately", NoExpression: true, Options: []Option{
 				{"Immediately (202 + execution id)", "immediately"},
 				{"With output of last node (waits)", "lastNode"},
@@ -245,7 +245,7 @@ func ParseWebhook(params map[string]any) (*Webhook, error) {
 	switch w.Auth {
 	case "none":
 	case "token":
-		w.Header = str("header", "X-G8G-Token")
+		w.Header = str("header", "X-G2F-Token")
 	case "hmac":
 		w.Header = str("header", "X-Signature-256")
 	default:

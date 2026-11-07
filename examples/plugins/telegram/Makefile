@@ -1,4 +1,4 @@
-# Build the sample plugin and package it for import into g8g.
+# Build the sample plugin and package it for import into glue2flow.
 #
 #   make go       standard Go toolchain (>= 1.24), ~3 MB
 #   make tinygo   TinyGo (>= 0.34), ~0.5 MB

@@ -16,19 +16,19 @@ RUN go mod download
 COPY cmd ./cmd
 COPY internal ./internal
 ARG VERSION=dev
-RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o /out/g8g ./cmd/g8g
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o /out/g2f ./cmd/g2f
 
 # --- Runtime ----------------------------------------------------------------
 # distroless/static: no shell, no package manager, runs as non-root.
 FROM gcr.io/distroless/static-debian12:nonroot
 WORKDIR /app
-COPY --from=server /out/g8g /app/g8g
+COPY --from=server /out/g2f /app/g2f
 COPY --from=web /src/web/dist /app/web
 COPY modules /app/modules
-ENV G8G_LISTEN=:8080 \
-    G8G_STATIC_DIR=/app/web \
-    G8G_MODULES_DIR=/app/modules
+ENV G2F_LISTEN=:8080 \
+    G2F_STATIC_DIR=/app/web \
+    G2F_MODULES_DIR=/app/modules
 EXPOSE 8080
 USER nonroot:nonroot
-HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=3 CMD ["/app/g8g", "healthcheck"]
-ENTRYPOINT ["/app/g8g"]
+HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=3 CMD ["/app/g2f", "healthcheck"]
+ENTRYPOINT ["/app/g2f"]
