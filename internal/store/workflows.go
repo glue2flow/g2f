@@ -8,8 +8,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/wolfposd/g8g/internal/auth"
-	"github.com/wolfposd/g8g/internal/workflow"
+	"github.com/glue2flow/g2f/internal/auth"
+	"github.com/glue2flow/g2f/internal/workflow"
 )
 
 const workflowCols = `id, org_id, name, description, owner_sub, owner_name, scope, org_role,

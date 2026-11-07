@@ -1,4 +1,4 @@
-module github.com/wolfposd/g8g/examples/plugins/telegram/go
+module github.com/glue2flow/g2f/examples/plugins/telegram/go
 
 go 1.24
 

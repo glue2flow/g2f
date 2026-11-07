@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/wolfposd/g8g/internal/auth"
+	"github.com/glue2flow/g2f/internal/auth"
 )
 
 // Scope controls who can see a workflow.

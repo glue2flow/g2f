@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/wolfposd/g8g/internal/expression"
+	"github.com/glue2flow/g2f/internal/expression"
 )
 
 // --- Switch -----------------------------------------------------------------

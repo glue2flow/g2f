@@ -6,7 +6,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/wolfposd/g8g/internal/workflow"
+	"github.com/glue2flow/g2f/internal/workflow"
 )
 
 // SecretOp changes one encrypted node parameter.

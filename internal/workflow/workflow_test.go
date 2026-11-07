@@ -3,7 +3,7 @@ package workflow
 import (
 	"testing"
 
-	"github.com/wolfposd/g8g/internal/auth"
+	"github.com/glue2flow/g2f/internal/auth"
 )
 
 func TestRoleFor(t *testing.T) {

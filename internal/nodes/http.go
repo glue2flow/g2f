@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/wolfposd/g8g/internal/expression"
+	"github.com/glue2flow/g2f/internal/expression"
 )
 
 const maxResponseBody = 10 << 20 // 10 MiB

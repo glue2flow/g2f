@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/wolfposd/g8g/internal/expression"
-	"github.com/wolfposd/g8g/internal/workflow"
+	"github.com/glue2flow/g2f/internal/expression"
+	"github.com/glue2flow/g2f/internal/workflow"
 )
 
 func TestHTTPModuleOAuthToken(t *testing.T) {

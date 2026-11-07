@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/wolfposd/g8g/internal/expression"
-	"github.com/wolfposd/g8g/internal/workflow"
+	"github.com/glue2flow/g2f/internal/expression"
+	"github.com/glue2flow/g2f/internal/workflow"
 )
 
 func run(t *testing.T, n Node, params map[string]any, inputs map[string][]Item) (Output, error) {

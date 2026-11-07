@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/wolfposd/g8g/internal/expression"
+	"github.com/glue2flow/g2f/internal/expression"
 )
 
 // HTTPModuleNodes builds the nodes of an "http" runtime manifest: each node maps

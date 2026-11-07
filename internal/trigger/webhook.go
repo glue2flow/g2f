@@ -17,9 +17,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/wolfposd/g8g/internal/engine"
-	"github.com/wolfposd/g8g/internal/nodes"
-	"github.com/wolfposd/g8g/internal/store"
+	"github.com/glue2flow/g2f/internal/engine"
+	"github.com/glue2flow/g2f/internal/nodes"
+	"github.com/glue2flow/g2f/internal/store"
 )
 
 const maxWebhookBody = 5 << 20 // 5 MiB

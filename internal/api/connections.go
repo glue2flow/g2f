@@ -9,8 +9,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/wolfposd/g8g/internal/auth"
-	"github.com/wolfposd/g8g/internal/store"
+	"github.com/glue2flow/g2f/internal/auth"
+	"github.com/glue2flow/g2f/internal/store"
 )
 
 type connectionView struct {

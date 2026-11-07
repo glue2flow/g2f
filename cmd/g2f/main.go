@@ -12,16 +12,16 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/wolfposd/g8g/internal/api"
-	"github.com/wolfposd/g8g/internal/auth"
-	"github.com/wolfposd/g8g/internal/config"
-	"github.com/wolfposd/g8g/internal/engine"
-	"github.com/wolfposd/g8g/internal/nodes"
-	"github.com/wolfposd/g8g/internal/oauth"
-	"github.com/wolfposd/g8g/internal/plugin"
-	"github.com/wolfposd/g8g/internal/secrets"
-	"github.com/wolfposd/g8g/internal/store"
-	"github.com/wolfposd/g8g/internal/trigger"
+	"github.com/glue2flow/g2f/internal/api"
+	"github.com/glue2flow/g2f/internal/auth"
+	"github.com/glue2flow/g2f/internal/config"
+	"github.com/glue2flow/g2f/internal/engine"
+	"github.com/glue2flow/g2f/internal/nodes"
+	"github.com/glue2flow/g2f/internal/oauth"
+	"github.com/glue2flow/g2f/internal/plugin"
+	"github.com/glue2flow/g2f/internal/secrets"
+	"github.com/glue2flow/g2f/internal/store"
+	"github.com/glue2flow/g2f/internal/trigger"
 )
 
 // version is set at build time via -ldflags.

@@ -11,7 +11,7 @@ import (
 
 	extism "github.com/extism/go-sdk"
 
-	"github.com/wolfposd/g8g/internal/nodes"
+	"github.com/glue2flow/g2f/internal/nodes"
 )
 
 // The WASM plugin ABI (JSON over Extism input/output):

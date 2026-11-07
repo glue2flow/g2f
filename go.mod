@@ -1,4 +1,4 @@
-module github.com/wolfposd/g8g
+module github.com/glue2flow/g2f
 
 go 1.25.0
 

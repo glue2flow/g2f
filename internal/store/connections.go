@@ -9,7 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/wolfposd/g8g/internal/auth"
+	"github.com/glue2flow/g2f/internal/auth"
 )
 
 // Connection is a connected OAuth2 account. AccessToken and RefreshToken hold

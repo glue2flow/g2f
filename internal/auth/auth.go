@@ -11,7 +11,7 @@ import (
 
 	"github.com/coreos/go-oidc/v3/oidc"
 
-	"github.com/wolfposd/g8g/internal/config"
+	"github.com/glue2flow/g2f/internal/config"
 )
 
 // Authenticator turns bearer tokens into Users.

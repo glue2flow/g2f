@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/wolfposd/g8g/internal/workflow"
+	"github.com/glue2flow/g2f/internal/workflow"
 )
 
 const (

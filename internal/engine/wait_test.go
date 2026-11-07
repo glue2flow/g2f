@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/wolfposd/g8g/internal/nodes"
-	"github.com/wolfposd/g8g/internal/store"
-	"github.com/wolfposd/g8g/internal/workflow"
+	"github.com/glue2flow/g2f/internal/nodes"
+	"github.com/glue2flow/g2f/internal/store"
+	"github.com/glue2flow/g2f/internal/workflow"
 )
 
 // waitStore is an in-memory ExecStore + WaitStore + WorkflowLoader.

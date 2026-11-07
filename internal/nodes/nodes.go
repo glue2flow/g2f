@@ -14,8 +14,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/wolfposd/g8g/internal/expression"
-	"github.com/wolfposd/g8g/internal/workflow"
+	"github.com/glue2flow/g2f/internal/expression"
+	"github.com/glue2flow/g2f/internal/workflow"
 )
 
 // Item is one unit of data flowing between nodes (a JSON object).

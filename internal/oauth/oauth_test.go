@@ -15,10 +15,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/wolfposd/g8g/internal/auth"
-	"github.com/wolfposd/g8g/internal/nodes"
-	"github.com/wolfposd/g8g/internal/secrets"
-	"github.com/wolfposd/g8g/internal/store"
+	"github.com/glue2flow/g2f/internal/auth"
+	"github.com/glue2flow/g2f/internal/nodes"
+	"github.com/glue2flow/g2f/internal/secrets"
+	"github.com/glue2flow/g2f/internal/store"
 )
 
 type memStore struct {

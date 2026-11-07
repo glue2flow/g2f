@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/wolfposd/g8g/internal/nodes"
-	"github.com/wolfposd/g8g/internal/store"
+	"github.com/glue2flow/g2f/internal/nodes"
+	"github.com/glue2flow/g2f/internal/store"
 )
 
 // MaxDepth limits sub-workflow nesting (and accidental recursion).
