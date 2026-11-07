@@ -184,12 +184,22 @@ Secret values never stay in the workflow JSON:
   node. On save they are moved into `node_secrets`. The API returns
   `{"$secret": "stored"}` instead of the value; sending that placeholder back keeps the
   value, and an empty value deletes it. The engine decrypts them right before the node runs.
-- **Plugin configuration:** global settings declared by a plugin (`config:` in its manifest,
-  e.g. an OAuth client secret or a default account). One value per organization, set by an
-  organization admin on the *Plugins* page (`GET/PUT /api/plugins/{module}/config`). Nodes
-  read them as `config.<name>`. Secret entries are write-only.
+- **Plugin settings:** declared in the plugin's manifest and set once per organization by
+  an organization admin on the *Plugins* page (`GET/PUT /api/plugins/{module}/config`).
+  There are two kinds:
 
-Both are encrypted with AES-256-GCM using `G8G_SECRET_KEY`. Each ciphertext is bound to its
+  | Kind | Manifest section | Readable by | Typical content |
+  | --- | --- | --- | --- |
+  | **config** | `config:` | the plugin only: WASM code (`config`) and the manifest's request templates (`{{ config.x }}`) | API tokens, client secrets, base URLs |
+  | **vars** | `vars:` | workflow editors, in node fields: `{{ vars.x }}` | default channel or chat, team name |
+
+  Config never reaches expressions in node fields. A field such as a message text cannot
+  contain the bot token: saving a workflow whose node fields reference `config` fails, and at
+  run time `config` does not exist in their scope. The plugin decides where config values go
+  (URL, `Authorization` header, `X-…` headers, request body). Vars cannot be secrets.
+  Secret config entries are write-only.
+
+All of these are encrypted with AES-256-GCM using `G8G_SECRET_KEY`. Each ciphertext is bound to its
 location (workflow/node/parameter, or org/module/key), so it cannot be copied into another
 row. Error messages are scrubbed of known secret values before they are stored.
 
@@ -238,8 +248,11 @@ allowedHosts: [api.telegram.org]
 timeout: 20s                  # wasm: per node run (default 30s)
 memoryMB: 32                  # wasm: default 64
 
-config:                       # global settings per organization (admin, encrypted)
+config:                       # plugin-only settings per organization (admin, encrypted)
   - { name: botToken, label: Default bot token, type: secret }
+  - { name: apiBaseUrl, default: https://api.telegram.org }
+vars:                         # per-organization values usable in node fields as {{ vars.x }}
+  - { name: defaultChatId, label: Default chat ID }
 params:                       # parameters shared by all nodes of the module
   - { name: botToken, label: Bot token, type: secret }   # per-node secret
 nodes:
@@ -276,8 +289,10 @@ nodes:
     output: "{{ response.body }}"   # optional; arrays become one item per element
 ```
 
-Inside the request templates, `params` holds the node's resolved parameters (secrets
-decrypted) and `config` holds the module's organization settings.
+Inside the request templates (`url`, `path`, `headers`, `query`, `body`, `output`), `params`
+holds the node's resolved parameters (secrets decrypted) and `config` the module's
+plugin-only settings. For example:
+`Authorization: "Bearer {{ config.apiToken }}"`. Node fields only see `vars`.
 
 Parameter types: `string`, `text`, `number`, `boolean`, `select` (with `options`), `json`, `secret`, `datetime`.
 `showIf: {auth: [token, hmac]}` shows a field only for certain values of another parameter.

@@ -62,8 +62,11 @@ func (d *declarativeNode) Execute(ctx context.Context, ec *ExecContext) (Output,
 		if err != nil {
 			return nil, err
 		}
+		// Request templates are written by the plugin author, so unlike node
+		// fields they may use the plugin config (tokens, base URLs).
 		env := ec.ItemEnv(item, i)
 		env["params"] = params
+		env["config"] = ec.Config
 
 		req := d.spec.Request
 		url := req.URL

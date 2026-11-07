@@ -147,6 +147,7 @@ export interface ModuleInfo {
   runtime: "builtin" | "http" | "wasm";
   source: string;
   config: ParamDef[];
+  vars: ParamDef[];
   allowedHosts?: string[];
   nodes: string[];
   installedBy?: string;
@@ -154,6 +155,7 @@ export interface ModuleInfo {
 }
 
 export interface ConfigValue extends ParamDef {
+  kind: "config" | "var";
   set: boolean;
   value?: unknown;
 }

@@ -28,7 +28,8 @@ import (
 // SecretSource provides decrypted node secrets and plugin configuration.
 type SecretSource interface {
 	NodeSecrets(ctx context.Context, workflowID string) (map[string]map[string]string, error)
-	ModuleConfig(ctx context.Context, org, module string) (map[string]any, error)
+	// ModuleSettings returns the plugin-only config and the editor-visible vars.
+	ModuleSettings(ctx context.Context, org, module string) (config, vars map[string]any, err error)
 }
 
 // ExecStore is the persistence the engine needs.
@@ -237,7 +238,7 @@ func (e *Engine) execute(ctx context.Context, exec *store.Execution, req Request
 			return e.finish(exec, nil, fmt.Errorf("load secrets: %w", err))
 		}
 	}
-	configs := map[string]map[string]any{} // module -> config, loaded lazily
+	settings := map[string]moduleSettings{} // module -> settings, loaded lazily
 	scrub := newScrubber(secrets)
 
 	// inputs: node id -> input handle -> items
@@ -262,7 +263,7 @@ func (e *Engine) execute(ctx context.Context, exec *store.Execution, req Request
 		if n.Disabled {
 			out = nodes.Output{workflow.DefaultHandle: in}
 		} else {
-			out, err = e.runNode(ctx, req.Workflow, withSecrets(n, secrets[n.ID]), byHandle, in, env, configs, scrub, log)
+			out, err = e.runNode(ctx, req.Workflow, withSecrets(n, secrets[n.ID]), byHandle, in, env, settings, scrub, log)
 		}
 		step.DurationMs = time.Since(step.StartedAt).Milliseconds()
 		if err != nil {
@@ -348,22 +349,22 @@ func withSecrets(n *workflow.Node, secrets map[string]string) *workflow.Node {
 }
 
 func (e *Engine) runNode(ctx context.Context, wf *workflow.Workflow, n *workflow.Node, byHandle map[string][]nodes.Item,
-	in []nodes.Item, env expression.Env, configs map[string]map[string]any, scrub *scrubber, log *slog.Logger) (out nodes.Output, err error) {
+	in []nodes.Item, env expression.Env, settings map[string]moduleSettings, scrub *scrubber, log *slog.Logger) (out nodes.Output, err error) {
 	impl, ok := e.reg.Get(n.Type)
 	if !ok {
 		return nil, fmt.Errorf("unknown node type %q", n.Type)
 	}
 	def := impl.Definition()
-	var config map[string]any
+	var ms moduleSettings
 	if mod := def.Module; mod != "" && mod != nodes.BuiltinModule && e.opts.Secrets != nil {
-		if config, ok = configs[mod]; !ok {
-			if config, err = e.opts.Secrets.ModuleConfig(ctx, wf.OrgID, mod); err != nil {
-				return nil, fmt.Errorf("load %s config: %w", mod, err)
+		if ms, ok = settings[mod]; !ok {
+			if ms.config, ms.vars, err = e.opts.Secrets.ModuleSettings(ctx, wf.OrgID, mod); err != nil {
+				return nil, fmt.Errorf("load %s settings: %w", mod, err)
 			}
-			configs[mod] = config
+			settings[mod] = ms
 			if info, ok := e.reg.Module(mod); ok {
 				for _, p := range info.Config {
-					if s, isStr := config[p.Name].(string); isStr && p.Type == nodes.ParamSecret {
+					if s, isStr := ms.config[p.Name].(string); isStr && p.Type == nodes.ParamSecret {
 						scrub.add(s)
 					}
 				}
@@ -383,7 +384,7 @@ func (e *Engine) runNode(ctx context.Context, wf *workflow.Workflow, n *workflow
 		in = []nodes.Item{}
 	}
 	return impl.Execute(ctx, &nodes.ExecContext{
-		Node: n, Def: &def, Items: in, Inputs: byHandle, Config: config, Env: env, Logger: log,
+		Node: n, Def: &def, Items: in, Inputs: byHandle, Config: ms.config, Vars: ms.vars, Env: env, Logger: log,
 	})
 }
 
@@ -437,6 +438,8 @@ func flatten(out nodes.Output) []nodes.Item {
 	}
 	return all
 }
+
+type moduleSettings struct{ config, vars map[string]any }
 
 // scrubber removes known secret values from messages.
 type scrubber struct{ values []string }

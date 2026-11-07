@@ -44,3 +44,24 @@ func TestResolveNested(t *testing.T) {
 		t.Fatalf("got %#v", got)
 	}
 }
+
+func TestIdentifiers(t *testing.T) {
+	got, err := Identifiers(map[string]any{
+		"a": "Hi {{ json.name }} {{ vars.footer ?? '' }}",
+		"b": []any{"{{ map(items, .x) }}", "plain"},
+		"c": "{{ json.config.token }}", // a field named config, not the variable
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	set := map[string]bool{}
+	for _, g := range got {
+		set[g] = true
+	}
+	if !set["json"] || !set["vars"] || !set["items"] || set["config"] {
+		t.Fatalf("unexpected identifiers %v", got)
+	}
+	if got, _ := Identifiers("{{ config.botToken }}"); len(got) != 1 || got[0] != "config" {
+		t.Fatalf("config not detected: %v", got)
+	}
+}

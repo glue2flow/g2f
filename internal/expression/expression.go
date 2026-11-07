@@ -13,6 +13,7 @@ import (
 
 	"github.com/expr-lang/expr"
 	"github.com/expr-lang/expr/ast"
+	"github.com/expr-lang/expr/parser"
 	"github.com/expr-lang/expr/vm"
 )
 
@@ -142,5 +143,70 @@ func Stringify(v any) string {
 		return string(b)
 	default:
 		return fmt.Sprint(t)
+	}
+}
+
+// Identifiers returns the top-level variable names used by the {{ }} blocks in
+// v (strings, maps and slices are searched recursively), e.g. "json", "vars".
+func Identifiers(v any) ([]string, error) {
+	seen := map[string]bool{}
+	var walk func(any) error
+	walk = func(v any) error {
+		switch t := v.(type) {
+		case string:
+			for _, code := range blocks(t) {
+				tree, err := parser.Parse(code)
+				if err != nil {
+					return fmt.Errorf("expression %q: %w", code, err)
+				}
+				ast.Walk(&tree.Node, identCollector(seen))
+			}
+		case map[string]any:
+			for _, e := range t {
+				if err := walk(e); err != nil {
+					return err
+				}
+			}
+		case []any:
+			for _, e := range t {
+				if err := walk(e); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}
+	if err := walk(v); err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(seen))
+	for k := range seen {
+		out = append(out, k)
+	}
+	return out, nil
+}
+
+type identCollector map[string]bool
+
+func (c identCollector) Visit(n *ast.Node) {
+	if id, ok := (*n).(*ast.IdentifierNode); ok {
+		c[id.Value] = true
+	}
+}
+
+// blocks returns the code inside each {{ }} of s.
+func blocks(s string) []string {
+	var out []string
+	for {
+		start := strings.Index(s, "{{")
+		if start < 0 {
+			return out
+		}
+		end := strings.Index(s[start:], "}}")
+		if end < 0 {
+			return out
+		}
+		out = append(out, strings.TrimSpace(s[start+2:start+end]))
+		s = s[start+end+2:]
 	}
 }

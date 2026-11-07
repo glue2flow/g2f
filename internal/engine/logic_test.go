@@ -89,8 +89,8 @@ type fakeSecrets map[string]map[string]string
 func (f fakeSecrets) NodeSecrets(context.Context, string) (map[string]map[string]string, error) {
 	return f, nil
 }
-func (f fakeSecrets) ModuleConfig(context.Context, string, string) (map[string]any, error) {
-	return nil, errors.New("unused")
+func (f fakeSecrets) ModuleSettings(context.Context, string, string) (map[string]any, map[string]any, error) {
+	return nil, nil, errors.New("unused")
 }
 
 func TestSecretsInjectedAndScrubbed(t *testing.T) {

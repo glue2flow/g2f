@@ -13,6 +13,7 @@ import (
 
 	"github.com/wolfposd/g8g/internal/auth"
 	"github.com/wolfposd/g8g/internal/engine"
+	"github.com/wolfposd/g8g/internal/expression"
 	"github.com/wolfposd/g8g/internal/nodes"
 	"github.com/wolfposd/g8g/internal/store"
 	"github.com/wolfposd/g8g/internal/workflow"
@@ -223,9 +224,33 @@ func (s *Server) validateNodes(g *workflow.Graph) error {
 	for i := range g.Nodes {
 		n := &g.Nodes[i]
 		impl, _ := s.reg.Get(n.Type)
+		if err := checkFieldExpressions(n, impl.Definition()); err != nil {
+			return err
+		}
 		if v, ok := impl.(nodes.Validator); ok && !n.Disabled {
 			if err := v.Validate(n); err != nil {
 				return errors.New(n.Name + ": " + err.Error())
+			}
+		}
+	}
+	return nil
+}
+
+// checkFieldExpressions rejects node fields that try to read plugin config.
+// Config (tokens, client secrets, base URLs) is reserved for the plugin;
+// editors use vars for organization-wide values.
+func checkFieldExpressions(n *workflow.Node, def nodes.Definition) error {
+	for name, v := range n.Params {
+		if p := def.Param(name); p != nil && (p.NoExpression || p.Type == nodes.ParamSecret) {
+			continue
+		}
+		ids, err := expression.Identifiers(v)
+		if err != nil {
+			return fmt.Errorf("node %q, field %q: %w", n.Name, name, err)
+		}
+		for _, id := range ids {
+			if id == "config" {
+				return fmt.Errorf("node %q, field %q: config.* is only available to the plugin itself; use vars.* for values meant for node fields", n.Name, name)
 			}
 		}
 	}

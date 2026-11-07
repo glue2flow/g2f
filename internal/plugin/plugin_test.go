@@ -132,17 +132,18 @@ func (m *memStore) UpdateExecution(context.Context, *store.Execution) error { re
 type fakeSecrets struct {
 	node   map[string]map[string]string
 	config map[string]any
+	vars   map[string]any
 }
 
 func (f fakeSecrets) NodeSecrets(context.Context, string) (map[string]map[string]string, error) {
 	return f.node, nil
 }
 
-func (f fakeSecrets) ModuleConfig(_ context.Context, _, module string) (map[string]any, error) {
+func (f fakeSecrets) ModuleSettings(_ context.Context, _, module string) (map[string]any, map[string]any, error) {
 	if module == "telegram" {
-		return f.config, nil
+		return f.config, f.vars, nil
 	}
-	return map[string]any{}, nil
+	return map[string]any{}, map[string]any{}, nil
 }
 
 // fakeTelegram records which token was used per request.
@@ -171,13 +172,18 @@ func fakeTelegram(t *testing.T) (*httptest.Server, *[]string) {
 
 func runTelegram(t *testing.T, reg *nodes.Registry, sec fakeSecrets, chatID string) *engine.Result {
 	t.Helper()
+	return runTelegramParams(t, reg, sec, chatID, map[string]any{
+		"chatId": "{{ json.chat }}", "text": "Hi from {{ workflow.name }}",
+	})
+}
+
+func runTelegramParams(t *testing.T, reg *nodes.Registry, sec fakeSecrets, chatID string, params map[string]any) *engine.Result {
+	t.Helper()
 	eng := engine.New(reg, newMemStore(), discard, engine.Options{Secrets: sec})
 	wf := &workflow.Workflow{ID: "wf", Name: "Notify", OrgID: "acme", Graph: workflow.Graph{
 		Nodes: []workflow.Node{
 			{ID: "t", Name: "Start", Type: "trigger.manual", Params: map[string]any{"payload": map[string]any{"chat": chatID}}},
-			{ID: "tg", Name: "Telegram", Type: "telegram.sendMessage", Params: map[string]any{
-				"chatId": "{{ json.chat }}", "text": "Hi from {{ workflow.name }}",
-			}},
+			{ID: "tg", Name: "Telegram", Type: "telegram.sendMessage", Params: params},
 		},
 		Edges: []workflow.Edge{{ID: "e", Source: "t", Target: "tg"}},
 	}}
@@ -201,7 +207,7 @@ func TestTelegramWasmPlugin(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Runtime != "wasm" || len(info.Nodes) != 2 || len(info.Config) != 2 {
+	if info.Runtime != "wasm" || len(info.Nodes) != 2 || len(info.Config) != 2 || len(info.Vars) != 1 {
 		t.Fatalf("unexpected module info %+v", info)
 	}
 
@@ -240,7 +246,22 @@ func TestTelegramWasmPlugin(t *testing.T) {
 		t.Fatalf("expected missing token error, got %q", res.Execution.Error)
 	}
 
-	// 5. Re-sync from the store on another "replica".
+	// 5. Vars are usable in node fields (Chat ID defaults to vars.defaultChatId);
+	//    config is not: {{ config.botToken }} in a field evaluates to nothing.
+	withVars := fakeSecrets{config: cfg, vars: map[string]any{"defaultChatId": "-100777"}}
+	res = runTelegramParams(t, reg, withVars, "ignored", map[string]any{"text": "token=[{{ config.botToken }}]"})
+	if res.Execution.Status != store.StatusSuccess {
+		t.Fatalf("run failed: %s", res.Execution.Error)
+	}
+	out := res.LastOutput[0]
+	if chat := out["chat"].(map[string]any)["id"]; chat != "-100777" {
+		t.Fatalf("chat from vars = %v", chat)
+	}
+	if out["text"] != "token=[]" {
+		t.Fatalf("config leaked into a node field: %v", out["text"])
+	}
+
+	// 6. Re-sync from the store on another "replica".
 	reg2 := nodes.NewRegistry()
 	_ = nodes.RegisterBuiltins(reg2)
 	if err := NewManager(reg2, st, discard).Sync(context.Background()); err != nil {
@@ -250,7 +271,7 @@ func TestTelegramWasmPlugin(t *testing.T) {
 		t.Fatal("plugin not synced to second registry")
 	}
 
-	// 6. Delete.
+	// 7. Delete.
 	if err := mgr.Delete(context.Background(), "telegram"); err != nil {
 		t.Fatal(err)
 	}

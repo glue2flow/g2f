@@ -21,7 +21,8 @@ import (
 //	{
 //	  "node":   "sendMessage",                 // node type without module prefix
 //	  "items":  [{"json": {...}, "params": {...}, "input": "main"}],
-//	  "config": {...},                         // module config of the organization
+//	  "config": {...},                         // plugin-only settings of the organization
+//	  "vars":   {...},                         // organization variables
 //	  "workflow":  {"id": "...", "name": "..."},
 //	  "execution": {"id": "..."}
 //	}
@@ -36,6 +37,7 @@ type wasmRequest struct {
 	Node      string         `json:"node"`
 	Items     []wasmItem     `json:"items"`
 	Config    map[string]any `json:"config"`
+	Vars      map[string]any `json:"vars"`
 	Workflow  any            `json:"workflow,omitempty"`
 	Execution any            `json:"execution,omitempty"`
 }
@@ -123,8 +125,12 @@ func (n *wasmNode) Definition() nodes.Definition { return n.def }
 
 func (n *wasmNode) Execute(ctx context.Context, ec *nodes.ExecContext) (nodes.Output, error) {
 	req := wasmRequest{Node: n.nodeType, Config: ec.Config, Workflow: ec.Env["workflow"], Execution: ec.Env["execution"]}
+	req.Vars = ec.Vars
 	if req.Config == nil {
 		req.Config = map[string]any{}
+	}
+	if req.Vars == nil {
+		req.Vars = map[string]any{}
 	}
 	handles := make([]string, 0, len(ec.Inputs))
 	for h := range ec.Inputs {

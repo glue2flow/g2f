@@ -6,7 +6,7 @@ WebAssembly module and work with the same [`plugin.yaml`](plugin.yaml).
 
 ```
 telegram/
-├── plugin.yaml     manifest: module, nodes, parameters, config, sandbox settings
+├── plugin.yaml     manifest: module, nodes, parameters, config, vars, sandbox settings
 ├── go/main.go      Go implementation (Extism Go PDK)
 ├── js/index.js     JavaScript implementation (Extism JS PDK)
 ├── js/index.d.ts   declares the exported function for the JS compiler
@@ -32,6 +32,7 @@ The plugin exports one function, `execute`. g8g calls it with JSON on the input:
     { "json": { "chat": "1234" }, "params": { "chatId": "1234", "text": "Hi", "botToken": "…" }, "input": "main" }
   ],
   "config": { "botToken": "…", "apiBaseUrl": "https://api.telegram.org" },
+  "vars": { "defaultChatId": "-1001234567890" },
   "workflow": { "id": "…", "name": "Notify" },
   "execution": { "id": "…" }
 }
@@ -40,7 +41,8 @@ The plugin exports one function, `execute`. g8g calls it with JSON on the input:
 - `items[].json`: the incoming data item.
 - `items[].params`: the node's parameters for that item, with `{{ expressions }}` already
   evaluated and secrets decrypted.
-- `config`: the module's global configuration for the workflow's organization.
+- `config`: the plugin-only settings of the workflow's organization (tokens, base URL).
+- `vars`: the organization variables (also usable by editors in node fields).
 
 The plugin writes `{"items": [...]}` (or `{"outputs": {"main": [...], "other": [...]}}`
 for several outputs) to the output. Errors go through the PDK's error function
@@ -49,17 +51,26 @@ errors and scrubs known secret values from all error messages before storing the
 
 ## Secrets and configuration
 
-The manifest declares two kinds of settings:
+The manifest declares three kinds of settings:
 
-| Kind | Declared in | Set by | Scope | Example here |
+| Kind | Declared in | Set by | Who can read it | Here |
 | --- | --- | --- | --- | --- |
-| **Global config** | `config:` | organization admin, on the *Plugins* page | one value per organization | `botToken` (default bot), `apiBaseUrl` |
-| **Node parameter** with `type: secret` | `params:` | workflow editor, in the node panel | one value per node | `botToken` (a user's own bot) |
+| **Config** | `config:` | organization admin, *Plugins* → *Settings* | **only the plugin code** | `botToken` (default bot), `apiBaseUrl` |
+| **Vars** | `vars:` | organization admin, *Plugins* → *Settings* | editors, in node fields as `{{ vars.x }}` | `defaultChatId` |
+| **Node secret** (`type: secret` param) | `params:` | workflow editor, in the node panel | only the plugin code | `botToken` (a user's own bot) |
 
-Both are encrypted at rest (AES-256-GCM, key `G8G_SECRET_KEY`) and write-only: the API
-never returns them. The editor shows "stored encrypted" with *Replace* / *Clear*. The
-plugin receives the decrypted values only while it runs. This sample uses the node's token
-when it is set and falls back to the organization's default bot.
+Config and node secrets never appear in the expression scope of node fields. Editors
+can't write `{{ config.botToken }}` into the message text: the workflow is rejected on
+save. The plugin puts the token into the request URL itself, where Telegram expects it.
+The base URL is config as well, since it only matters for building that URL.
+
+Vars are for values editors should be able to use. The *Chat ID* field defaults to
+`{{ vars.defaultChatId }}`, so an organization can set one alert chat for all nodes.
+
+Secrets are encrypted at rest (AES-256-GCM, key `G8G_SECRET_KEY`) and write-only: the API
+never returns them. The editor shows "stored encrypted" with *Replace* / *Clear*. The plugin
+receives the decrypted values only while it runs. This sample uses the node's token when it
+is set and falls back to the organization's default bot.
 
 ## Build
 
@@ -116,8 +127,8 @@ As a user with the `g8g-plugin-admin` role (`alice` in the demo realm), choose o
 Imported plugins are stored in PostgreSQL and loaded by every g8g replica
 (`G8G_PLUGIN_SYNC`). Importing the same module again replaces it (upgrade).
 
-Then, as an organization admin, open *Plugins* → *Telegram* → *Configure* and set a
-default bot token. Or give each *Send Message* node its own token.
+Then, as an organization admin, open *Plugins* → *Telegram* → *Settings* and set a
+default bot token (and optionally a default chat ID). Or give each *Send Message* node its own token.
 
 ## Test a plugin without g8g
 
@@ -125,7 +136,7 @@ The [Extism CLI](https://github.com/extism/cli) can call the function directly:
 
 ```bash
 extism call plugin.wasm execute --wasi --allow-host api.telegram.org --input '{
-  "node": "getMe", "config": {}, "items": [{"json": {}, "params": {"botToken": "123:ABC"}}]
+  "node": "getMe", "config": {}, "vars": {}, "items": [{"json": {}, "params": {"botToken": "123:ABC"}}]
 }'
 ```
 

@@ -108,33 +108,43 @@ func (s *Service) NodeSecrets(ctx context.Context, workflowID string) (map[strin
 	return out, nil
 }
 
-// ModuleConfig returns the decrypted global configuration of a module for an
-// organization, with defaults applied and numbers/booleans converted.
-func (s *Service) ModuleConfig(ctx context.Context, org, module string) (map[string]any, error) {
+// ModuleSettings returns the decrypted settings of a module for an
+// organization, split into plugin-only config and editor-visible vars, with
+// defaults applied and numbers/booleans converted.
+func (s *Service) ModuleSettings(ctx context.Context, org, module string) (config, vars map[string]any, err error) {
+	config, vars = map[string]any{}, map[string]any{}
 	info, ok := s.reg.Module(module)
-	if !ok || len(info.Config) == 0 {
-		return map[string]any{}, nil
+	if !ok || len(info.Config)+len(info.Vars) == 0 {
+		return config, vars, nil
 	}
 	sealed, err := s.store.PluginConfig(ctx, org, module)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	out := map[string]any{}
-	for _, p := range info.Config {
-		v, ok := sealed[p.Name]
-		if !ok {
-			if p.Default != nil {
-				out[p.Name] = p.Default
+	fill := func(params []nodes.Param, into map[string]any) error {
+		for _, p := range params {
+			v, ok := sealed[p.Name]
+			if !ok {
+				if p.Default != nil {
+					into[p.Name] = p.Default
+				}
+				continue
 			}
-			continue
+			pt, err := s.box.Open(v, ConfigAAD(org, module, p.Name))
+			if err != nil {
+				return fmt.Errorf("setting %s.%s: %w", module, p.Name, err)
+			}
+			into[p.Name] = typed(p.Type, pt)
 		}
-		pt, err := s.box.Open(v, ConfigAAD(org, module, p.Name))
-		if err != nil {
-			return nil, fmt.Errorf("config %s.%s: %w", module, p.Name, err)
-		}
-		out[p.Name] = typed(p.Type, pt)
+		return nil
 	}
-	return out, nil
+	if err := fill(info.Config, config); err != nil {
+		return nil, nil, err
+	}
+	if err := fill(info.Vars, vars); err != nil {
+		return nil, nil, err
+	}
+	return config, vars, nil
 }
 
 func typed(t nodes.ParamType, s string) any {
@@ -149,14 +159,38 @@ func typed(t nodes.ParamType, s string) any {
 	return s
 }
 
-// ConfigValue is how the API presents one config entry. Secret values are never returned.
+// Setting kinds.
+const (
+	KindConfig = "config" // plugin-only
+	KindVar    = "var"    // usable in node fields as vars.<name>
+)
+
+// ConfigValue is how the API presents one setting. Secret values are never returned.
 type ConfigValue struct {
 	nodes.Param
-	Set   bool `json:"set"`
-	Value any  `json:"value,omitempty"`
+	Kind  string `json:"kind"` // config | var
+	Set   bool   `json:"set"`
+	Value any    `json:"value,omitempty"`
 }
 
-// ConfigStatus lists the module's config schema with current (non-secret) values.
+type kindedParam struct {
+	nodes.Param
+	kind string
+}
+
+func settingsOf(info *nodes.ModuleInfo) []kindedParam {
+	out := make([]kindedParam, 0, len(info.Config)+len(info.Vars))
+	for _, p := range info.Config {
+		out = append(out, kindedParam{p, KindConfig})
+	}
+	for _, p := range info.Vars {
+		out = append(out, kindedParam{p, KindVar})
+	}
+	return out
+}
+
+// ConfigStatus lists the module's settings (config and vars) with current
+// non-secret values.
 func (s *Service) ConfigStatus(ctx context.Context, org, module string) ([]ConfigValue, error) {
 	info, ok := s.reg.Module(module)
 	if !ok {
@@ -166,9 +200,11 @@ func (s *Service) ConfigStatus(ctx context.Context, org, module string) ([]Confi
 	if err != nil {
 		return nil, err
 	}
-	out := make([]ConfigValue, 0, len(info.Config))
-	for _, p := range info.Config {
-		cv := ConfigValue{Param: p}
+	all := settingsOf(info)
+	out := make([]ConfigValue, 0, len(all))
+	for _, kp := range all {
+		p := kp.Param
+		cv := ConfigValue{Param: p, Kind: kp.kind}
 		if v, ok := sealed[p.Name]; ok {
 			cv.Set = true
 			if p.Type != nodes.ParamSecret {
@@ -182,7 +218,7 @@ func (s *Service) ConfigStatus(ctx context.Context, org, module string) ([]Confi
 	return out, nil
 }
 
-// UpdateConfig applies changes: a value of nil or "" deletes the key,
+// UpdateConfig applies changes to config and vars: a value of nil or "" deletes the key,
 // nodes.SecretRef keeps it, anything else is stored encrypted.
 func (s *Service) UpdateConfig(ctx context.Context, org, module, by string, values map[string]any) error {
 	info, ok := s.reg.Module(module)
@@ -190,8 +226,8 @@ func (s *Service) UpdateConfig(ctx context.Context, org, module, by string, valu
 		return fmt.Errorf("unknown module %q", module)
 	}
 	known := map[string]nodes.Param{}
-	for _, p := range info.Config {
-		known[p.Name] = p
+	for _, kp := range settingsOf(info) {
+		known[kp.Name] = kp.Param
 	}
 	set := map[string]string{}
 	var del []string

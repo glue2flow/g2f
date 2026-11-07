@@ -12,7 +12,10 @@ export function Plugins({ user, onChanged }: { user: User; onChanged: () => void
   const fileRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(() => {
-    api.plugins().then(setModules).catch((e) => setError(e.message));
+    api
+      .plugins()
+      .then(setModules)
+      .catch((e) => setError(e.message));
   }, []);
   useEffect(load, [load]);
 
@@ -66,8 +69,8 @@ export function Plugins({ user, onChanged }: { user: User; onChanged: () => void
       </div>
       <p className="muted small">
         Import a <code>.yaml</code> manifest (HTTP nodes) or a <code>.zip</code> with <code>plugin.yaml</code> and a WebAssembly
-        module. See <code>examples/plugins/telegram</code>. Importing requires the <code>g8g-plugin-admin</code> role; global plugin
-        settings are configured per organization by admins.
+        module. See <code>examples/plugins/telegram</code>. Importing requires the <code>g8g-plugin-admin</code> role; global
+        plugin settings are configured per organization by admins.
       </p>
       {error && <div className="alert error">{error}</div>}
       {notice && <div className="alert info">{notice}</div>}
@@ -96,9 +99,9 @@ export function Plugins({ user, onChanged }: { user: User; onChanged: () => void
                 <div className="muted small">Network: none</div>
               )}
               <div className="card-actions">
-                {user.admin && m.config.length > 0 && (
+                {user.admin && m.config.length + m.vars.length > 0 && (
                   <button className="btn small" onClick={() => setConfigFor(m)}>
-                    ⚙ Configure ({m.config.length})
+                    ⚙ Settings ({m.config.length + m.vars.length})
                   </button>
                 )}
                 {user.pluginAdmin && m.source === "imported" && (
@@ -150,51 +153,79 @@ function ConfigDialog({ module, org, onClose }: { module: ModuleInfo; org: strin
         <h2>{module.name} settings</h2>
         <p className="muted small">
           Applies to all workflows of organization <b>{org}</b>. Values are encrypted at rest; secrets can be replaced but never
-          read back. Nodes access them as <code>config.&lt;name&gt;</code>.
+          read back.
         </p>
         {error && <div className="alert error">{error}</div>}
         {!values ? (
           <div className="loading">Loading…</div>
         ) : (
-          <div className="form">
-            {values.map((v) => (
-              <label key={v.name} className="field">
-                <span className="field-label">
-                  {v.label}
-                  {v.required && <span className="req">*</span>}
-                </span>
-                {v.type === "secret" ? (
-                  <SecretField
-                    value={draft[v.name]}
-                    readOnly={false}
-                    onChange={(x) => setDraft({ ...draft, [v.name]: x ?? "" })}
-                  />
-                ) : v.type === "boolean" ? (
-                  <input
-                    type="checkbox"
-                    checked={draft[v.name] === true || draft[v.name] === "true"}
-                    onChange={(e) => setDraft({ ...draft, [v.name]: e.target.checked })}
-                  />
-                ) : v.type === "select" ? (
-                  <select value={String(draft[v.name] ?? "")} onChange={(e) => setDraft({ ...draft, [v.name]: e.target.value })}>
-                    <option value="">(default)</option>
-                    {v.options?.map((o) => (
-                      <option key={o.value} value={o.value}>
-                        {o.label}
-                      </option>
+          <>
+            {(["config", "var"] as const).map((kind) => {
+              const list = values.filter((v) => v.kind === kind);
+              if (list.length === 0) return null;
+              return (
+                <section key={kind} className="settings-section">
+                  <h3>{kind === "config" ? "Plugin configuration" : "Variables"}</h3>
+                  <p className="muted small">
+                    {kind === "config" ? (
+                      <>Used only by the plugin itself (e.g. in request URLs or headers). Not available in node fields.</>
+                    ) : (
+                      <>
+                        Usable in node fields as <code>{"{{ vars.<name> }}"}</code>.
+                      </>
+                    )}
+                  </p>
+                  <div className="form">
+                    {list.map((v) => (
+                      <label key={v.name} className="field">
+                        <span className="field-label">
+                          {v.label}
+                          {v.required && <span className="req">*</span>}
+                        </span>
+                        {v.type === "secret" ? (
+                          <SecretField
+                            value={draft[v.name]}
+                            readOnly={false}
+                            onChange={(x) => setDraft({ ...draft, [v.name]: x ?? "" })}
+                          />
+                        ) : v.type === "boolean" ? (
+                          <input
+                            type="checkbox"
+                            checked={draft[v.name] === true || draft[v.name] === "true"}
+                            onChange={(e) => setDraft({ ...draft, [v.name]: e.target.checked })}
+                          />
+                        ) : v.type === "select" ? (
+                          <select
+                            value={String(draft[v.name] ?? "")}
+                            onChange={(e) => setDraft({ ...draft, [v.name]: e.target.value })}
+                          >
+                            <option value="">(default)</option>
+                            {v.options?.map((o) => (
+                              <option key={o.value} value={o.value}>
+                                {o.label}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <input
+                            value={String(draft[v.name] ?? "")}
+                            placeholder={v.default !== undefined ? `default: ${String(v.default)}` : v.placeholder}
+                            onChange={(e) => setDraft({ ...draft, [v.name]: e.target.value })}
+                          />
+                        )}
+                        {v.description && <span className="field-desc">{v.description}</span>}
+                        {v.kind === "var" && (
+                          <span className="field-desc">
+                            Use as <code>{`{{ vars.${v.name} }}`}</code>
+                          </span>
+                        )}
+                      </label>
                     ))}
-                  </select>
-                ) : (
-                  <input
-                    value={String(draft[v.name] ?? "")}
-                    placeholder={v.default !== undefined ? `default: ${String(v.default)}` : v.placeholder}
-                    onChange={(e) => setDraft({ ...draft, [v.name]: e.target.value })}
-                  />
-                )}
-                {v.description && <span className="field-desc">{v.description}</span>}
-              </label>
-            ))}
-          </div>
+                  </div>
+                </section>
+              );
+            })}
+          </>
         )}
         <div className="modal-actions">
           <button className="btn ghost" onClick={onClose}>

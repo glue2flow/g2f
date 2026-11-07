@@ -33,9 +33,11 @@ export function ParamPanel({ nodeId, data, readOnly, extra, onChange, onDelete }
       {def?.description && <p className="desc">{def.description}</p>}
       {extra}
       <div className="form">
-        {def?.params.filter((p) => visible(p, def, data.params)).map((p) => (
-          <Field key={p.name} def={p} value={data.params[p.name]} readOnly={readOnly} onChange={(v) => setParam(p.name, v)} />
-        ))}
+        {def?.params
+          .filter((p) => visible(p, def, data.params))
+          .map((p) => (
+            <Field key={p.name} def={p} value={data.params[p.name]} readOnly={readOnly} onChange={(v) => setParam(p.name, v)} />
+          ))}
         {!def && <div className="alert error">This node type is not installed on the server.</div>}
       </div>
       {!readOnly && (
@@ -51,15 +53,31 @@ export function ParamPanel({ nodeId, data, readOnly, extra, onChange, onDelete }
       )}
       {def && !def.trigger && (
         <p className="hint">
-          Use <code>{"{{ json.field }}"}</code> for the current item, <code>{"{{ nodes['Name'][0].field }}"}</code> for
-          earlier nodes, <code>{"{{ trigger.field }}"}</code> for the trigger payload.
+          Use <code>{"{{ json.field }}"}</code> for the current item, <code>{"{{ nodes['Name'][0].field }}"}</code> for earlier
+          nodes, <code>{"{{ trigger.field }}"}</code> for the trigger payload
+          {def.module !== "builtin" && (
+            <>
+              , <code>{"{{ vars.name }}"}</code> for the plugin's organization variables
+            </>
+          )}
+          .
         </p>
       )}
     </aside>
   );
 }
 
-function Field({ def, value, readOnly, onChange }: { def: ParamDef; value: unknown; readOnly: boolean; onChange: (v: unknown) => void }) {
+function Field({
+  def,
+  value,
+  readOnly,
+  onChange,
+}: {
+  def: ParamDef;
+  value: unknown;
+  readOnly: boolean;
+  onChange: (v: unknown) => void;
+}) {
   const v = value ?? def.default;
   const label = (
     <span className="field-label">
@@ -72,7 +90,12 @@ function Field({ def, value, readOnly, onChange }: { def: ParamDef; value: unkno
     case "boolean":
       return (
         <label className="field check">
-          <input type="checkbox" disabled={readOnly} checked={v === true || v === "true"} onChange={(e) => onChange(e.target.checked)} />
+          <input
+            type="checkbox"
+            disabled={readOnly}
+            checked={v === true || v === "true"}
+            onChange={(e) => onChange(e.target.checked)}
+          />
           {label}
         </label>
       );
@@ -88,7 +111,15 @@ function Field({ def, value, readOnly, onChange }: { def: ParamDef; value: unkno
       );
       break;
     case "text":
-      input = <textarea rows={4} disabled={readOnly} placeholder={def.placeholder} value={String(v ?? "")} onChange={(e) => onChange(e.target.value)} />;
+      input = (
+        <textarea
+          rows={4}
+          disabled={readOnly}
+          placeholder={def.placeholder}
+          value={String(v ?? "")}
+          onChange={(e) => onChange(e.target.value)}
+        />
+      );
       break;
     case "json":
       input = <JsonField value={v} readOnly={readOnly} placeholder={def.placeholder} onChange={onChange} />;
@@ -107,13 +138,22 @@ function Field({ def, value, readOnly, onChange }: { def: ParamDef; value: unkno
       );
       break;
     case "datetime":
-      input = <input type="datetime-local" disabled={readOnly} value={String(v ?? "")} onChange={(e) => onChange(e.target.value)} />;
+      input = (
+        <input type="datetime-local" disabled={readOnly} value={String(v ?? "")} onChange={(e) => onChange(e.target.value)} />
+      );
       break;
     case "secret":
       input = <SecretField value={value} readOnly={readOnly} placeholder={def.placeholder} onChange={onChange} />;
       break;
     default:
-      input = <input disabled={readOnly} placeholder={def.placeholder} value={String(v ?? "")} onChange={(e) => onChange(e.target.value)} />;
+      input = (
+        <input
+          disabled={readOnly}
+          placeholder={def.placeholder}
+          value={String(v ?? "")}
+          onChange={(e) => onChange(e.target.value)}
+        />
+      );
   }
   return (
     <label className="field">
@@ -125,7 +165,17 @@ function Field({ def, value, readOnly, onChange }: { def: ParamDef; value: unkno
 }
 
 /** Edits JSON as text; stores parsed objects when valid, raw strings otherwise (to allow expressions). */
-function JsonField({ value, readOnly, placeholder, onChange }: { value: unknown; readOnly: boolean; placeholder?: string; onChange: (v: unknown) => void }) {
+function JsonField({
+  value,
+  readOnly,
+  placeholder,
+  onChange,
+}: {
+  value: unknown;
+  readOnly: boolean;
+  placeholder?: string;
+  onChange: (v: unknown) => void;
+}) {
   const toText = (v: unknown) => (v === undefined || v === null ? "" : typeof v === "string" ? v : JSON.stringify(v, null, 2));
   const [text, setText] = useState(toText(value));
   const [invalid, setInvalid] = useState(false);
@@ -176,7 +226,17 @@ function visible(p: ParamDef, def: NodeDef, params: Record<string, unknown>): bo
  * Secrets are write-only: the server returns a placeholder for stored values,
  * which is sent back unchanged to keep them. Typing replaces, Clear deletes.
  */
-export function SecretField({ value, readOnly, placeholder, onChange }: { value: unknown; readOnly: boolean; placeholder?: string; onChange: (v: unknown) => void }) {
+export function SecretField({
+  value,
+  readOnly,
+  placeholder,
+  onChange,
+}: {
+  value: unknown;
+  readOnly: boolean;
+  placeholder?: string;
+  onChange: (v: unknown) => void;
+}) {
   if (isSecretRef(value)) {
     return (
       <div className="secret-stored">

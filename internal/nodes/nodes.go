@@ -107,9 +107,13 @@ type ExecContext struct {
 	Items []Item
 	// Inputs holds the items per input handle (e.g. "a" and "b" for logic gates).
 	Inputs map[string][]Item
-	// Config is the decrypted global configuration of the node's module for the
-	// workflow's organization. Exposed to expressions as `config`.
+	// Config holds the decrypted plugin settings of the node's module for the
+	// workflow's organization. Only for the node implementation; it is NOT
+	// part of the expression scope of node fields.
 	Config map[string]any
+	// Vars holds the module's organization variables, exposed to expressions
+	// in node fields as `vars`.
+	Vars   map[string]any
 	Env    expression.Env // shared scope: nodes, trigger, execution, workflow
 	Logger *slog.Logger
 }
@@ -121,8 +125,8 @@ func (c *ExecContext) ItemEnv(item Item, index int) expression.Env {
 	env["json"] = item
 	env["index"] = index
 	env["items"] = c.Items
-	if c.Config != nil {
-		env["config"] = c.Config
+	if c.Vars != nil {
+		env["vars"] = c.Vars
 	}
 	return env
 }
@@ -219,7 +223,8 @@ type ModuleInfo struct {
 	Color        string     `json:"color,omitempty"`
 	Runtime      string     `json:"runtime"` // builtin | http | wasm
 	Source       string     `json:"source"`  // builtin | file:<name> | imported
-	Config       []Param    `json:"config"`  // global (per organization) settings
+	Config       []Param    `json:"config"`  // plugin-only settings per organization
+	Vars         []Param    `json:"vars"`    // per-organization values usable in node fields
 	AllowedHosts []string   `json:"allowedHosts,omitempty"`
 	Nodes        []string   `json:"nodes"`
 	InstalledBy  string     `json:"installedBy,omitempty"`
@@ -254,7 +259,7 @@ func (r *Registry) Register(n Node) error {
 	r.nodes[d.Type] = n
 	m := r.modules[BuiltinModule]
 	if m == nil {
-		m = &ModuleInfo{Module: BuiltinModule, Name: "Built-in", Runtime: "builtin", Source: "builtin", Config: []Param{}}
+		m = &ModuleInfo{Module: BuiltinModule, Name: "Built-in", Runtime: "builtin", Source: "builtin", Config: []Param{}, Vars: []Param{}}
 		r.modules[BuiltinModule] = m
 	}
 	m.Nodes = append(m.Nodes, d.Type)
@@ -287,6 +292,9 @@ func (r *Registry) RegisterModule(info ModuleInfo, list []Node) error {
 	}
 	if info.Config == nil {
 		info.Config = []Param{}
+	}
+	if info.Vars == nil {
+		info.Vars = []Param{}
 	}
 	r.modules[info.Module] = &info
 	return nil

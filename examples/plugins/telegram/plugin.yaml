@@ -14,8 +14,10 @@ allowedHosts:
 timeout: 20s
 memoryMB: 32
 
-# Global configuration: set once per organization by an admin on the Plugins
-# page. Stored encrypted; secrets are write-only. Available as `config`.
+# Plugin configuration: set once per organization by an admin on the Plugins
+# page, stored encrypted. Only the plugin code sees these values (as `config`);
+# workflow editors cannot use them in node fields, so the token can never end
+# up in a message text. The plugin itself puts it into the request URL.
 config:
   - name: botToken
     label: Default bot token
@@ -25,6 +27,13 @@ config:
     label: Bot API base URL
     default: https://api.telegram.org
     description: Only change for a self-hosted Bot API server (and add its host to allowedHosts).
+
+# Variables: organization-wide values that editors may use in node fields as
+# {{ vars.<name> }}. Never secrets.
+vars:
+  - name: defaultChatId
+    label: Default chat ID
+    description: Used by Send Message nodes unless they set another chat.
 
 # Per-node parameters shared by all nodes. "secret" parameters are stored
 # encrypted per node instance, e.g. every user enters their own bot token.
@@ -42,6 +51,7 @@ nodes:
       - name: chatId
         label: Chat ID
         required: true
+        default: "{{ vars.defaultChatId }}"
         placeholder: "{{ json.chatId }}"
       - name: text
         label: Text

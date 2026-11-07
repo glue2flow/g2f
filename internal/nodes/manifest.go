@@ -23,10 +23,18 @@ type Manifest struct {
 	Color       string `yaml:"color"`
 	Runtime     string `yaml:"runtime"` // http | wasm
 
-	// Config declares global settings, configured once per organization by an
-	// admin (e.g. an OAuth client secret). Values are encrypted at rest and
-	// available to the module's nodes as `config.<name>`.
+	// Config declares settings for the plugin itself, configured once per
+	// organization by an admin (API tokens, client secrets, base URLs).
+	// Values are encrypted at rest. They are available ONLY to the plugin:
+	// WASM code receives them as `config`, HTTP manifests can use
+	// {{ config.<name> }} in their request templates. Expressions written by
+	// workflow editors in node fields cannot read them.
 	Config []Param `yaml:"config"`
+
+	// Vars declares organization-wide values that workflow editors may use in
+	// node fields as {{ vars.<name> }} (e.g. a default chat or channel).
+	// Vars cannot be secrets.
+	Vars []Param `yaml:"vars"`
 
 	// Params are per-node parameters shared by all nodes of the module.
 	// Parameters of type "secret" are stored encrypted per node instance
@@ -126,6 +134,21 @@ func (m *Manifest) validate() error {
 	if err := normalizeParams(m.Config, "config"); err != nil {
 		return err
 	}
+	if err := normalizeParams(m.Vars, "vars"); err != nil {
+		return err
+	}
+	settings := map[string]bool{}
+	for _, p := range m.Config {
+		settings[p.Name] = true
+	}
+	for _, p := range m.Vars {
+		if p.Type == ParamSecret {
+			return fmt.Errorf("vars: %q cannot be a secret; put secrets into config", p.Name)
+		}
+		if settings[p.Name] {
+			return fmt.Errorf("%q is declared in both config and vars", p.Name)
+		}
+	}
 	if err := normalizeParams(m.Params, "params"); err != nil {
 		return err
 	}
@@ -186,7 +209,7 @@ func normalizeParams(ps []Param, where string) error {
 func (m *Manifest) Info(source string) ModuleInfo {
 	return ModuleInfo{
 		Module: m.Module, Name: m.Name, Version: m.Version, Description: m.Description,
-		Color: m.Color, Runtime: m.Runtime, Source: source, Config: m.Config, AllowedHosts: m.AllowedHosts,
+		Color: m.Color, Runtime: m.Runtime, Source: source, Config: m.Config, Vars: m.Vars, AllowedHosts: m.AllowedHosts,
 	}
 }
 
