@@ -33,6 +33,8 @@ type Config struct {
 	SecretKeysOld []string
 	// PluginSync is how often imported plugins are re-read from the database.
 	PluginSync time.Duration
+	// DisableCodeNode turns off the JavaScript Code node.
+	DisableCodeNode bool
 
 	Workers          int
 	ExecutionTimeout time.Duration
@@ -110,6 +112,7 @@ func Load() (*Config, error) {
 	if c.PluginSync, err = time.ParseDuration(env("G8G_PLUGIN_SYNC", "30s")); err != nil {
 		return nil, fmt.Errorf("G8G_PLUGIN_SYNC: %w", err)
 	}
+	c.DisableCodeNode = env("G8G_DISABLE_CODE_NODE", "false") == "true"
 	if c.SecretKey == "" {
 		return nil, fmt.Errorf("G8G_SECRET_KEY is required (generate one with: openssl rand -base64 32)")
 	}

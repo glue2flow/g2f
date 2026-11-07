@@ -25,6 +25,32 @@ export function TriggerInfo({ workflow, nodeId, data, dirty }: Props) {
     // Refetch whenever a new version is saved.
   }, [workflow.id, workflow.version, workflow.active, nodeId, kind]);
 
+  if (data.type === "core.wait" && (data.params.mode ?? "duration") === "webhook") {
+    return (
+      <div className="info-box">
+        The execution pauses here until its resume URL is called (any HTTP method). Put the URL into an earlier node, e.g. an
+        approval message: <code>{"{{ execution.resumeUrl }}?decision=approve"}</code>. The request (query, body) is the output.
+      </div>
+    );
+  }
+  if (data.type === "core.wait") {
+    return <div className="info-box">Paused executions are stored in the database and continue after restarts.</div>;
+  }
+  if (kind === "call") {
+    return (
+      <div className="info-box">
+        Runs when another workflow's Execute Workflow node calls it. The last node's output is returned.
+      </div>
+    );
+  }
+  if (kind === "error") {
+    return (
+      <div className="info-box">
+        Emits <code>workflow</code>, <code>execution</code>, <code>failedNode</code> and <code>error</code> of the failed run.
+        Watching other workflows requires this workflow to be active.
+      </div>
+    );
+  }
   if (kind === "manual") {
     return <div className="info-box">Select this node and click ▶ Run to start the workflow from here.</div>;
   }

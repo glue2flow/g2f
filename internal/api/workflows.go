@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -103,7 +104,7 @@ func (s *Server) createWorkflow(w http.ResponseWriter, r *http.Request) {
 	wf := &workflow.Workflow{
 		ID: uuid.NewString(), OrgID: u.Org, OwnerSub: u.Sub, OwnerName: u.Name,
 	}
-	if err := s.apply(wf, &in, true); err != nil {
+	if err := s.apply(r.Context(), u, wf, &in, true); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -140,7 +141,7 @@ func (s *Server) updateWorkflow(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "only the owner can change scope and sharing")
 		return
 	}
-	if err := s.apply(wf, &in, isOwner); err != nil {
+	if err := s.apply(r.Context(), auth.FromContext(r.Context()), wf, &in, isOwner); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -173,7 +174,7 @@ func (s *Server) deleteWorkflow(w http.ResponseWriter, r *http.Request) {
 }
 
 // apply copies validated input onto wf.
-func (s *Server) apply(wf *workflow.Workflow, in *workflowInput, sharing bool) error {
+func (s *Server) apply(ctx context.Context, u *auth.User, wf *workflow.Workflow, in *workflowInput, sharing bool) error {
 	in.Name = strings.TrimSpace(in.Name)
 	if in.Name == "" {
 		return errors.New("name is required")
@@ -182,6 +183,9 @@ func (s *Server) apply(wf *workflow.Workflow, in *workflowInput, sharing bool) e
 		return err
 	}
 	if err := s.validateNodes(&in.Graph); err != nil {
+		return err
+	}
+	if err := s.checkWorkflowRefs(ctx, u, wf.ID, &in.Graph); err != nil {
 		return err
 	}
 	wf.Name, wf.Description, wf.Graph, wf.Active = in.Name, in.Description, in.Graph, in.Active
@@ -214,7 +218,8 @@ func (s *Server) validateNodes(g *workflow.Graph) error {
 		src, _ := s.reg.Get(g.Node(e.Source).Type)
 		dst, _ := s.reg.Get(g.Node(e.Target).Type)
 		var err error
-		if e.SourceHandle, err = pickHandle(e.SourceHandle, src.Definition().Outputs, "output", g.Node(e.Source).Name); err != nil {
+		srcDef := src.Definition()
+		if e.SourceHandle, err = pickHandle(e.SourceHandle, srcDef.OutputsFor(g.Node(e.Source).Params), "output", g.Node(e.Source).Name); err != nil {
 			return err
 		}
 		if e.TargetHandle, err = pickHandle(e.TargetHandle, dst.Definition().Inputs, "input", g.Node(e.Target).Name); err != nil {
@@ -257,12 +262,50 @@ func checkFieldExpressions(n *workflow.Node, def nodes.Definition) error {
 	return nil
 }
 
-// pickHandle defaults an empty handle when the node has exactly one, and
-// rejects handles the node does not have.
+// checkWorkflowRefs makes sure the saving user may use the workflows a node
+// references: Execute Workflow needs the runner role on its target, an Error
+// Trigger watching other workflows needs at least viewer. This keeps users
+// from running or observing workflows that were not shared with them.
+func (s *Server) checkWorkflowRefs(ctx context.Context, u *auth.User, selfID string, g *workflow.Graph) error {
+	for _, n := range g.Nodes {
+		impl, _ := s.reg.Get(n.Type)
+		def := impl.Definition()
+		for _, p := range def.Params {
+			var ids []string
+			var min workflow.Role
+			switch p.Type {
+			case nodes.ParamWorkflow:
+				if id, _ := n.Params[p.Name].(string); id != "" {
+					ids, min = []string{id}, workflow.RoleRunner
+				}
+			case nodes.ParamWorkflows:
+				ids, min = nodes.ParseList(n.Params[p.Name]), workflow.RoleViewer
+			default:
+				continue
+			}
+			for _, id := range ids {
+				if id == selfID {
+					continue
+				}
+				ref, err := s.store.GetWorkflow(ctx, id)
+				if err != nil || !ref.RoleFor(u).AtLeast(min) {
+					return fmt.Errorf("node %q: workflow %s not found or not shared with you as %s", n.Name, id, min)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// pickHandle defaults an empty handle to the node's only handle (or to "main"),
+// and rejects handles the node does not have.
 func pickHandle(h string, handles []string, kind, node string) (string, error) {
 	if h == "" {
 		if len(handles) == 1 {
 			return handles[0], nil
+		}
+		if slices.Contains(handles, workflow.DefaultHandle) {
+			return workflow.DefaultHandle, nil // e.g. Wait: main vs. timeout
 		}
 		return "", fmt.Errorf("connection to %q must name the %s (%s)", node, kind, strings.Join(handles, ", "))
 	}
@@ -334,6 +377,27 @@ func (s *Server) listExecutions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, execs)
+}
+
+// cancelExecution stops a waiting execution (e.g. an approval nobody will answer).
+func (s *Server) cancelExecution(w http.ResponseWriter, r *http.Request) {
+	exec, err := s.store.GetExecution(r.Context(), chi.URLParam(r, "id"))
+	if err != nil {
+		s.storeError(w, err)
+		return
+	}
+	if _, ok := s.loadWorkflow(w, r, exec.WorkflowID, workflow.RoleRunner); !ok {
+		return
+	}
+	if err := s.store.CancelWaiting(r.Context(), exec.ID, auth.FromContext(r.Context()).Name); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusConflict, "execution is not waiting")
+			return
+		}
+		s.storeError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) getExecution(w http.ResponseWriter, r *http.Request) {

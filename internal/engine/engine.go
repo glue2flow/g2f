@@ -5,6 +5,9 @@
 // concatenation of all items arriving on its incoming edges; a node that
 // receives no items (e.g. the unused branch of an If) is skipped, and so are
 // its descendants unless they receive items from elsewhere.
+//
+// The whole progress of a run lives in a serializable runState, so a run can
+// pause at a Wait node, be persisted, and continue later (see wait.go).
 package engine
 
 import (
@@ -32,15 +35,28 @@ type SecretSource interface {
 	ModuleSettings(ctx context.Context, org, module string) (config, vars map[string]any, err error)
 }
 
-// ExecStore is the persistence the engine needs.
+// ExecStore is the persistence the engine needs. Stores that also implement
+// WaitStore enable the Wait node.
 type ExecStore interface {
 	CreateExecution(ctx context.Context, e *store.Execution) error
 	UpdateExecution(ctx context.Context, e *store.Execution) error
 }
 
+// WorkflowLoader loads workflows for sub-workflow calls.
+type WorkflowLoader interface {
+	GetWorkflow(ctx context.Context, id string) (*workflow.Workflow, error)
+}
+
 type Options struct {
 	// Secrets is optional; without it nodes see no secrets and no plugin config.
-	Secrets        SecretSource
+	Secrets SecretSource
+	// Workflows is optional; without it Execute Workflow nodes fail.
+	Workflows WorkflowLoader
+	// ResumeURL builds the signed URL that resumes a waiting execution.
+	ResumeURL func(executionID string) string
+	// OnFailure is called (in the background) after an execution failed.
+	OnFailure func(exec *store.Execution, wf *workflow.Workflow)
+
 	Workers        int
 	Timeout        time.Duration
 	MaxStoredItems int
@@ -95,27 +111,73 @@ type Result struct {
 	LastOutput []nodes.Item
 }
 
+// runState is everything needed to continue a run. It is persisted as JSON
+// while the execution waits, so it must only contain JSON-friendly data.
+type runState struct {
+	Workflow wfMeta                             `json:"workflow"`
+	Graph    workflow.Graph                     `json:"graph"` // the version the run started with
+	StartID  string                             `json:"startId"`
+	Depth    int                                `json:"depth"` // sub-workflow nesting level
+	Done     map[string]bool                    `json:"done"`
+	Received map[string]bool                    `json:"received"`
+	Inputs   map[string]map[string][]nodes.Item `json:"inputs"`  // node -> input handle -> items
+	Outputs  map[string]any                     `json:"outputs"` // node name -> items (expression scope)
+	Trigger  nodes.Item                         `json:"trigger"`
+	Last     []nodes.Item                       `json:"last"`
+	WaitNode string                             `json:"waitNode,omitempty"`
+}
+
+type wfMeta struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	OrgID   string `json:"orgId"`
+	Version int    `json:"version"`
+}
+
+func (m wfMeta) workflow() *workflow.Workflow {
+	return &workflow.Workflow{ID: m.ID, Name: m.Name, OrgID: m.OrgID, Version: m.Version}
+}
+
+func newState(req Request, start *workflow.Node, depth int) *runState {
+	w := req.Workflow
+	return &runState{
+		Workflow: wfMeta{ID: w.ID, Name: w.Name, OrgID: w.OrgID, Version: w.Version},
+		Graph:    w.Graph, StartID: start.ID, Depth: depth,
+		Done:     map[string]bool{},
+		Received: map[string]bool{start.ID: true},
+		Inputs:   map[string]map[string][]nodes.Item{start.ID: {workflow.DefaultHandle: req.Items}},
+		Outputs:  map[string]any{},
+		Trigger:  nodes.Item{},
+	}
+}
+
 // Start persists a queued execution and runs it in the background.
 func (e *Engine) Start(ctx context.Context, req Request) (*store.Execution, error) {
 	exec, start, err := e.prepare(ctx, req)
 	if err != nil {
 		return nil, err
 	}
-	// The goroutine keeps mutating exec; callers get a snapshot.
-	snapshot := *exec
+	st := newState(req, start, 0)
+	e.background(exec, st, nil)
+	return exec, nil
+}
+
+// background runs exec in a goroutine, bounded by the worker pool. exec is
+// copied first because the goroutine keeps mutating its own copy.
+func (e *Engine) background(exec *store.Execution, st *runState, resume nodes.Output) {
+	own := *exec
 	e.wg.Add(1)
 	go func() {
 		defer e.wg.Done()
 		select {
 		case e.sem <- struct{}{}:
 		case <-e.baseCtx.Done():
-			e.finish(exec, nil, errors.New("server shutting down"))
+			e.finish(&own, st, nil, errors.New("server shutting down"))
 			return
 		}
 		defer func() { <-e.sem }()
-		e.execute(e.baseCtx, exec, req, start)
+		e.execute(e.baseCtx, &own, st, resume)
 	}()
-	return &snapshot, nil
 }
 
 // Run executes synchronously and returns the result, bounded by ctx.
@@ -124,19 +186,20 @@ func (e *Engine) Run(ctx context.Context, req Request) (*Result, error) {
 	if err != nil {
 		return nil, err
 	}
+	st := newState(req, start, 0)
 	select {
 	case e.sem <- struct{}{}:
 	case <-ctx.Done():
-		e.finish(exec, nil, ctx.Err())
-		return &Result{Execution: exec}, nil
+		return e.finish(exec, st, nil, ctx.Err()), nil
 	}
 	defer func() { <-e.sem }()
 	e.wg.Add(1)
 	defer e.wg.Done()
-	return e.execute(ctx, exec, req, start), nil
+	return e.execute(ctx, exec, st, nil), nil
 }
 
 // Shutdown cancels running executions and waits for them to record their state.
+// Waiting executions are unaffected; they resume after the next start.
 func (e *Engine) Shutdown(timeout time.Duration) {
 	e.cancel()
 	done := make(chan struct{})
@@ -204,10 +267,15 @@ func (e *Engine) findTrigger(req Request) (*workflow.Node, error) {
 	if req.TriggerType == nodes.TriggerManual && fallback != nil {
 		return fallback, nil
 	}
+	if req.TriggerType == nodes.TriggerCall {
+		return nil, errors.New("workflow has no 'Called by Workflow' trigger")
+	}
 	return nil, fmt.Errorf("workflow has no %s trigger", req.TriggerType)
 }
 
-func (e *Engine) execute(ctx context.Context, exec *store.Execution, req Request, start *workflow.Node) *Result {
+// execute runs (or, with resume set, continues) a run until it finishes or
+// pauses. resume is the output of the Wait node the run paused at.
+func (e *Engine) execute(ctx context.Context, exec *store.Execution, st *runState, resume nodes.Output) *Result {
 	ctx, cancel := context.WithTimeout(ctx, e.opts.Timeout)
 	defer cancel()
 
@@ -216,88 +284,116 @@ func (e *Engine) execute(ctx context.Context, exec *store.Execution, req Request
 		e.log.Error("update execution", "id", exec.ID, "err", err)
 	}
 
-	log := e.log.With("workflow", req.Workflow.ID, "execution", exec.ID)
-	g := &req.Workflow.Graph
-	reachable := g.Reachable(start.ID)
+	log := e.log.With("workflow", st.Workflow.ID, "execution", exec.ID)
+	g := &st.Graph
+	reachable := g.Reachable(st.StartID)
 	order, err := g.TopoOrder(reachable)
 	if err != nil {
-		return e.finish(exec, nil, err)
+		return e.finish(exec, st, nil, err)
 	}
 
-	env := expression.Env{
-		"workflow":  map[string]any{"id": req.Workflow.ID, "name": req.Workflow.Name},
-		"execution": map[string]any{"id": exec.ID, "triggerType": exec.TriggerType},
-		"nodes":     map[string]any{},
-		"trigger":   map[string]any{},
+	execInfo := map[string]any{"id": exec.ID, "triggerType": exec.TriggerType}
+	if e.opts.ResumeURL != nil {
+		execInfo["resumeUrl"] = e.opts.ResumeURL(exec.ID)
 	}
-	nodeOutputs := env["nodes"].(map[string]any)
+	env := expression.Env{
+		"workflow":  map[string]any{"id": st.Workflow.ID, "name": st.Workflow.Name},
+		"execution": execInfo,
+		"nodes":     st.Outputs,
+		"trigger":   st.Trigger,
+	}
 
 	var secrets map[string]map[string]string
 	if e.opts.Secrets != nil {
-		if secrets, err = e.opts.Secrets.NodeSecrets(ctx, req.Workflow.ID); err != nil {
-			return e.finish(exec, nil, fmt.Errorf("load secrets: %w", err))
+		if secrets, err = e.opts.Secrets.NodeSecrets(ctx, st.Workflow.ID); err != nil {
+			return e.finish(exec, st, nil, fmt.Errorf("load secrets: %w", err))
 		}
 	}
-	settings := map[string]moduleSettings{} // module -> settings, loaded lazily
-	scrub := newScrubber(secrets)
-
-	// inputs: node id -> input handle -> items
-	inputs := map[string]map[string][]nodes.Item{start.ID: {workflow.DefaultHandle: req.Items}}
-	received := map[string]bool{start.ID: true}
-	var last []nodes.Item
+	rc := &runCtx{
+		settings: map[string]moduleSettings{}, scrub: newScrubber(secrets),
+		rt: &runtime{e: e, st: st, execID: exec.ID}, log: log,
+	}
 
 	for _, id := range order {
-		n := g.Node(id)
-		step := store.Step{NodeID: n.ID, NodeName: n.Name, NodeType: n.Type, StartedAt: time.Now().UTC()}
-		byHandle := inputs[id]
-		in := concatInputs(byHandle)
-		step.InputCount = len(in)
-
-		if !received[id] || (id != start.ID && len(in) == 0) {
-			step.Status = "skipped"
-			exec.Steps = append(exec.Steps, step)
+		if st.Done[id] {
 			continue
 		}
-
+		n := g.Node(id)
 		var out nodes.Output
-		if n.Disabled {
-			out = nodes.Output{workflow.DefaultHandle: in}
-		} else {
-			out, err = e.runNode(ctx, req.Workflow, withSecrets(n, secrets[n.ID]), byHandle, in, env, settings, scrub, log)
-		}
-		step.DurationMs = time.Since(step.StartedAt).Milliseconds()
-		if err != nil {
-			// Error messages are stored and shown to viewers: never include secrets.
-			msg := scrub.clean(err.Error())
-			step.Status = "error"
-			step.Error = msg
-			exec.Steps = append(exec.Steps, step)
-			return e.finish(exec, nil, fmt.Errorf("node %q: %s", n.Name, msg))
-		}
-		step.Status = "success"
-		step.Output, step.Truncated = e.truncate(out)
-		exec.Steps = append(exec.Steps, step)
 
-		all := flatten(out)
-		nodeOutputs[n.Name] = all
-		if id == start.ID && len(all) > 0 {
-			env["trigger"] = all[0]
+		if resume != nil && id == st.WaitNode {
+			// Continue after the Wait node: its output decides the branch.
+			out = resume
+			resume = nil
+			st.WaitNode = ""
+			e.completeWaitStep(exec, id, out)
+		} else {
+			step := store.Step{NodeID: n.ID, NodeName: n.Name, NodeType: n.Type, StartedAt: time.Now().UTC()}
+			byHandle := st.Inputs[id]
+			in := concatInputs(byHandle)
+			step.InputCount = len(in)
+
+			if !st.Received[id] || (id != st.StartID && len(in) == 0) {
+				step.Status = "skipped"
+				exec.Steps = append(exec.Steps, step)
+				st.Done[id] = true
+				continue
+			}
+
+			if n.Disabled {
+				out = nodes.Output{workflow.DefaultHandle: in}
+			} else {
+				out, err = e.runNode(ctx, st, withSecrets(n, secrets[n.ID]), byHandle, in, env, rc)
+			}
+			step.DurationMs = time.Since(step.StartedAt).Milliseconds()
+
+			var wait *nodes.WaitRequest
+			if errors.As(err, &wait) {
+				return e.pause(exec, st, n, step, wait)
+			}
+			if err != nil {
+				// Error messages are stored and shown to viewers: never include secrets.
+				msg := rc.scrub.clean(err.Error())
+				step.Status = "error"
+				step.Error = msg
+				exec.Steps = append(exec.Steps, step)
+				return e.finish(exec, st, nil, fmt.Errorf("node %q: %s", n.Name, msg))
+			}
+			step.Status = "success"
+			step.Output, step.Truncated = e.truncate(out)
+			exec.Steps = append(exec.Steps, step)
 		}
-		last = all
+
+		st.Done[id] = true
+		all := flatten(out)
+		st.Outputs[n.Name] = all
+		if id == st.StartID && len(all) > 0 {
+			st.Trigger = all[0]
+			env["trigger"] = st.Trigger
+		}
+		st.Last = all
 
 		for _, edge := range g.Edges {
 			if edge.Source != id || !reachable[edge.Target] {
 				continue
 			}
-			received[edge.Target] = true
+			st.Received[edge.Target] = true
 			th := e.targetHandle(g, edge)
-			if inputs[edge.Target] == nil {
-				inputs[edge.Target] = map[string][]nodes.Item{}
+			if st.Inputs[edge.Target] == nil {
+				st.Inputs[edge.Target] = map[string][]nodes.Item{}
 			}
-			inputs[edge.Target][th] = append(inputs[edge.Target][th], out[edge.Handle()]...)
+			st.Inputs[edge.Target][th] = append(st.Inputs[edge.Target][th], out[edge.Handle()]...)
 		}
 	}
-	return e.finish(exec, last, nil)
+	return e.finish(exec, st, st.Last, nil)
+}
+
+// runCtx holds per-run helpers that are not persisted.
+type runCtx struct {
+	settings map[string]moduleSettings
+	scrub    *scrubber
+	rt       *runtime
+	log      *slog.Logger
 }
 
 // targetHandle returns the input handle an edge feeds; edges without one go to
@@ -348,8 +444,8 @@ func withSecrets(n *workflow.Node, secrets map[string]string) *workflow.Node {
 	return &c
 }
 
-func (e *Engine) runNode(ctx context.Context, wf *workflow.Workflow, n *workflow.Node, byHandle map[string][]nodes.Item,
-	in []nodes.Item, env expression.Env, settings map[string]moduleSettings, scrub *scrubber, log *slog.Logger) (out nodes.Output, err error) {
+func (e *Engine) runNode(ctx context.Context, st *runState, n *workflow.Node, byHandle map[string][]nodes.Item,
+	in []nodes.Item, env expression.Env, rc *runCtx) (out nodes.Output, err error) {
 	impl, ok := e.reg.Get(n.Type)
 	if !ok {
 		return nil, fmt.Errorf("unknown node type %q", n.Type)
@@ -357,15 +453,15 @@ func (e *Engine) runNode(ctx context.Context, wf *workflow.Workflow, n *workflow
 	def := impl.Definition()
 	var ms moduleSettings
 	if mod := def.Module; mod != "" && mod != nodes.BuiltinModule && e.opts.Secrets != nil {
-		if ms, ok = settings[mod]; !ok {
-			if ms.config, ms.vars, err = e.opts.Secrets.ModuleSettings(ctx, wf.OrgID, mod); err != nil {
+		if ms, ok = rc.settings[mod]; !ok {
+			if ms.config, ms.vars, err = e.opts.Secrets.ModuleSettings(ctx, st.Workflow.OrgID, mod); err != nil {
 				return nil, fmt.Errorf("load %s settings: %w", mod, err)
 			}
-			settings[mod] = ms
+			rc.settings[mod] = ms
 			if info, ok := e.reg.Module(mod); ok {
 				for _, p := range info.Config {
 					if s, isStr := ms.config[p.Name].(string); isStr && p.Type == nodes.ParamSecret {
-						scrub.add(s)
+						rc.scrub.add(s)
 					}
 				}
 			}
@@ -373,7 +469,7 @@ func (e *Engine) runNode(ctx context.Context, wf *workflow.Workflow, n *workflow
 	}
 	defer func() {
 		if r := recover(); r != nil {
-			log.Error("node panic", "node", n.Name, "panic", r, "stack", string(debug.Stack()))
+			rc.log.Error("node panic", "node", n.Name, "panic", r, "stack", string(debug.Stack()))
 			err = fmt.Errorf("internal error: %v", r)
 		}
 	}()
@@ -384,13 +480,15 @@ func (e *Engine) runNode(ctx context.Context, wf *workflow.Workflow, n *workflow
 		in = []nodes.Item{}
 	}
 	return impl.Execute(ctx, &nodes.ExecContext{
-		Node: n, Def: &def, Items: in, Inputs: byHandle, Config: ms.config, Vars: ms.vars, Env: env, Logger: log,
+		Node: n, Def: &def, Items: in, Inputs: byHandle, Config: ms.config, Vars: ms.vars,
+		Env: env, Logger: rc.log, Runtime: rc.rt,
 	})
 }
 
-func (e *Engine) finish(exec *store.Execution, last []nodes.Item, err error) *Result {
+func (e *Engine) finish(exec *store.Execution, st *runState, last []nodes.Item, err error) *Result {
 	now := time.Now().UTC()
 	exec.FinishedAt = &now
+	exec.ResumeAt = nil
 	if err != nil {
 		exec.Status = store.StatusError
 		exec.Error = err.Error()
@@ -402,6 +500,10 @@ func (e *Engine) finish(exec *store.Execution, last []nodes.Item, err error) *Re
 	defer cancel()
 	if uerr := e.store.UpdateExecution(ctx, exec); uerr != nil {
 		e.log.Error("store execution result", "id", exec.ID, "err", uerr)
+	}
+	if err != nil && e.opts.OnFailure != nil && st != nil {
+		snapshot := *exec
+		go e.opts.OnFailure(&snapshot, st.Workflow.workflow())
 	}
 	return &Result{Execution: exec, LastOutput: last}
 }
@@ -431,10 +533,15 @@ func flatten(out nodes.Output) []nodes.Item {
 	for _, h := range []string{"true", "false"} {
 		all = append(all, out[h]...)
 	}
-	for h, items := range out {
+	rest := make([]string, 0, len(out))
+	for h := range out {
 		if h != workflow.DefaultHandle && h != "true" && h != "false" {
-			all = append(all, items...)
+			rest = append(rest, h)
 		}
+	}
+	sort.Strings(rest)
+	for _, h := range rest {
+		all = append(all, out[h]...)
 	}
 	return all
 }

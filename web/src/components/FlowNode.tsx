@@ -1,5 +1,5 @@
 import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
-import type { NodeDef, Step } from "../types";
+import { outputsFor, type NodeDef, type Step } from "../types";
 
 export interface FlowNodeData extends Record<string, unknown> {
   type: string;
@@ -13,12 +13,12 @@ export interface FlowNodeData extends Record<string, unknown> {
 
 export type FlowNodeType = Node<FlowNodeData, "g8g">;
 
-const triggerIcon: Record<string, string> = { manual: "▶", schedule: "⏱", webhook: "⚡" };
+const triggerIcon: Record<string, string> = { manual: "▶", schedule: "⏱", webhook: "⚡", call: "↪", error: "⚠" };
 
 export function FlowNode({ data, selected }: NodeProps<FlowNodeType>) {
   const def = data.def;
   const inputs = def?.inputs ?? ["main"];
-  const outputs = def?.outputs ?? ["main"];
+  const outputs = outputsFor(def, data.params);
   const color = def?.color ?? "#64748b";
   const cls = ["flow-node", selected && "selected", data.disabled && "disabled", def?.trigger && "trigger", data.status && `st-${data.status}`]
     .filter(Boolean)
@@ -46,7 +46,7 @@ export function FlowNode({ data, selected }: NodeProps<FlowNodeType>) {
       </div>
       {data.status && (
         <div className="flow-node-status" title={data.status}>
-          {data.status === "success" ? `✓ ${data.itemCount ?? 0}` : data.status === "error" ? "✕" : "–"}
+          {data.status === "success" ? `✓ ${data.itemCount ?? 0}` : data.status === "error" ? "✕" : data.status === "waiting" ? "⏸" : "–"}
         </div>
       )}
       {outputs.map((h, i) => {

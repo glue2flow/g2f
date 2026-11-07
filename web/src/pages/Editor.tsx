@@ -398,8 +398,18 @@ function EditorInner({ id, defs, user, config }: Props) {
       <ExecutionsPanel
         executions={executions}
         selected={execution}
+        canCancel={canRun}
         onSelect={(eid) => poll(eid)}
         onRefresh={loadExecutions}
+        onCancel={async (eid) => {
+          try {
+            await api.cancelExecution(eid);
+            poll(eid);
+            loadExecutions();
+          } catch (e) {
+            setMessage({ kind: "error", text: (e as Error).message });
+          }
+        }}
       />
 
       {showSharing && (

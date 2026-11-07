@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { isSecretRef, type NodeDef, type ParamDef } from "../types";
+import { api } from "../api";
+import { isSecretRef, parseList, type NodeDef, type ParamDef, type Workflow } from "../types";
 import type { FlowNodeData } from "./FlowNode";
 
 interface Props {
@@ -123,6 +124,35 @@ function Field({
       break;
     case "json":
       input = <JsonField value={v} readOnly={readOnly} placeholder={def.placeholder} onChange={onChange} />;
+      break;
+    case "code":
+      input = (
+        <textarea
+          className="mono code"
+          rows={14}
+          spellCheck={false}
+          disabled={readOnly}
+          value={String(v ?? "")}
+          onChange={(e) => onChange(e.target.value)}
+          onKeyDown={(e) => {
+            // Tab inserts two spaces instead of leaving the field.
+            if (e.key === "Tab" && !e.shiftKey) {
+              e.preventDefault();
+              const t = e.currentTarget;
+              const pos = t.selectionStart;
+              const next = t.value.slice(0, pos) + "  " + t.value.slice(t.selectionEnd);
+              onChange(next);
+              requestAnimationFrame(() => t.setSelectionRange(pos + 2, pos + 2));
+            }
+          }}
+        />
+      );
+      break;
+    case "workflow":
+      input = <WorkflowPicker value={v} readOnly={readOnly} onChange={onChange} />;
+      break;
+    case "workflows":
+      input = <WorkflowPicker multiple value={v} readOnly={readOnly} onChange={onChange} />;
       break;
     case "number":
       input = (
@@ -263,5 +293,59 @@ export function SecretField({
       value={typeof value === "string" ? value : ""}
       onChange={(e) => onChange(e.target.value)}
     />
+  );
+}
+
+let workflowList: Promise<Workflow[]> | undefined;
+
+/** Picks one workflow (Execute Workflow) or several (Error Trigger) the user can see. */
+function WorkflowPicker({
+  value,
+  multiple,
+  readOnly,
+  onChange,
+}: {
+  value: unknown;
+  multiple?: boolean;
+  readOnly: boolean;
+  onChange: (v: unknown) => void;
+}) {
+  const [list, setList] = useState<Workflow[]>();
+  useEffect(() => {
+    workflowList ??= api.workflows();
+    workflowList.then(setList).catch(() => setList([]));
+  }, []);
+  const current = location.hash.split("/w/")[1];
+  const options = (list ?? []).filter((w) => w.id !== current);
+  if (!list) return <span className="muted small">Loading workflows…</span>;
+  if (!multiple) {
+    return (
+      <select disabled={readOnly} value={String(value ?? "")} onChange={(e) => onChange(e.target.value)}>
+        <option value="">Select a workflow…</option>
+        {options.map((w) => (
+          <option key={w.id} value={w.id}>
+            {w.name}
+            {w.triggers?.includes("call") ? "" : " (no 'Called by Workflow' trigger)"}
+          </option>
+        ))}
+      </select>
+    );
+  }
+  const selected = parseList(value);
+  return (
+    <div className="check-list">
+      {options.length === 0 && <span className="muted small">No other workflows.</span>}
+      {options.map((w) => (
+        <label key={w.id} className="check">
+          <input
+            type="checkbox"
+            disabled={readOnly}
+            checked={selected.includes(w.id)}
+            onChange={(e) => onChange((e.target.checked ? [...selected, w.id] : selected.filter((x) => x !== w.id)).join(","))}
+          />
+          {w.name}
+        </label>
+      ))}
+    </div>
   );
 }

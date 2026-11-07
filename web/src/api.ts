@@ -74,5 +74,6 @@ export const api = {
   pluginConfig: (module: string) => request<ConfigValue[]>("GET", `/api/plugins/${module}/config`),
   setPluginConfig: (module: string, values: Record<string, unknown>) =>
     request<ConfigValue[]>("PUT", `/api/plugins/${module}/config`, { values }),
+  cancelExecution: (id: string) => request<void>("POST", `/api/executions/${id}/cancel`),
   execution: (id: string) => request<Execution>("GET", `/api/executions/${id}`),
 };

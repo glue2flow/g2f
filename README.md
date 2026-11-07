@@ -69,9 +69,68 @@ Each execution stores per-node status, duration and output (capped at
 
 | Category | Nodes |
 | --- | --- |
-| Triggers | Manual, Schedule, Webhook |
-| Core | HTTP Request, Set Fields, If, Transform Items, Log |
+| Triggers | Manual, Schedule, Webhook, **Called by Workflow**, **Error Trigger** |
+| Core | HTTP Request, Set Fields, If, **Switch**, **Merge**, **Code**, **Wait**, Transform Items, Log |
+| Flow | **Execute Workflow** (incl. loops over items / batches) |
 | Logic | **And**, **Or**, **Xor** |
+
+**Switch** routes each item by value: `value: {{ json.severity }}`, `cases: critical, warning`
+creates the outputs `critical`, `warning` and `default`.
+
+**Merge** combines inputs A and B:
+- *append*: A, then B;
+- *join by key*: `{{ json.id }}` on both sides, keeping inner, left or outer matches;
+- *pair by position*.
+
+Fields of B win on conflicts.
+
+**Code** runs JavaScript in an embedded, sandboxed interpreter ([goja](https://github.com/dop251/goja)).
+There is no network, file system, modules or timers, every run uses a fresh VM, and runs stop
+after a timeout (default 10 s).
+- *Once for all items*: use `items`, return an array.
+- *Once per item*: use `item` and `index`, return an object, or `null` to drop the item.
+
+`nodes`, `trigger`, `workflow`, `execution` and `console.log()` are available. Administrators
+can turn the node off with `G8G_DISABLE_CODE_NODE=true`. Memory use of scripts is not limited.
+
+```js
+return items.filter(i => i.total > 100).map(i => ({ id: i.id, vip: true }));
+```
+
+**Wait** pauses an execution and stores its complete state in PostgreSQL, so waits of
+minutes, days or weeks survive restarts and deployments. Three modes:
+- *after an interval*;
+- *at a specific time* (with timezone);
+- *when the resume URL is called*: `{{ execution.resumeUrl }}` can be used in any node before
+  the Wait, e.g. in an approval message. Calling it with any HTTP method continues the run, and
+  the request (`query`, `body`, `headers`) becomes the Wait node's output.
+
+Unanswered webhook waits continue on the `timeout` output after the configured hours. Resume
+URLs are HMAC-signed with a key derived from `G8G_SECRET_KEY`. Waiting runs show a *Cancel*
+button, and the execution timeout only counts active time. Every replica polls for due waits;
+each resume is claimed atomically, so it happens exactly once.
+
+```
+Expense ─► Ask manager (Slack: "{{ execution.resumeUrl }}?decision=approve") ─► Wait ─► Switch(json.query.decision)
+                                                                                   └─timeout─► Escalate
+```
+
+**Execute Workflow** runs another workflow that starts with a *Called by Workflow* trigger, and
+continues with that workflow's last output. Modes:
+- *once* with all items;
+- *per item*;
+- *per batch of N*, with an optional pause between runs.
+
+The per-item and batch modes are how g8g loops: the engine runs acyclic graphs, and a loop body
+becomes a reusable sub-workflow. Each call is its own execution (`triggered by workflow: …`).
+Calls stay within the organization and nest at most 5 levels deep. Saving requires the
+`runner` role on the called workflow. Wait nodes are not allowed in called workflows.
+
+**Error Trigger** starts a workflow when a run fails. It can watch the workflow it belongs to
+(an in-workflow error handler) or selected workflows (watching others requires viewer access
+and an active error workflow). It emits `workflow` (with editor URL), `execution`,
+`failedNode` and `error`. Manual test runs are ignored unless enabled, and failures of error
+workflows never trigger further error workflows.
 
 **Logic gates** combine two branches. Each gate has the inputs **A** and **B** and the outputs
 `true` / `false`. An input is *true* when it received at least one item matching its
@@ -320,19 +379,22 @@ in `RegisterBuiltins`.
 | `G8G_OIDC_PLUGIN_ADMIN_ROLE` | `g8g-plugin-admin` | may import plugins (installation-wide) |
 | `G8G_DEFAULT_ORG` | `default` | org for users without an org claim |
 | `G8G_WORKERS` | `16` | max concurrent executions |
-| `G8G_EXECUTION_TIMEOUT` | `5m` | per execution |
+| `G8G_EXECUTION_TIMEOUT` | `5m` | per execution (active time; waiting does not count) |
 | `G8G_MAX_STORED_ITEMS` | `100` | items stored per node output |
 | `G8G_SCHEDULE_CATCHUP` | `1h` | how late a missed one-time schedule may still run |
 | `G8G_WEBHOOK_MAX_WAIT` | `60s` | max wait for webhooks that respond with the result |
 | `G8G_STATIC_DIR` | `./web/dist` | built editor |
 | `G8G_MODULES_DIR` | `./modules` | plugins loaded at startup |
 | `G8G_PLUGIN_SYNC` | `30s` | how often imported plugins are reloaded from the database |
+| `G8G_DISABLE_CODE_NODE` | `false` | turn off the JavaScript Code node |
 
 ## Roadmap
 
 - Reusable credentials (named, shareable like workflows) in addition to per-node secrets
 - Plugin signing and a plugin catalog
-- Code node (JavaScript via goja / QuickJS-WASM)
+- OAuth2 credentials (Google, Microsoft, HubSpot, …) managed by the host
+- Built-in protocol nodes: SMTP/IMAP, Postgres/MySQL, SFTP
+- Memory limits for the Code node (e.g. QuickJS in WASM)
 - Horizontal scaling: run executions through a Postgres-backed job queue (schedules are
   already replica-safe; the restart recovery of running executions still assumes one instance)
 - Webhook rate limiting and a "test URL" that works while a workflow is inactive

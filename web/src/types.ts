@@ -59,7 +59,18 @@ export interface Workflow {
   triggers?: string[];
 }
 
-export type ParamType = "string" | "text" | "number" | "boolean" | "select" | "json" | "secret" | "datetime";
+export type ParamType =
+  | "string"
+  | "text"
+  | "number"
+  | "boolean"
+  | "select"
+  | "json"
+  | "secret"
+  | "datetime"
+  | "code"
+  | "workflow"
+  | "workflows";
 
 export interface ParamDef {
   name: string;
@@ -80,7 +91,8 @@ export interface NodeDef {
   category: string;
   description: string;
   color?: string;
-  trigger?: "manual" | "schedule" | "webhook";
+  trigger?: "manual" | "schedule" | "webhook" | "call" | "error";
+  dynamicOutputs?: { param: string; extra?: string[] };
   inputs: string[];
   outputs: string[];
   params: ParamDef[];
@@ -88,13 +100,13 @@ export interface NodeDef {
   source: string;
 }
 
-export type ExecStatus = "queued" | "running" | "success" | "error";
+export type ExecStatus = "queued" | "running" | "waiting" | "success" | "error";
 
 export interface Step {
   nodeId: string;
   nodeName: string;
   nodeType: string;
-  status: "success" | "error" | "skipped";
+  status: "success" | "error" | "skipped" | "waiting";
   startedAt: string;
   durationMs: number;
   inputCount: number;
@@ -113,6 +125,8 @@ export interface Execution {
   status: ExecStatus;
   error?: string;
   steps?: Step[];
+  resumeAt?: string;
+  waitMode?: string;
   startedAt: string;
   finishedAt?: string;
 }
@@ -131,7 +145,7 @@ export const atLeast = (r: Role | undefined, min: Role) => !!r && roleRank[r] >=
 export interface TriggerInfo {
   nodeId: string;
   name: string;
-  kind: "manual" | "schedule" | "webhook";
+  kind: "manual" | "schedule" | "webhook" | "call" | "error";
   listening: boolean;
   error?: string;
   webhook?: { url: string; method: string; auth: "none" | "token" | "hmac"; header?: string; respond: string };
@@ -164,3 +178,25 @@ export interface ConfigValue extends ParamDef {
 export const SECRET_REF = { $secret: "stored" } as const;
 export const isSecretRef = (v: unknown): boolean =>
   typeof v === "object" && v !== null && "$secret" in (v as Record<string, unknown>);
+
+/** Splits a comma separated list (or array) into unique, trimmed entries. */
+export function parseList(v: unknown): string[] {
+  const raw = Array.isArray(v) ? v.map(String) : typeof v === "string" ? v.split(",") : [];
+  const out: string[] = [];
+  for (const r of raw) {
+    const t = r.trim();
+    if (t && !out.includes(t)) out.push(t);
+  }
+  return out;
+}
+
+/** Output handles of a node, honouring parameter-driven outputs (Switch). */
+export function outputsFor(def: NodeDef | undefined, params: Record<string, unknown>): string[] {
+  if (!def) return ["main"];
+  const dyn = def.dynamicOutputs;
+  if (!dyn) return def.outputs;
+  const p = def.params.find((x) => x.name === dyn.param);
+  const out = parseList(params[dyn.param] ?? p?.default);
+  for (const e of dyn.extra ?? []) if (!out.includes(e)) out.push(e);
+  return out;
+}

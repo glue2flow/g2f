@@ -89,10 +89,18 @@ func run(log *slog.Logger) error {
 		log.Warn("AUTHENTICATION DISABLED (G8G_AUTH_MODE=none) - do not use in production")
 	}
 
+	nodes.CodeNodeEnabled = !cfg.DisableCodeNode
+	signer := trigger.NewResumeSigner(cfg.SecretKey, cfg.PublicURL)
+	errDispatch := trigger.NewErrorDispatcher(st, nil, reg, log, cfg.PublicURL)
 	eng := engine.New(reg, st, log, engine.Options{
-		Secrets: sec,
-		Workers: cfg.Workers, Timeout: cfg.ExecutionTimeout, MaxStoredItems: cfg.MaxStoredItems,
+		Secrets:   sec,
+		Workflows: st,
+		ResumeURL: signer.URL,
+		OnFailure: errDispatch.WorkflowFailed,
+		Workers:   cfg.Workers, Timeout: cfg.ExecutionTimeout, MaxStoredItems: cfg.MaxStoredItems,
 	})
+
+	errDispatch.SetEngine(eng)
 
 	sched := trigger.NewScheduler(st, eng, reg, log, trigger.SchedulerOptions{CatchUp: cfg.ScheduleCatchUp})
 	schedCtx, stopSched := context.WithCancel(context.Background())
@@ -104,10 +112,12 @@ func run(log *slog.Logger) error {
 		Config: cfg, Store: st, Registry: reg, Engine: eng, Auth: authn, Logger: log,
 		Listener: sched,
 		Webhooks: trigger.NewWebhookHandler(st, eng, reg, sec, log, cfg.WebhookMaxWait),
+		Resume:   trigger.NewResumeHandler(signer, eng, log),
 		Secrets:  sec,
 		Plugins:  plugins,
 	})
 	go plugins.Run(schedCtx, cfg.PluginSync)
+	go eng.RunResumer(schedCtx, 2*time.Second)
 	httpSrv := &http.Server{
 		Addr:              cfg.Listen,
 		Handler:           srv.Handler(),

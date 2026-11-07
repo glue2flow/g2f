@@ -10,6 +10,7 @@ import (
 	"slices"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -42,6 +43,12 @@ const (
 	ParamSelect  ParamType = "select"
 	ParamJSON    ParamType = "json"
 	ParamSecret  ParamType = "secret"
+	// ParamCode is source code, edited with a monospace editor.
+	ParamCode ParamType = "code"
+	// ParamWorkflow references one workflow by id (editor shows a picker).
+	ParamWorkflow ParamType = "workflow"
+	// ParamWorkflows references several workflows (comma separated ids).
+	ParamWorkflows ParamType = "workflows"
 	// ParamDateTime is a local date-time string "YYYY-MM-DDTHH:MM".
 	ParamDateTime ParamType = "datetime"
 )
@@ -79,9 +86,62 @@ type Definition struct {
 	Inputs      []string    `json:"inputs"`
 	Outputs     []string    `json:"outputs"`
 	Params      []Param     `json:"params"`
+	// DynamicOutputs makes the outputs depend on a parameter (e.g. Switch cases).
+	DynamicOutputs *DynamicOutputs `json:"dynamicOutputs,omitempty"`
 	// Module is the plugin module the node belongs to ("builtin" for Go nodes).
 	Module string `json:"module"`
 	Source string `json:"source"` // builtin | file:<name> | imported
+}
+
+// DynamicOutputs derives output handles from a list parameter: one output per
+// list entry, followed by Extra (e.g. "default").
+type DynamicOutputs struct {
+	Param string   `json:"param"`
+	Extra []string `json:"extra,omitempty"`
+}
+
+// OutputsFor returns the output handles of a node with the given parameters.
+func (d *Definition) OutputsFor(params map[string]any) []string {
+	if d.DynamicOutputs == nil {
+		return d.Outputs
+	}
+	v, ok := params[d.DynamicOutputs.Param]
+	if !ok || v == nil {
+		if p := d.Param(d.DynamicOutputs.Param); p != nil {
+			v = p.Default
+		}
+	}
+	out := ParseList(v)
+	for _, e := range d.DynamicOutputs.Extra {
+		if !slices.Contains(out, e) {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// ParseList reads a comma separated string or a JSON array into unique,
+// trimmed, non-empty strings.
+func ParseList(v any) []string {
+	var raw []string
+	switch t := v.(type) {
+	case string:
+		raw = strings.Split(t, ",")
+	case []any:
+		for _, e := range t {
+			raw = append(raw, fmt.Sprint(e))
+		}
+	case []string:
+		raw = t
+	}
+	out := []string{}
+	for _, r := range raw {
+		r = strings.TrimSpace(r)
+		if r != "" && !slices.Contains(out, r) {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 func (d *Definition) Param(name string) *Param {
@@ -116,6 +176,8 @@ type ExecContext struct {
 	Vars   map[string]any
 	Env    expression.Env // shared scope: nodes, trigger, execution, workflow
 	Logger *slog.Logger
+	// Runtime is provided by the engine (sub-workflows, resume URL).
+	Runtime Runtime
 }
 
 // ItemEnv builds the expression scope for a single item.
@@ -370,7 +432,7 @@ func (r *Registry) Definitions() []Definition {
 }
 
 func categoryRank(c string) string {
-	order := []string{"Triggers", "Core", "Logic"}
+	order := []string{"Triggers", "Core", "Flow", "Logic"}
 	if i := slices.Index(order, c); i >= 0 {
 		return strconv.Itoa(i)
 	}

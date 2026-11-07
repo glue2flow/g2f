@@ -197,7 +197,7 @@ func normalizeParams(ps []Param, where string) error {
 			p.Label = p.Name
 		}
 		switch p.Type {
-		case ParamString, ParamText, ParamNumber, ParamBoolean, ParamSelect, ParamJSON, ParamSecret, ParamDateTime:
+		case ParamString, ParamText, ParamNumber, ParamBoolean, ParamSelect, ParamJSON, ParamSecret, ParamDateTime, ParamCode:
 		default:
 			return fmt.Errorf("%s: parameter %q has unknown type %q", where, p.Name, p.Type)
 		}

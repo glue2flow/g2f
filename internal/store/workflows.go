@@ -156,3 +156,24 @@ func marshalWF(w *workflow.Workflow) (shares, graph []byte, err error) {
 	graph, err = json.Marshal(w.Graph)
 	return
 }
+
+// WorkflowsWithNodeType returns the organization's workflows containing a node
+// of the given type (e.g. error triggers).
+func (s *Store) WorkflowsWithNodeType(ctx context.Context, org, nodeType string) ([]*workflow.Workflow, error) {
+	filter, _ := json.Marshal([]map[string]string{{"type": nodeType}})
+	rows, err := s.pool.Query(ctx, `SELECT `+workflowCols+` FROM workflows
+		WHERE org_id=$1 AND graph->'nodes' @> $2::jsonb`, org, string(filter))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*workflow.Workflow
+	for rows.Next() {
+		w, err := scanWorkflow(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, w)
+	}
+	return out, rows.Err()
+}

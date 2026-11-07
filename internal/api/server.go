@@ -40,6 +40,7 @@ type Server struct {
 	log      *slog.Logger
 	listener ChangeListener
 	webhooks http.Handler
+	resume   http.Handler
 	secrets  *secrets.Service
 	plugins  *plugin.Manager
 }
@@ -55,15 +56,17 @@ type Deps struct {
 	Listener ChangeListener
 	// Webhooks handles /webhook/*; optional.
 	Webhooks http.Handler
-	Secrets  *secrets.Service
-	Plugins  *plugin.Manager
+	// Resume handles /webhook-resume/* (Wait nodes); optional.
+	Resume  http.Handler
+	Secrets *secrets.Service
+	Plugins *plugin.Manager
 }
 
 func New(d Deps) *Server {
 	return &Server{
 		cfg: d.Config, store: d.Store, reg: d.Registry, engine: d.Engine,
 		auth: d.Auth, log: d.Logger, listener: d.Listener, webhooks: d.Webhooks,
-		secrets: d.Secrets, plugins: d.Plugins,
+		secrets: d.Secrets, plugins: d.Plugins, resume: d.Resume,
 	}
 }
 
@@ -95,6 +98,7 @@ func (s *Server) Handler() http.Handler {
 			r.Get("/workflows/{id}/executions", s.listExecutions)
 			r.Get("/workflows/{id}/triggers", s.listTriggers)
 			r.Get("/executions/{id}", s.getExecution)
+			r.Post("/executions/{id}/cancel", s.cancelExecution)
 
 			r.Get("/plugins", s.listPlugins)
 			r.Post("/plugins", s.importPlugin)
@@ -106,6 +110,9 @@ func (s *Server) Handler() http.Handler {
 
 	if s.webhooks != nil {
 		r.Handle("/webhook/*", s.webhooks)
+	}
+	if s.resume != nil {
+		r.Handle("/webhook-resume/*", s.resume)
 	}
 
 	r.NotFound(s.spa)

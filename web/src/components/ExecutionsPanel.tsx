@@ -4,11 +4,13 @@ import type { Execution } from "../types";
 interface Props {
   executions: Execution[];
   selected?: Execution;
+  canCancel: boolean;
   onSelect: (id: string) => void;
   onRefresh: () => void;
+  onCancel: (id: string) => void;
 }
 
-export function ExecutionsPanel({ executions, selected, onSelect, onRefresh }: Props) {
+export function ExecutionsPanel({ executions, selected, canCancel, onSelect, onRefresh, onCancel }: Props) {
   const [stepId, setStepId] = useState<string>();
   const step = selected?.steps?.find((s) => s.nodeId === stepId) ?? selected?.steps?.find((s) => s.status === "error");
 
@@ -42,6 +44,20 @@ export function ExecutionsPanel({ executions, selected, onSelect, onRefresh }: P
                 {selected.triggerType} · by {selected.triggeredBy || "system"} · v{selected.workflowVersion}
               </span>
               {selected.error && <span className="error-text small">{selected.error}</span>}
+              {selected.status === "waiting" && (
+                <>
+                  <span className="muted small">
+                    {selected.waitMode === "webhook" ? "waiting for its resume URL" : "resumes"}
+                    {selected.resumeAt &&
+                      `${selected.waitMode === "webhook" ? ", times out" : ""} at ${new Date(selected.resumeAt).toLocaleString()}`}
+                  </span>
+                  {canCancel && (
+                    <button className="btn small ghost danger" onClick={() => onCancel(selected.id)}>
+                      Cancel
+                    </button>
+                  )}
+                </>
+              )}
             </div>
             <div className="steps">
               <div className="step-tabs">
@@ -73,6 +89,7 @@ export function ExecutionsPanel({ executions, selected, onSelect, onRefresh }: P
 }
 
 function duration(e: Execution) {
+  if (e.status === "waiting") return "waiting";
   if (!e.finishedAt) return e.status;
   const ms = new Date(e.finishedAt).getTime() - new Date(e.startedAt).getTime();
   return ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`;

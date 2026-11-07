@@ -140,6 +140,10 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("X-G8G-Execution-Id", res.Execution.ID)
+	if res.Execution.Status == store.StatusWaiting {
+		writeJSON(w, http.StatusAccepted, map[string]string{"executionId": res.Execution.ID, "status": "waiting"})
+		return
+	}
 	if res.Execution.Status != store.StatusSuccess {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{
 			"error": res.Execution.Error, "executionId": res.Execution.ID,

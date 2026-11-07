@@ -227,3 +227,11 @@ pre.json { margin: 6px 0 0; white-space: pre-wrap; word-break: break-word; }
 .settings-section { border-top: 1px solid var(--border); padding-top: 10px; }
 .settings-section h3 { margin: 0; }
 .settings-section > p { margin: 4px 0 10px; }
+
+/* Waiting executions, code editor, workflow pickers */
+.status-dot.waiting { background: #a855f7; }
+.chip.st-waiting { background: color-mix(in srgb, #a855f7 18%, transparent); color: #a855f7; }
+.step-tab.st-waiting { color: #a855f7; }
+.flow-node.st-waiting { box-shadow: 0 0 0 2px color-mix(in srgb, #a855f7 60%, transparent); }
+textarea.code { font-size: 12px; line-height: 1.5; tab-size: 2; white-space: pre; font-variant-ligatures: none; }
+.check-list { display: flex; flex-direction: column; gap: 4px; max-height: 160px; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; }
