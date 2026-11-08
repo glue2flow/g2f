@@ -280,3 +280,75 @@ func containsAny(list []any, s string) bool {
 	}
 	return false
 }
+
+func TestEmailReceivedTrigger(t *testing.T) {
+	port := startIMAP(t)
+	n := loadNodes(t)["email.received"]
+	if n.Definition().Trigger != nodes.TriggerPoll || len(n.Definition().Inputs) != 0 {
+		t.Fatalf("not a polling trigger: %+v", n.Definition())
+	}
+	cfg := map[string]any{"imapHost": "127.0.0.1", "imapPort": float64(port), "imapSecurity": "none", "imapUsername": "username", "imapPassword": "password"}
+	state := nodes.NewMemoryState()
+	check := func(trigger string, params map[string]any) []nodes.Item {
+		t.Helper()
+		def := n.Definition()
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		out, err := n.Execute(ctx, &nodes.ExecContext{
+			Node: &workflow.Node{ID: "trig", Name: def.Name, Params: params}, Def: &def, Items: []nodes.Item{}, Config: cfg,
+			Env: expression.Env{}, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), State: state, TriggerType: trigger,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out["main"]
+	}
+	add := func(subject string) {
+		c, err := client.Dial("127.0.0.1:" + strconv.Itoa(port))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer c.Logout()
+		if err := c.Login("username", "password"); err != nil {
+			t.Fatal(err)
+		}
+		msg := "From: a@example.com\r\nTo: b@example.com\r\nSubject: " + subject + "\r\n\r\nbody\r\n"
+		if err := c.Append("INBOX", nil, time.Now(), strings.NewReader(msg)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// ▶ Run in the editor shows existing mail and remembers nothing.
+	if got := check("manual", nil); len(got) != 2 {
+		t.Fatalf("test run: %d messages", len(got))
+	}
+	// First real check: existing mail is ignored.
+	if got := check("poll", nil); len(got) != 0 {
+		t.Fatalf("first check emitted %d", len(got))
+	}
+	add("New one")
+	got := check("poll", nil)
+	if len(got) != 1 || got[0]["subject"] != "New one" {
+		t.Fatalf("new mail: %v", got)
+	}
+	if got := check("poll", nil); len(got) != 0 {
+		t.Fatalf("mail emitted twice: %v", got)
+	}
+	// More new mail than the limit: the rest comes with the next check.
+	add("A")
+	add("B")
+	add("C")
+	params := map[string]any{"limit": 2}
+	if got = check("poll", params); len(got) != 2 || got[0]["subject"] != "A" {
+		t.Fatalf("limited check: %v", got)
+	}
+	if got = check("poll", params); len(got) != 1 || got[0]["subject"] != "C" {
+		t.Fatalf("remaining mail: %v", got)
+	}
+	// Filters: mail not matching is skipped for good.
+	add("ignore me")
+	add("Invoice 7")
+	if got = check("poll", map[string]any{"subjectFilter": "Invoice"}); len(got) != 1 || got[0]["subject"] != "Invoice 7" {
+		t.Fatalf("filtered: %v", got)
+	}
+}

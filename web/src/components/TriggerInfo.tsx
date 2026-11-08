@@ -17,7 +17,7 @@ export function TriggerInfo({ workflow, nodeId, data, dirty }: Props) {
   const [info, setInfo] = useState<Info>();
 
   useEffect(() => {
-    if (kind !== "webhook" && kind !== "schedule") return;
+    if (kind !== "webhook" && kind !== "schedule" && kind !== "poll") return;
     api
       .triggers(workflow.id)
       .then((list) => setInfo(list.find((t) => t.nodeId === nodeId)))
@@ -54,7 +54,7 @@ export function TriggerInfo({ workflow, nodeId, data, dirty }: Props) {
   if (kind === "manual") {
     return <div className="info-box">Select this node and click ▶ Run to start the workflow from here.</div>;
   }
-  if (kind !== "webhook" && kind !== "schedule") return null;
+  if (kind !== "webhook" && kind !== "schedule" && kind !== "poll") return null;
   if (!info) {
     return <div className="info-box">{dirty ? "Save the workflow to activate this trigger." : "Loading…"}</div>;
   }
@@ -104,6 +104,24 @@ export function TriggerInfo({ workflow, nodeId, data, dirty }: Props) {
           <summary className="small">curl example</summary>
           <pre className="json">{curl}</pre>
         </details>
+      </div>
+    );
+  }
+
+  if (info.poll) {
+    const p = info.poll;
+    return (
+      <div className="info-box">
+        <div className="row">
+          {status}
+          <span className="chip">every {p.intervalMinutes} min</span>
+        </div>
+        <p className="small" style={{ margin: "6px 0 0" }}>
+          While the workflow is active, glue2flow checks for new items
+          {info.listening && <> (next check {new Date(p.next).toLocaleTimeString()})</>} and starts a run only when there
+          are some. The first check remembers what is already there. ▶ Run shows the current items without remembering
+          them. Failed checks appear as failed executions.
+        </p>
       </div>
     );
   }

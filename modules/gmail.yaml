@@ -229,3 +229,26 @@ nodes:
         - { path: id, type: string }
         - { path: name, type: string }
         - { path: type, type: string, description: system or user }
+
+  - type: newEmail
+    name: New Email
+    description: Start a run when new messages match a Gmail search (one item per message, oldest first). Follow with Get Message for the content.
+    trigger: poll
+    pollKey: "{{ json.id }}"
+    params:
+      - name: query
+        label: Search
+        default: in:inbox
+        description: "Gmail search, e.g. in:inbox -category:promotions, or from:billing@example.com has:attachment"
+      - { name: maxResults, label: Messages checked, type: number, default: 25, description: The newest matching messages looked at per check. }
+    request:
+      method: GET
+      path: /messages
+      query:
+        q: "{{ params.query }}"
+        maxResults: "{{ params.maxResults }}"
+    output: "{{ reverse(response.body.messages ?? []) }}"
+    outputSchema:
+      fields:
+        - { path: id, type: string, description: Message ID (for Get Message) }
+        - { path: threadId, type: string }

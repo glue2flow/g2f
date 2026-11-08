@@ -17,10 +17,10 @@ A plugin (module) is a set of nodes described by a manifest. There are three run
 | GitHub | http | Get Repository, List Issues, Create Issue | [`modules/github.yaml`](../modules/github.yaml) |
 | Slack | http | Post Message (incoming webhook) | [`modules/slack.yaml`](../modules/slack.yaml) |
 | Google Sheets | http + OAuth2 | Append Row, Read Rows | [`modules/google-sheets.yaml`](../modules/google-sheets.yaml) |
-| Gmail | http + OAuth2 | Send Email, Search Messages, Get Message, Get Attachment, Change Labels, Move to Trash, List Labels | [`modules/gmail.yaml`](../modules/gmail.yaml) |
-| Outlook | http + OAuth2 | Send Email, List Messages, Get Message, Reply, Move Message, Mark as Read, List Folders | [`modules/outlook.yaml`](../modules/outlook.yaml) |
+| Gmail | http + OAuth2 | New Email (trigger), Send Email, Search Messages, Get Message, Get Attachment, Change Labels, Move to Trash, List Labels | [`modules/gmail.yaml`](../modules/gmail.yaml) |
+| Outlook | http + OAuth2 | New Email (trigger), Send Email, List Messages, Get Message, Reply, Move Message, Mark as Read, List Folders | [`modules/outlook.yaml`](../modules/outlook.yaml) |
 | Microsoft Teams | http + OAuth2 | Send Channel Message, Reply in Channel Thread, Send Chat Message, List Teams / Channels / Chats | [`modules/ms-teams.yaml`](../modules/ms-teams.yaml) |
-| Email (SMTP/IMAP) | go | Send Email, Read Emails, Move Email, Set Email Flags ([docs](email.md)) | [`modules/email`](../modules/email) |
+| Email (SMTP/IMAP) | go | Email Received (trigger), Send Email, Read Emails, Move Email, Set Email Flags ([docs](email.md)) | [`modules/email`](../modules/email) |
 | Telegram | wasm (Go and JS) | Send Message, Get Bot Info | [`examples/plugins/telegram`](../examples/plugins/telegram) |
 | Mistral AI | wasm (Go) | Chat (prompt → answer) | [`examples/plugins/mistral`](../examples/plugins/mistral) |
 
@@ -95,6 +95,26 @@ nodes:
 
 Config, vars and secret parameters are explained in [Secrets & plugin settings](secrets.md),
 OAuth2 (`oauth2:`) in [Connected accounts](connections.md).
+
+### Polling triggers
+
+A node with `trigger: poll` becomes a [polling trigger](triggers.md#polling-triggers). In an
+`http` module, its request is sent on every check, and `pollKey` (default `{{ json.id }}`)
+identifies the output items: items whose key was emitted before are dropped. glue2flow adds the
+*Check every (minutes)* parameter.
+
+```yaml
+  - type: newEmail
+    name: New Email
+    trigger: poll
+    pollKey: "{{ json.id }}"
+    request: { method: GET, path: /messages, query: { q: "{{ params.query }}" } }
+    output: "{{ reverse(response.body.messages ?? []) }}"   # oldest first
+```
+
+In a Go module, the node's function is the check: it runs with `TriggerType` `poll` (or
+`manual` for test runs, see `ExecContext.IsTestRun`) and returns the new items, keeping its own
+cursor in `ExecContext.State`.
 
 ### Parameters
 

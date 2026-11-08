@@ -94,7 +94,7 @@ nodes:
       - { name: limit, label: Max messages, type: number, default: 20, description: "The newest matching messages, at most 200." }
       - { name: markSeen, label: Mark as read, type: boolean, default: false, description: "Flag the returned messages as read, so the next run skips them." }
       - { name: includeAttachments, label: Include attachment content, type: boolean, default: false, description: "Adds base64 content to each attachment (up to 10 MB per message)." }
-    outputSchema:
+    outputSchema: &messages
       fields:
         - { path: uid, type: number, description: "IMAP UID, for Move / Set Flags" }
         - { path: mailbox, type: string }
@@ -143,3 +143,17 @@ nodes:
       - { name: flags, label: Flags, default: \Seen, description: "Comma separated: \\Seen, \\Flagged, \\Answered, or custom keywords." }
     outputSchema:
       passthrough: true
+
+  - type: received
+    name: Email Received
+    description: Start a run for each check that finds new mail in a mailbox (one item per message, oldest first).
+    trigger: poll
+    params:
+      - { name: mailbox, label: Mailbox, default: INBOX, noExpression: true }
+      - { name: unseenOnly, label: Only unread, type: boolean, default: false, noExpression: true }
+      - { name: fromFilter, label: From contains, noExpression: true }
+      - { name: subjectFilter, label: Subject contains, noExpression: true }
+      - { name: markSeen, label: Mark as read, type: boolean, default: false, noExpression: true }
+      - { name: includeAttachments, label: Include attachment content, type: boolean, default: false, noExpression: true }
+      - { name: limit, label: Max messages per check, type: number, default: 50, noExpression: true, description: "More new mail is picked up by the following checks." }
+    outputSchema: *messages

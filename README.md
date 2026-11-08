@@ -54,9 +54,10 @@ replicas when you need them: if one stops, another continues its runs where they
 
 | | |
 | --- | --- |
-| **Triggers** | Manual · Schedule (cron, once, timezones) · Webhook (token / HMAC) · Called by Workflow · Error Trigger |
+| **Triggers** | Manual · Schedule (cron, once, timezones) · Webhook (token / HMAC) · Called by Workflow · Error Trigger · Polling: Email Received (IMAP), Gmail and Outlook New Email |
 | **Logic & flow** | If · Switch · Merge (append, join, pair) · And / Or / Xor · Execute Workflow (loops, batches) |
-| **Data** | HTTP Request · Set Fields · Transform Items · Code (JavaScript, isolated with a memory limit) · Log |
+| **Data** | HTTP Request · Set Fields · Filter · Sort · Limit · Split Out · Aggregate · Map · Rename / Remove Fields · Date & Time · CSV · Transform Items · Code (JavaScript, isolated with a memory limit) · Log |
+| **Memory** | Remove Duplicates (within a run or across runs) · Data Store (values, counters between runs) |
 | **Long-running** | Wait for a time, a date, or an approval link, for days if needed, surviving restarts |
 | **Integrations** | Gmail · Outlook · Microsoft Teams · Google Sheets (OAuth2) · Email (SMTP/IMAP) · GitHub · Slack · Telegram · Mistral AI |
 | **Accounts** | Users connect their own OAuth2 accounts and share them with groups |
@@ -89,6 +90,8 @@ setup is a demo with default passwords.
 | Plugins: YAML/HTTP and WebAssembly, runtime import | ✅ Working |
 | Connected OAuth2 accounts | ✅ Working (Gmail, Google Sheets, Outlook, Teams included) |
 | Email over SMTP/IMAP (native Go module) | ✅ New |
+| Polling triggers, Remove Duplicates, Data Store | ✅ New |
+| Data nodes: Filter, Sort, Split Out, Aggregate, Date & Time, CSV, … | ✅ New |
 | Code node in an isolated process with a memory limit | ✅ New |
 | Several replicas: executions survive restarts, crashes and rolling deploys | ✅ New |
 | Workflow history, import/export | 🗺️ Planned |
@@ -98,7 +101,8 @@ setup is a demo with default passwords.
 - Reusable API-key credentials (like connections, for non-OAuth services)
 - Plugin signing and a plugin catalog
 - More OAuth2 integration packs (HubSpot, Salesforce, Google Calendar/Drive, SharePoint)
-- An "email received" trigger (IMAP IDLE / Gmail push) instead of schedule + read
+- Push instead of polling for mail (IMAP IDLE, Gmail push notifications, Graph subscriptions)
+- XML / HTML parsing, file (binary) data between nodes
 - More native protocol modules: Postgres/MySQL, SFTP
 - Cancelling running executions from the editor (waiting ones can be cancelled today)
 - Webhook rate limiting and a "test URL" that works while a workflow is inactive

@@ -56,6 +56,8 @@ Run as many replicas as you like against the same PostgreSQL database.
 | Schedules | Every replica runs the scheduler; each firing is claimed once in PostgreSQL (`trigger_firings`). |
 | Webhooks, manual runs | Any replica can receive them; the execution runs on that replica. |
 | Wait nodes | Every replica polls for due waits; each resume is claimed atomically. |
+| Polling triggers | Checks happen at interval-aligned times; each is claimed once in `trigger_firings`. Trigger cursors and the last check error live in `workflow_state`. |
+| Data Store, Remove Duplicates | Values live in PostgreSQL (`workflow_state`); increments and "seen" checks are single atomic statements. |
 | Running executions | Survive the replica that runs them, see below. |
 | Imported plugins | Stored in PostgreSQL and reloaded by every replica (`G2F_PLUGIN_SYNC`). |
 

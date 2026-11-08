@@ -61,8 +61,26 @@ func ResolveParams(ec *ExecContext, item Item, index int) (map[string]any, error
 }
 
 func (d *declarativeNode) Execute(ctx context.Context, ec *ExecContext) (Output, error) {
+	if d.spec.Trigger != "" {
+		return pollTrigger(ctx, ec, func(ctx context.Context, ec *ExecContext) ([]Item, error) {
+			items, err := d.requests(ctx, ec, []Item{{}})
+			if err != nil {
+				return nil, err
+			}
+			return PollNew(ctx, ec, items, d.spec.PollKey)
+		})
+	}
+	out, err := d.requests(ctx, ec, ec.Items)
+	if err != nil {
+		return nil, err
+	}
+	return Output{"main": out}, nil
+}
+
+// requests sends the node's request once per item and returns the output items.
+func (d *declarativeNode) requests(ctx context.Context, ec *ExecContext, items []Item) ([]Item, error) {
 	var out []Item
-	for i, item := range ec.Items {
+	for i, item := range items {
 		params, err := ResolveParams(ec, item, i)
 		if err != nil {
 			return nil, err
@@ -140,7 +158,7 @@ func (d *declarativeNode) Execute(ctx context.Context, ec *ExecContext) (Output,
 	if out == nil {
 		out = []Item{}
 	}
-	return Output{"main": out}, nil
+	return out, nil
 }
 
 func (d *declarativeNode) tokenHostAllowed(raw string) bool {

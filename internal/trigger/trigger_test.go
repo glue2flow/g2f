@@ -100,6 +100,10 @@ type recordingEngine struct {
 	mu   sync.Mutex
 	reqs []engine.Request
 	ch   chan engine.Request
+
+	polls     int
+	pollItems []nodes.Item
+	pollErr   error
 }
 
 func (e *recordingEngine) Start(_ context.Context, r engine.Request) (*store.Execution, error) {
@@ -112,6 +116,16 @@ func (e *recordingEngine) Start(_ context.Context, r engine.Request) (*store.Exe
 
 func (e *recordingEngine) Run(context.Context, engine.Request) (*engine.Result, error) {
 	return nil, fmt.Errorf("not implemented")
+}
+
+func (e *recordingEngine) Poll(_ context.Context, _ *workflow.Workflow, nodeID string) ([]nodes.Item, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.polls++
+	if e.pollErr != nil {
+		return nil, e.pollErr
+	}
+	return e.pollItems, nil
 }
 
 var discard = slog.New(slog.NewTextHandler(io.Discard, nil))

@@ -79,6 +79,18 @@ type nativeNode struct {
 
 func (n *nativeNode) Definition() Definition { return n.def }
 
+// Execute runs the node. For polling triggers fn is the check: it runs when
+// the engine polls (or in a manual test run) and returns the new items;
+// TriggerType tells which ("poll" or "manual", see ExecContext.IsTestRun).
 func (n *nativeNode) Execute(ctx context.Context, ec *ExecContext) (Output, error) {
+	if n.def.Trigger == TriggerPoll {
+		return pollTrigger(ctx, ec, func(ctx context.Context, ec *ExecContext) ([]Item, error) {
+			out, err := n.fn(ctx, ec)
+			if err != nil {
+				return nil, err
+			}
+			return out["main"], nil
+		})
+	}
 	return n.fn(ctx, ec)
 }

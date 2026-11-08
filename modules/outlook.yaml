@@ -256,3 +256,42 @@ nodes:
         - { path: displayName, type: string }
         - { path: unreadItemCount, type: number }
         - { path: totalItemCount, type: number }
+
+  - type: newEmail
+    name: New Email
+    description: Start a run when new messages arrive in a folder (one item per message, oldest first).
+    trigger: poll
+    pollKey: "{{ json.id }}"
+    params:
+      - { name: folder, label: Folder, default: inbox, description: "inbox, archive, … or a folder ID" }
+      - { name: unreadOnly, label: Only unread, type: boolean, default: false }
+      - { name: filter, label: OData filter, description: "Advanced, e.g. hasAttachments eq true" }
+      - { name: top, label: Messages checked, type: number, default: 25, description: The newest messages looked at per check. }
+      - name: bodyType
+        label: Body format
+        type: select
+        default: text
+        options:
+          - { label: Plain text, value: text }
+          - { label: HTML, value: html }
+    request:
+      method: GET
+      path: /mailFolders/{{ params.folder }}/messages
+      headers:
+        Prefer: outlook.body-content-type="{{ params.bodyType }}"
+      query:
+        $top: "{{ params.top }}"
+        $filter: >-
+          {{ join(filter([params.unreadOnly ? 'isRead eq false' : '', params.filter ?? ''], # != ''), ' and ') }}
+    output: >-
+      {{ reverse(map(response.body.value ?? [], ({
+           id: .id, conversationId: .conversationId, subject: .subject,
+           from: .from.emailAddress.address, fromName: .from.emailAddress.name,
+           to: map(.toRecipients ?? [], .emailAddress.address),
+           cc: map(.ccRecipients ?? [], .emailAddress.address),
+           receivedDateTime: .receivedDateTime, isRead: .isRead, importance: .importance,
+           hasAttachments: .hasAttachments, bodyPreview: .bodyPreview, body: .body.content,
+           webLink: .webLink, internetMessageId: .internetMessageId
+         }))) }}
+    outputSchema:
+      fields: *message
