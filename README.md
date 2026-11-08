@@ -46,8 +46,8 @@ Plugins get them; workflow fields don't.
 🔌 **Extend it in any language.** Wrap a REST API in a few lines of YAML, or write a
 sandboxed WebAssembly plugin in Go, JavaScript or Rust, and import it at runtime.
 
-🪶 **Small and simple to run.** One Go binary (~25 MB image) plus PostgreSQL.
-Replica-safe schedules and waits.
+🪶 **Small and simple to run.** One Go binary (~25 MB image) plus PostgreSQL. Add
+replicas when you need them: if one stops, another continues its runs where they left off.
 
 ## What's in the box
 
@@ -55,7 +55,7 @@ Replica-safe schedules and waits.
 | --- | --- |
 | **Triggers** | Manual · Schedule (cron, once, timezones) · Webhook (token / HMAC) · Called by Workflow · Error Trigger |
 | **Logic & flow** | If · Switch · Merge (append, join, pair) · And / Or / Xor · Execute Workflow (loops, batches) |
-| **Data** | HTTP Request · Set Fields · Transform Items · Code (sandboxed JavaScript) · Log |
+| **Data** | HTTP Request · Set Fields · Transform Items · Code (JavaScript, isolated with a memory limit) · Log |
 | **Long-running** | Wait for a time, a date, or an approval link, for days if needed, surviving restarts |
 | **Integrations** | GitHub · Slack · Google Sheets (OAuth2) · Telegram · Mistral AI |
 | **Accounts** | Users connect their own OAuth2 accounts and share them with groups |
@@ -87,8 +87,8 @@ setup is a demo with default passwords.
 | Encrypted secrets, plugin config and vars, key rotation | ✅ Working |
 | Plugins: YAML/HTTP and WebAssembly, runtime import | ✅ Working |
 | Connected OAuth2 accounts | ✅ Working (Google Sheets included) |
-| Code node | 🟡 Working; script memory is not limited yet |
-| Several replicas | 🟡 Schedules, waits and plugins are replica-safe; executions running during a restart are not yet |
+| Code node in an isolated process with a memory limit | ✅ New |
+| Several replicas: executions survive restarts, crashes and rolling deploys | ✅ New |
 | Workflow history, import/export | 🗺️ Planned |
 
 ## Roadmap
@@ -97,8 +97,7 @@ setup is a demo with default passwords.
 - Plugin signing and a plugin catalog
 - More OAuth2 integration packs (Gmail, Microsoft 365, HubSpot, Salesforce)
 - Built-in protocol nodes: SMTP/IMAP, Postgres/MySQL, SFTP
-- Memory limits for the Code node (e.g. QuickJS in WASM)
-- Horizontal scaling: run executions through a Postgres-backed job queue
+- Cancelling running executions from the editor (waiting ones can be cancelled today)
 - Webhook rate limiting and a "test URL" that works while a workflow is inactive
 - Workflow version history and import/export
 - SSRF protection for HTTP nodes (block private networks by default)

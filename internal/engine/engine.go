@@ -20,8 +20,11 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
+
+	"github.com/google/uuid"
 
 	"github.com/glue2flow/g2f/internal/expression"
 	"github.com/glue2flow/g2f/internal/nodes"
@@ -80,6 +83,12 @@ type Engine struct {
 	wg      sync.WaitGroup
 	baseCtx context.Context
 	cancel  context.CancelFunc
+
+	// instance identifies this engine; rs is set when the store supports
+	// checkpoints (see recovery.go).
+	instance string
+	rs       RecoveryStore
+	draining atomic.Bool
 }
 
 func New(reg *nodes.Registry, st ExecStore, log *slog.Logger, opts Options) *Engine {
@@ -93,10 +102,13 @@ func New(reg *nodes.Registry, st ExecStore, log *slog.Logger, opts Options) *Eng
 		opts.MaxStoredItems = 100
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Engine{
+	e := &Engine{
 		reg: reg, store: st, log: log, opts: opts,
 		sem: make(chan struct{}, opts.Workers), baseCtx: ctx, cancel: cancel,
+		instance: uuid.NewString(),
 	}
+	e.rs, _ = st.(RecoveryStore)
+	return e
 }
 
 // Request describes one workflow run.
@@ -133,6 +145,9 @@ type runState struct {
 	Trigger  nodes.Item                         `json:"trigger"`
 	Last     []nodes.Item                       `json:"last"`
 	WaitNode string                             `json:"waitNode,omitempty"`
+
+	// recovered marks a run continued after its instance stopped (not persisted).
+	recovered bool
 }
 
 type wfMeta struct {
@@ -166,6 +181,10 @@ func (e *Engine) Start(ctx context.Context, req Request) (*store.Execution, erro
 		return nil, err
 	}
 	st := newState(req, start, 0)
+	// Save the trigger items, so another instance can run it if this one stops.
+	if err := e.checkpoint(exec, st); err != nil {
+		return nil, err
+	}
 	e.background(exec, st, nil)
 	return exec, nil
 }
@@ -180,7 +199,11 @@ func (e *Engine) background(exec *store.Execution, st *runState, resume nodes.Ou
 		select {
 		case e.sem <- struct{}{}:
 		case <-e.baseCtx.Done():
-			e.finish(&own, st, nil, errors.New("server shutting down"))
+			if e.rs != nil && st.Depth == 0 {
+				e.release(&own, st)
+			} else {
+				e.finish(&own, st, nil, errors.New("server shutting down"))
+			}
 			return
 		}
 		defer func() { <-e.sem }()
@@ -206,16 +229,32 @@ func (e *Engine) Run(ctx context.Context, req Request) (*Result, error) {
 	return e.execute(ctx, exec, st, nil), nil
 }
 
-// Shutdown cancels running executions and waits for them to record their state.
-// Waiting executions are unaffected; they resume after the next start.
-func (e *Engine) Shutdown(timeout time.Duration) {
-	e.cancel()
+// Shutdown lets running executions finish for up to grace, then cancels the
+// rest and waits up to timeout for them to record their state. With a
+// RecoveryStore, cancelled executions are handed to another instance instead
+// of failing. Waiting executions are unaffected.
+func (e *Engine) Shutdown(grace, timeout time.Duration) {
+	e.draining.Store(true)
 	done := make(chan struct{})
 	go func() { e.wg.Wait(); close(done) }()
 	select {
 	case <-done:
-	case <-time.After(timeout):
-		e.log.Warn("engine shutdown timed out")
+	case <-time.After(grace):
+		e.log.Info("handing over unfinished executions")
+		e.cancel()
+		select {
+		case <-done:
+		case <-time.After(timeout):
+			e.log.Warn("engine shutdown timed out")
+		}
+	}
+	e.cancel()
+	if e.rs != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := e.rs.RemoveInstance(ctx, e.instance); err != nil {
+			e.log.Error("unregister instance", "err", err)
+		}
 	}
 }
 
@@ -231,6 +270,9 @@ func (e *Engine) prepare(ctx context.Context, req Request) (*store.Execution, *w
 		TriggerNode:     start.ID,
 		TriggeredBy:     req.TriggeredBy,
 		Status:          store.StatusQueued,
+	}
+	if e.rs != nil {
+		exec.Owner = e.instance
 	}
 	if err := e.store.CreateExecution(ctx, exec); err != nil {
 		return nil, nil, fmt.Errorf("create execution: %w", err)
@@ -288,8 +330,18 @@ func (e *Engine) execute(ctx context.Context, exec *store.Execution, st *runStat
 	defer cancel()
 
 	exec.Status = store.StatusRunning
-	if err := e.store.UpdateExecution(ctx, exec); err != nil {
-		e.log.Error("update execution", "id", exec.ID, "err", err)
+	switch {
+	case resume != nil:
+		// Claiming the wait already marked it running; the first checkpoint
+		// follows once the Wait node's output is processed.
+	case e.rs != nil && exec.Owner != "":
+		if err := e.checkpoint(exec, st); err != nil {
+			return e.abandon(exec, err)
+		}
+	default:
+		if err := e.store.UpdateExecution(ctx, exec); err != nil {
+			e.log.Error("update execution", "id", exec.ID, "err", err)
+		}
 	}
 
 	log := e.log.With("workflow", st.Workflow.ID, "execution", exec.ID)
@@ -348,6 +400,13 @@ func (e *Engine) execute(ctx context.Context, exec *store.Execution, st *runStat
 				continue
 			}
 
+			if st.recovered {
+				// The first node that runs after a takeover may have run before.
+				st.recovered = false
+				step.Logs = append(step.Logs, store.LogEntry{Time: time.Now().UTC(), Level: nodes.LogWarn,
+					Message: fmt.Sprintf("The instance running this execution stopped; continued on another one (attempt %d). "+
+						"This node may have run before.", exec.Attempts+1)})
+			}
 			if n.Disabled {
 				out = nodes.Output{workflow.DefaultHandle: in}
 			} else {
@@ -358,6 +417,10 @@ func (e *Engine) execute(ctx context.Context, exec *store.Execution, st *runStat
 			var wait *nodes.WaitRequest
 			if errors.As(err, &wait) {
 				return e.pause(exec, st, n, step, wait)
+			}
+			if err != nil && e.shouldRelease(ctx, st) {
+				// Shutting down: another instance runs this node again.
+				return e.release(exec, st)
 			}
 			if err != nil {
 				// Error messages are stored and shown to viewers: never include secrets.
@@ -392,8 +455,17 @@ func (e *Engine) execute(ctx context.Context, exec *store.Execution, st *runStat
 			}
 			st.Inputs[edge.Target][th] = append(st.Inputs[edge.Target][th], out[edge.Handle()]...)
 		}
+		if err := e.checkpoint(exec, st); err != nil {
+			return e.abandon(exec, err)
+		}
 	}
 	return e.finish(exec, st, st.Last, nil)
+}
+
+// abandon stops a run that another instance took over, without writing it.
+func (e *Engine) abandon(exec *store.Execution, err error) *Result {
+	e.log.Warn("stopping execution", "id", exec.ID, "reason", err)
+	return &Result{Execution: exec}
 }
 
 // runCtx holds per-run helpers that are not persisted.
@@ -520,7 +592,10 @@ func (e *Engine) finish(exec *store.Execution, st *runState, last []nodes.Item, 
 	// Use a fresh context so results are stored even after cancellation.
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if uerr := e.store.UpdateExecution(ctx, exec); uerr != nil {
+	if uerr := e.store.UpdateExecution(ctx, exec); errors.Is(uerr, store.ErrNotOwner) {
+		e.log.Warn("execution was taken over by another instance; result discarded", "id", exec.ID)
+		return &Result{Execution: exec, LastOutput: last}
+	} else if uerr != nil {
 		e.log.Error("store execution result", "id", exec.ID, "err", uerr)
 		// Never leave an execution "running": retry without node outputs.
 		for i := range exec.Steps {

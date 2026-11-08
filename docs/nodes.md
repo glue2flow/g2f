@@ -49,13 +49,25 @@ Fields of B win on conflicts.
 
 Runs JavaScript in an embedded, sandboxed interpreter ([goja](https://github.com/dop251/goja)).
 There is no network, file system, modules or timers, every run uses a fresh VM, and runs stop
-after a timeout (default 10 s).
+after a timeout (default 10 s) or when they use more memory than allowed (default 128 MB).
 - *Once for all items*: use `items`, return an array.
 - *Once per item*: use `item` and `index`, return an object, or `null` to drop the item.
 
 `nodes`, `trigger`, `workflow`, `execution` and `console.log()` (also `info`, `warn`, `error`,
 `debug`) are available. Console output goes to the run's execution log. Administrators
-can turn the node off with `G2F_DISABLE_CODE_NODE=true`. Memory use of scripts is not limited.
+can turn the node off with `G2F_DISABLE_CODE_NODE=true`.
+
+**Isolation.** Each run happens in its own short-lived process (the `g2f` binary started
+again, about 10 ms), so a script cannot take the server down:
+
+- **Memory:** a watchdog in the sandbox stops the script when its heap exceeds
+  `G2F_CODE_MEMORY_MB` (default 128). The run fails with *code exceeded its memory limit*.
+  On Linux the server additionally kills a sandbox whose resident memory grows far beyond the limit.
+- **Secrets:** the sandbox starts with an empty environment: no `G2F_SECRET_KEY`, no database URL.
+- **Crashes:** on Linux the sandbox dies with the server, so no script outlives it.
+
+`G2F_CODE_MEMORY_MB=0` runs scripts inside the server process without a memory limit
+(the behaviour of earlier versions).
 
 ```js
 return items.filter(i => i.total > 100).map(i => ({ id: i.id, vip: true }));

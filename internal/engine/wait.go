@@ -15,7 +15,9 @@ import (
 // WaitStore persists paused executions. *store.Store implements it.
 type WaitStore interface {
 	PauseExecution(ctx context.Context, e *store.Execution, state []byte) error
-	ClaimWaiting(ctx context.Context, id, mode string) (*store.Execution, []byte, error)
+	// ClaimWaiting marks the execution running and owned by owner ("" if the
+	// store has no RecoveryStore).
+	ClaimWaiting(ctx context.Context, id, mode, owner string) (*store.Execution, []byte, error)
 	DueWaiting(ctx context.Context, now time.Time, limit int) ([]string, error)
 }
 
@@ -82,7 +84,11 @@ func (e *Engine) Resume(ctx context.Context, execID string, item nodes.Item) (*s
 	if item != nil {
 		mode = nodes.WaitWebhook
 	}
-	exec, data, err := ws.ClaimWaiting(ctx, execID, mode)
+	owner := ""
+	if e.rs != nil {
+		owner = e.instance
+	}
+	exec, data, err := ws.ClaimWaiting(ctx, execID, mode, owner)
 	if errors.Is(err, store.ErrNotFound) {
 		return nil, ErrNotWaiting
 	}

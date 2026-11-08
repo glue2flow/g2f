@@ -23,6 +23,7 @@ make dev-db          # PostgreSQL in Docker on :5432
 make dev-server      # Go API on :8080 with auth disabled (G2F_AUTH_MODE=none)
 make dev-web         # Vite dev server on :5173, proxies /api and /webhook to :8080
 make test            # go vet, go test, TypeScript typecheck
+make test-db         # all Go tests incl. PostgreSQL ones (recovery), with the race detector
 make plugin-sample   # build examples/plugins/telegram/telegram.zip
 make plugin-mistral  # build examples/plugins/mistral/mistral.zip
 ```
