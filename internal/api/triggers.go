@@ -20,6 +20,7 @@ type triggerInfo struct {
 	Listening bool          `json:"listening"`
 	Webhook   *webhookInfo  `json:"webhook,omitempty"`
 	Schedule  *scheduleInfo `json:"schedule,omitempty"`
+	Poll      *pollInfo     `json:"poll,omitempty"`
 	Error     string        `json:"error,omitempty"`
 }
 
@@ -35,6 +36,11 @@ type scheduleInfo struct {
 	Mode     nodes.ScheduleMode `json:"mode"`
 	Timezone string             `json:"timezone"`
 	Next     []time.Time        `json:"next"`
+}
+
+type pollInfo struct {
+	IntervalMinutes float64   `json:"intervalMinutes"`
+	Next            time.Time `json:"next"`
 }
 
 // listTriggers describes how each trigger of the stored workflow is invoked.
@@ -68,6 +74,9 @@ func (s *Server) listTriggers(w http.ResponseWriter, r *http.Request) {
 				URL: trigger.URL(s.cfg.PublicURL, wf.ID, n.ID), Method: cfg.Method,
 				Auth: cfg.Auth, Header: cfg.Header, Respond: cfg.Respond,
 			}
+		case nodes.TriggerPoll:
+			d := nodes.PollInterval(n.Params)
+			info.Poll = &pollInfo{IntervalMinutes: d.Minutes(), Next: time.Now().Truncate(d).Add(d)}
 		case nodes.TriggerSchedule:
 			sched, err := nodes.ParseSchedule(n.Params)
 			if err != nil {

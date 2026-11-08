@@ -30,6 +30,17 @@ func RegisterBuiltins(r *Registry) error {
 		gateNode{gateAnd},
 		gateNode{gateOr},
 		gateNode{gateXor},
+		dataStoreNode{},
+		dedupeNode{},
+		filterNode{},
+		sortNode{},
+		limitNode{},
+		splitOutNode{},
+		aggregateNode{},
+		mapNode{},
+		editFieldsNode{},
+		dateTimeNode{},
+		csvNode{},
 	} {
 		if err := r.Register(n); err != nil {
 			return err

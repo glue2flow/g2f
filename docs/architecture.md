@@ -53,5 +53,7 @@ The engine runs acyclic graphs only. Loops are built with
 | --- | --- |
 | Schedules | Safe: every replica runs the scheduler, each firing is claimed once in PostgreSQL (`trigger_firings`). |
 | Wait nodes | Safe: every replica polls for due waits, each resume is claimed atomically. |
+| Polling triggers | Safe: checks happen at interval-aligned times, each is claimed once in `trigger_firings`; trigger cursors and the last check error live in `workflow_state`. |
+| Data Store, Remove Duplicates | Safe: values live in PostgreSQL (`workflow_state`); increments and "seen" checks are single atomic statements. |
 | Imported plugins | Safe: stored in PostgreSQL and reloaded by every replica (`G2F_PLUGIN_SYNC`). |
 | Running executions after a restart | Not yet: recovery assumes a single instance. A Postgres-backed job queue is on the [roadmap](../README.md#roadmap). |

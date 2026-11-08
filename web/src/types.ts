@@ -92,7 +92,7 @@ export interface NodeDef {
   category: string;
   description: string;
   color?: string;
-  trigger?: "manual" | "schedule" | "webhook" | "call" | "error";
+  trigger?: "manual" | "schedule" | "webhook" | "call" | "error" | "poll";
   dynamicOutputs?: { param: string; extra?: string[] };
   inputs: string[];
   outputs: string[];
@@ -175,11 +175,12 @@ export const atLeast = (r: Role | undefined, min: Role) => !!r && roleRank[r] >=
 export interface TriggerInfo {
   nodeId: string;
   name: string;
-  kind: "manual" | "schedule" | "webhook" | "call" | "error";
+  kind: "manual" | "schedule" | "webhook" | "call" | "error" | "poll";
   listening: boolean;
   error?: string;
   webhook?: { url: string; method: string; auth: "none" | "token" | "hmac"; header?: string; respond: string };
   schedule?: { mode: "cron" | "once"; timezone: string; next: string[] };
+  poll?: { intervalMinutes: number; next: string };
 }
 
 export interface ModuleInfo {

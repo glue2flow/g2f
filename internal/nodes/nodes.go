@@ -185,6 +185,10 @@ type ExecContext struct {
 	Logger *slog.Logger
 	// Runtime is provided by the engine (sub-workflows, resume URL).
 	Runtime Runtime
+	// State is the workflow's durable key/value storage (nil if unavailable).
+	State StateStore
+	// TriggerType is how the run was started: manual, schedule, webhook, poll, …
+	TriggerType string
 	// LogSink receives messages for the execution log shown in the editor.
 	// Use Log instead of calling it directly.
 	LogSink func(level, message string)
@@ -477,7 +481,7 @@ func (r *Registry) Definitions() []Definition {
 }
 
 func categoryRank(c string) string {
-	order := []string{"Triggers", "Core", "Flow", "Logic"}
+	order := []string{"Triggers", "Core", "Data", "Flow", "Logic"}
 	if i := slices.Index(order, c); i >= 0 {
 		return strconv.Itoa(i)
 	}

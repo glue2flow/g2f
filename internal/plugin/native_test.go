@@ -21,7 +21,7 @@ func TestLoadShippedModules(t *testing.T) {
 		t.Fatalf("loaded only %d modules", n)
 	}
 	info, ok := reg.Module("email")
-	if !ok || info.Runtime != "go" || len(info.Nodes) != 4 || !mgr.IsFileModule("email") {
+	if !ok || info.Runtime != "go" || len(info.Nodes) != 5 || !mgr.IsFileModule("email") {
 		t.Fatalf("email module: %+v", info)
 	}
 	for _, typ := range []string{"email.send", "email.read", "gmail.send", "outlook.send", "ms-teams.sendChannelMessage"} {

@@ -11,9 +11,31 @@ Every workflow starts at a trigger node. A workflow may have several triggers.
 | **Webhook** | the workflow is **active** and `/webhook/{workflowId}/{nodeId}` is called | `{method, headers, query, body, receivedAt}` |
 | **Called by Workflow** | an [Execute Workflow](nodes.md#execute-workflow) node of another workflow calls it | the caller's items |
 | **Error Trigger** | a watched workflow fails | `{workflow, execution, failedNode, error}` |
+| **Polling triggers** (Email Received, Gmail / Outlook New Email, …) | the workflow is **active** and a periodic check finds new items | one item per new item, e.g. per e-mail |
 
 Any trigger can also be run manually from the editor (select it, then ▶ Run). Webhook and
 schedule triggers then use their test payload, so a flow can be tested before activation.
+
+## Polling triggers
+
+Some sources cannot call a webhook, so glue2flow checks them every few minutes (*Check every
+(minutes)*, default 5):
+
+| Trigger | Plugin | Detects new items by |
+| --- | --- | --- |
+| **Email Received** | [Email (IMAP)](email.md) | the mailbox's message UIDs |
+| **New Email** | [Gmail](connections.md#included-oauth2-plugins) (any Gmail search) | message IDs |
+| **New Email** | [Outlook](connections.md#included-oauth2-plugins) (a folder, optionally unread or filtered) | message IDs |
+
+- A run starts only when a check finds something new, so idle checks leave no executions.
+- The first check after activation only remembers what is already there.
+- ▶ Run in the editor shows the current items without remembering them.
+- A failing check (e.g. a rejected login) is recorded as a failed execution, once while the
+  same error repeats, so it shows up in the editor and notifies [error workflows](#error-trigger).
+- Checks happen at times aligned to the interval (every full 5 minutes) and are claimed in
+  PostgreSQL, so with several replicas each check runs once.
+
+YAML plugins can declare their own polling triggers, see [Plugins](plugins.md#polling-triggers).
 
 ## Schedule
 

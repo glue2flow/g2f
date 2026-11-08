@@ -100,6 +100,12 @@ type ManifestNode struct {
 	Outputs     []string `yaml:"outputs"` // default [main]
 	// OutputSchema describes the emitted items, for the editor's field picker.
 	OutputSchema *OutputSchema `yaml:"outputSchema"`
+	// Trigger "poll" makes the node a polling trigger: it is checked every few
+	// minutes while the workflow is active and starts a run with new items.
+	Trigger string `yaml:"trigger"`
+	// PollKey (http runtime) identifies items, e.g. {{ json.id }}: items whose
+	// key was emitted before are not new. Go modules track new items themselves.
+	PollKey string `yaml:"pollKey"`
 
 	// http runtime
 	Request ManifestRequest `yaml:"request"`
@@ -126,7 +132,7 @@ var (
 )
 
 // reservedModules cannot be used by plugins because built-in node types use them.
-var reservedModules = map[string]bool{BuiltinModule: true, "core": true, "trigger": true, "logic": true}
+var reservedModules = map[string]bool{BuiltinModule: true, "core": true, "trigger": true, "logic": true, "flow": true, "data": true}
 
 // ParseManifest decodes and validates a manifest.
 func ParseManifest(raw []byte) (*Manifest, error) {
@@ -216,7 +222,31 @@ func (m *Manifest) validate() error {
 		if m.Runtime == "http" && n.Request.URL == "" && m.BaseURL == "" {
 			return fmt.Errorf("node %s: request.url or module baseUrl required", n.Type)
 		}
-		if len(n.Inputs) == 0 {
+		switch n.Trigger {
+		case "":
+			if n.PollKey != "" {
+				return fmt.Errorf("node %s: pollKey requires trigger: poll", n.Type)
+			}
+		case string(TriggerPoll):
+			if m.Runtime == "wasm" {
+				return fmt.Errorf("node %s: wasm plugins cannot provide polling triggers yet", n.Type)
+			}
+			if m.Runtime == "http" && n.PollKey == "" {
+				n.PollKey = "{{ json.id }}"
+			}
+			if len(n.Inputs) > 0 {
+				return fmt.Errorf("node %s: triggers have no inputs", n.Type)
+			}
+			n.Inputs = []string{}
+			for _, p := range n.Params {
+				if p.Name == PollParam {
+					return fmt.Errorf("node %s: parameter %q is reserved", n.Type, PollParam)
+				}
+			}
+		default:
+			return fmt.Errorf("node %s: unknown trigger %q (supported: poll)", n.Type, n.Trigger)
+		}
+		if len(n.Inputs) == 0 && n.Trigger == "" {
 			n.Inputs = []string{"main"}
 		}
 		if len(n.Outputs) == 0 {
@@ -339,10 +369,15 @@ func (m *Manifest) NodeDefinition(n ManifestNode, source string) Definition {
 		})
 	}
 	params = append(append(params, m.Params...), n.Params...)
+	var trigger TriggerKind
+	if n.Trigger != "" {
+		trigger = TriggerKind(n.Trigger)
+		params = append(params, pollIntervalParam())
+	}
 	category := m.Name
 	return Definition{
 		Type: m.Module + "." + n.Type, Name: n.Name, Category: category, Description: n.Description,
-		Color: m.Color, Inputs: n.Inputs, Outputs: n.Outputs, Params: params,
+		Color: m.Color, Trigger: trigger, Inputs: n.Inputs, Outputs: n.Outputs, Params: params,
 		OutputSchema: n.OutputSchema, Module: m.Module, Source: source,
 	}
 }

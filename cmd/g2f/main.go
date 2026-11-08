@@ -101,6 +101,7 @@ func run(log *slog.Logger) error {
 	eng := engine.New(reg, st, log, engine.Options{
 		Secrets:   sec,
 		Tokens:    oauthMgr,
+		State:     st,
 		Workflows: st,
 		ResumeURL: signer.URL,
 		OnFailure: errDispatch.WorkflowFailed,

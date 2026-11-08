@@ -30,9 +30,9 @@ top of each file.
 
 | Module | Nodes | Provider app |
 | --- | --- | --- |
-| [`gmail`](../modules/gmail.yaml) | Send Email (HTML, attachments, replies in threads), Search Messages, Get Message, Get Attachment, Change Labels (mark read, archive, star), Move to Trash, List Labels | Google Cloud OAuth client, Gmail API |
+| [`gmail`](../modules/gmail.yaml) | **New Email** (trigger), Send Email (HTML, attachments, replies in threads), Search Messages, Get Message, Get Attachment, Change Labels (mark read, archive, star), Move to Trash, List Labels | Google Cloud OAuth client, Gmail API |
 | [`google-sheets`](../modules/google-sheets.yaml) | Append Row, Read Rows | Google Cloud OAuth client, Sheets API |
-| [`outlook`](../modules/outlook.yaml) | Send Email, List Messages (unread, search, OData filter), Get Message, Reply / Reply all, Move Message, Mark as Read, List Folders | Microsoft Entra app (Graph `Mail.ReadWrite`, `Mail.Send`) |
+| [`outlook`](../modules/outlook.yaml) | **New Email** (trigger), Send Email, List Messages (unread, search, OData filter), Get Message, Reply / Reply all, Move Message, Mark as Read, List Folders | Microsoft Entra app (Graph `Mail.ReadWrite`, `Mail.Send`) |
 | [`ms-teams`](../modules/ms-teams.yaml) | Send Channel Message, Reply in Channel Thread, Send Chat Message, List Teams, List Channels, List Chats | Microsoft Entra app (Graph, no admin consent needed) |
 
 Google modules can share one OAuth client, as can the two Microsoft modules. The Microsoft
@@ -40,7 +40,7 @@ manifests use the `common` endpoint (multi-tenant apps); for a single-tenant app
 tenant ID in `authorizeUrl` and `tokenUrl`.
 
 ```
-Schedule (every 5 min) ─► Gmail: Search "is:unread label:support" ─► Gmail: Get Message
+Gmail: New Email ("label:support") ─► Gmail: Get Message
    ─► Teams: Send Channel Message "New ticket: {{ json.subject }}" ─► Gmail: Change Labels (remove UNREAD)
 ```
 

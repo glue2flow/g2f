@@ -193,3 +193,56 @@ func TestTeamsModule(t *testing.T) {
 		t.Fatalf("chat: %+v", got)
 	}
 }
+
+func TestMailPollTriggers(t *testing.T) {
+	var got captured
+	reply := `{"messages":[{"id":"m2","threadId":"t"},{"id":"m1","threadId":"t"}]}`
+	gm := shippedModule(t, "gmail.yaml", reply, &got)
+	n := gm["gmail.newEmail"]
+	def := n.Definition()
+	if def.Trigger != TriggerPoll || def.Param(PollParam) == nil || len(def.Inputs) != 0 {
+		t.Fatalf("definition: %+v", def)
+	}
+	state := NewMemoryState()
+	check := func(trigger string) []Item {
+		t.Helper()
+		out, err := n.Execute(context.Background(), &ExecContext{
+			Node: &workflow.Node{ID: "g", Name: def.Name, Params: map[string]any{}}, Def: &def, Items: []Item{},
+			OAuth: &OAuthToken{AccessToken: "tok"}, State: state, TriggerType: trigger,
+			Env: expression.Env{}, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out["main"]
+	}
+	if items := check("manual"); len(items) != 2 || items[0]["id"] != "m1" {
+		t.Fatalf("test run (oldest first): %v", items)
+	}
+	if items := check("poll"); len(items) != 0 {
+		t.Fatalf("first check: %v", items)
+	}
+	if got.query != "maxResults=25&q=in%3Ainbox" {
+		t.Fatalf("query %q", got.query)
+	}
+	// m3 arrives.
+	gm = shippedModule(t, "gmail.yaml", `{"messages":[{"id":"m3"},{"id":"m2"},{"id":"m1"}]}`, &got)
+	n = gm["gmail.newEmail"]
+	if items := check("poll"); len(items) != 1 || items[0]["id"] != "m3" {
+		t.Fatalf("new mail: %v", items)
+	}
+	if items := check("poll"); len(items) != 0 {
+		t.Fatalf("repeated: %v", items)
+	}
+
+	ol := shippedModule(t, "outlook.yaml", `{"value":[{"id":"b"},{"id":"a"}]}`, &got)
+	odef := ol["outlook.newEmail"].Definition()
+	out, err := ol["outlook.newEmail"].Execute(context.Background(), &ExecContext{
+		Node: &workflow.Node{ID: "o", Params: map[string]any{"unreadOnly": true}}, Def: &odef, Items: []Item{},
+		OAuth: &OAuthToken{AccessToken: "tok"}, State: state, TriggerType: "manual",
+		Env: expression.Env{}, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	if err != nil || len(out["main"]) != 2 || out["main"][0]["id"] != "a" || !strings.Contains(got.query, "isRead+eq+false") {
+		t.Fatalf("outlook: %v %v %s", out, err, got.query)
+	}
+}

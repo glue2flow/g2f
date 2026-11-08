@@ -25,12 +25,14 @@ Passwords are only sent over TLS/STARTTLS, or to `localhost`.
 
 | Node | What it does |
 | --- | --- |
+| **Email Received** (trigger) | A [polling trigger](triggers.md#polling-triggers): starts a run when new mail arrives in a mailbox (optionally only unread, or matching From/Subject), one item per message with the same fields as Read Emails. It remembers the last message UID, so every message is handled once, even when it was read in between; *Mark as read* flags the messages it emits. |
 | **Send Email** | One mail per item: From, To/Cc/Bcc (comma separated or arrays), Reply-To, subject, text and/or HTML, attachments `[{filename, content (base64), contentType}]`, extra headers (e.g. `In-Reply-To`). Bcc stays out of the headers. |
 | **Read Emails** | Searches a mailbox (unread only, since a date, From/Subject/text contains) and emits the newest N messages, oldest first, with `uid`, `from`, `to`, `subject`, `date`, `text`, `html`, `flags`, `messageId` and attachment info (optionally with content). *Mark as read* makes the next run skip them. |
 | **Move Email** | Moves messages by `uid` to another mailbox (MOVE, or copy + UID EXPUNGE). A plain EXPUNGE is never used, so other deleted messages are not purged. |
 | **Set Email Flags** | Adds or removes flags such as `\Seen` or `\Flagged`. |
 
 ```
-Schedule (every 5 min) ─► Read Emails (unread, mark as read) ─► If subject contains "invoice"
-   ─► HTTP Request (upload attachment) ─► Move Email (Archive)
+Email Received (subject contains "invoice", with attachment content) ─► Split Out (json.attachments)
+   ─► CSV (text: {{ json.content }}) ─► Aggregate (sum of {{ json.amount }})
+   ─► Send Email "Invoice total: {{ json.result }}"
 ```

@@ -1,4 +1,4 @@
-// Package trigger starts workflows from schedules and webhooks.
+// Package trigger starts workflows from schedules, polling triggers and webhooks.
 package trigger
 
 import (
@@ -26,6 +26,14 @@ type Store interface {
 type Engine interface {
 	Start(ctx context.Context, req engine.Request) (*store.Execution, error)
 	Run(ctx context.Context, req engine.Request) (*engine.Result, error)
+	// Poll runs one check of a polling trigger and returns the new items.
+	// It records failed checks as failed executions itself.
+	Poll(ctx context.Context, wf *workflow.Workflow, nodeID string) ([]nodes.Item, error)
+}
+
+// statePruner is implemented by stores that keep workflow state.
+type statePruner interface {
+	PruneState(ctx context.Context) (int64, error)
 }
 
 type SchedulerOptions struct {
@@ -37,10 +45,13 @@ type SchedulerOptions struct {
 	Resync time.Duration
 }
 
-// Scheduler fires schedule triggers of active workflows.
+// Scheduler fires schedule triggers and runs the checks of polling triggers
+// of active workflows.
 //
 // Every replica may run a Scheduler: each firing is claimed in the database
-// with a key derived from the scheduled time, so exactly one replica executes it.
+// with a key derived from the scheduled time, so exactly one replica executes
+// it. Polling checks happen at times aligned to their interval (e.g. every
+// full 5 minutes), so all replicas compute the same keys.
 type Scheduler struct {
 	store Store
 	eng   Engine
@@ -62,8 +73,15 @@ type wfEntry struct {
 type job struct {
 	workflowID string
 	nodeID     string
-	sched      *nodes.Schedule
+	sched      *nodes.Schedule // schedule triggers
+	poll       time.Duration   // polling triggers: interval
 	next       time.Time
+}
+
+// nextSlot returns the first multiple of d after t (counted from the zero
+// time), the same on every replica.
+func nextSlot(t time.Time, d time.Duration) time.Time {
+	return t.Truncate(d).Add(d)
 }
 
 func NewScheduler(st Store, eng Engine, reg *nodes.Registry, log *slog.Logger, opts SchedulerOptions) *Scheduler {
@@ -108,6 +126,13 @@ func (s *Scheduler) Run(ctx context.Context) {
 				s.log.Error("prune firings", "err", err)
 			} else if n > 0 {
 				s.log.Info("pruned firing records", "count", n)
+			}
+			if p, ok := s.store.(statePruner); ok {
+				if n, err := p.PruneState(ctx); err != nil {
+					s.log.Error("prune workflow state", "err", err)
+				} else if n > 0 {
+					s.log.Info("pruned expired workflow state", "count", n)
+				}
 			}
 		}
 	}
@@ -169,7 +194,15 @@ func (s *Scheduler) setLocked(ctx context.Context, w *workflow.Workflow) {
 	now := s.now()
 	entry := &wfEntry{version: w.Version}
 	for _, n := range w.Graph.Nodes {
-		if n.Disabled || s.reg.TriggerKind(n.Type) != nodes.TriggerSchedule {
+		if n.Disabled {
+			continue
+		}
+		if s.reg.TriggerKind(n.Type) == nodes.TriggerPoll {
+			d := nodes.PollInterval(n.Params)
+			entry.jobs = append(entry.jobs, &job{workflowID: w.ID, nodeID: n.ID, poll: d, next: nextSlot(now, d)})
+			continue
+		}
+		if s.reg.TriggerKind(n.Type) != nodes.TriggerSchedule {
 			continue
 		}
 		sched, err := nodes.ParseSchedule(n.Params)
@@ -235,7 +268,10 @@ func (s *Scheduler) fireDue(ctx context.Context) {
 				continue
 			}
 			due = append(due, firing{job: *j, scheduledAt: j.next})
-			if j.sched.Mode == nodes.ScheduleCron {
+			if j.poll > 0 {
+				j.next = nextSlot(now, j.poll)
+				kept = append(kept, j)
+			} else if j.sched.Mode == nodes.ScheduleCron {
 				j.next = j.sched.Next(now)
 				kept = append(kept, j)
 			}
@@ -250,6 +286,9 @@ func (s *Scheduler) fireDue(ctx context.Context) {
 }
 
 func fireKey(sched *nodes.Schedule, at time.Time) string {
+	if sched == nil {
+		return "poll:" + at.UTC().Format(time.RFC3339)
+	}
 	if sched.Mode == nodes.ScheduleOnce {
 		return "once:" + at.UTC().Format(time.RFC3339)
 	}
@@ -275,6 +314,10 @@ func (s *Scheduler) fire(ctx context.Context, f firing) {
 	if !w.Active {
 		return
 	}
+	if f.job.poll > 0 {
+		s.check(ctx, w, f.job.nodeID, log)
+		return
+	}
 	exec, err := s.eng.Start(ctx, engine.Request{
 		Workflow:    w,
 		TriggerType: nodes.TriggerSchedule,
@@ -291,4 +334,27 @@ func (s *Scheduler) fire(ctx context.Context, f firing) {
 		return
 	}
 	log.Info("schedule fired", "execution", exec.ID)
+}
+
+// check runs one polling check and starts a run with the new items.
+func (s *Scheduler) check(ctx context.Context, w *workflow.Workflow, nodeID string, log *slog.Logger) {
+	if n := w.Graph.Node(nodeID); n == nil || n.Disabled || s.reg.TriggerKind(n.Type) != nodes.TriggerPoll {
+		return // changed since the job was planned
+	}
+	items, err := s.eng.Poll(ctx, w, nodeID)
+	if err != nil {
+		log.Warn("polling check failed", "err", err)
+		return
+	}
+	if len(items) == 0 {
+		return
+	}
+	exec, err := s.eng.Start(ctx, engine.Request{
+		Workflow: w, TriggerType: nodes.TriggerPoll, TriggerNode: nodeID, TriggeredBy: "poll", Items: items,
+	})
+	if err != nil {
+		log.Error("start polled execution", "err", err)
+		return
+	}
+	log.Info("polling trigger found new items", "items", len(items), "execution", exec.ID)
 }

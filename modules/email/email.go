@@ -24,6 +24,7 @@ func init() {
 		"read":     read,
 		"move":     move,
 		"setFlags": setFlags,
+		"received": received,
 	})
 }
 

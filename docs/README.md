@@ -8,8 +8,8 @@ Everything about running, using and extending glue2flow. New here? Start with
 | Page | What's inside |
 | --- | --- |
 | [Getting started](getting-started.md) | Docker quick start, demo users, local development, your first workflow |
-| [Built-in nodes](nodes.md) | HTTP Request, Set Fields, If, Switch, Merge, Code, Wait, Transform, Log, Execute Workflow, logic gates |
-| [Triggers](triggers.md) | Manual, Schedule (cron / once), Webhook (auth, responses), Called by Workflow, Error Trigger |
+| [Built-in nodes](nodes.md) | HTTP Request, Set Fields, If, Switch, Merge, Code, Wait, Log, Execute Workflow, logic gates; data nodes (Filter, Sort, Split Out, Aggregate, Date & Time, CSV, …); Remove Duplicates and Data Store |
+| [Triggers](triggers.md) | Manual, Schedule (cron / once), Webhook (auth, responses), Called by Workflow, Error Trigger, polling triggers (new e-mail) |
 | [Expressions](expressions.md) | `{{ }}` syntax, variables, the ⚡ dynamic content picker |
 | [Sharing & Keycloak](sharing.md) | Scopes, roles, groups, organizations, required token claims |
 | [Connected accounts (OAuth2)](connections.md) | Gmail, Outlook, Teams, Google Sheets: connecting accounts, token storage and refresh |

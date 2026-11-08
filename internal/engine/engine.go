@@ -62,6 +62,9 @@ type Options struct {
 	Workflows WorkflowLoader
 	// ResumeURL builds the signed URL that resumes a waiting execution.
 	ResumeURL func(executionID string) string
+	// State is optional; without it the Data Store, Remove Duplicates (across
+	// runs) and polling triggers fail.
+	State StateBackend
 	// OnFailure is called (in the background) after an execution failed.
 	OnFailure func(exec *store.Execution, wf *workflow.Workflow)
 
@@ -320,6 +323,7 @@ func (e *Engine) execute(ctx context.Context, exec *store.Execution, st *runStat
 	rc := &runCtx{
 		settings: map[string]moduleSettings{}, scrub: newScrubber(secrets),
 		rt: &runtime{e: e, st: st, execID: exec.ID}, log: log,
+		triggerType: exec.TriggerType, state: e.stateFor(st.Workflow.ID),
 	}
 
 	for _, id := range order {
@@ -398,10 +402,19 @@ func (e *Engine) execute(ctx context.Context, exec *store.Execution, st *runStat
 
 // runCtx holds per-run helpers that are not persisted.
 type runCtx struct {
-	settings map[string]moduleSettings
-	scrub    *scrubber
-	rt       *runtime
-	log      *slog.Logger
+	settings    map[string]moduleSettings
+	scrub       *scrubber
+	rt          *runtime
+	log         *slog.Logger
+	triggerType string
+	state       nodes.StateStore
+}
+
+func (e *Engine) stateFor(workflowID string) nodes.StateStore {
+	if e.opts.State == nil {
+		return nil
+	}
+	return workflowState{b: e.opts.State, id: workflowID}
 }
 
 // targetHandle returns the input handle an edge feeds; edges without one go to
@@ -504,6 +517,7 @@ func (e *Engine) runNode(ctx context.Context, st *runState, n *workflow.Node, by
 	return impl.Execute(ctx, &nodes.ExecContext{
 		Node: n, Def: &def, Items: in, Inputs: byHandle, Config: ms.config, Vars: ms.vars, OAuth: token,
 		Env: env, Logger: rc.log, Runtime: rc.rt, LogSink: rc.logSink(logs),
+		State: rc.state, TriggerType: rc.triggerType,
 	})
 }
 

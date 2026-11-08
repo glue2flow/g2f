@@ -186,6 +186,20 @@ func readOnce(ctx context.Context, ec *nodes.ExecContext, c *client.Client, item
 	if len(uids) > o.limit {
 		uids = uids[len(uids)-o.limit:]
 	}
+	out, err := fetchMessages(c, uids, o)
+	if err != nil {
+		return nil, err
+	}
+	ec.Log(nodes.LogInfo, fmt.Sprintf("%s: %d message(s)", o.mailbox, len(out)))
+	return out, nil
+}
+
+// fetchMessages downloads and parses the messages with the given UIDs of the
+// selected mailbox, oldest first, and marks them as read if requested.
+func fetchMessages(c *client.Client, uids []uint32, o *readOptions) ([]nodes.Item, error) {
+	if len(uids) == 0 {
+		return nil, nil
+	}
 	set := new(imap.SeqSet)
 	set.AddNum(uids...)
 
@@ -216,7 +230,6 @@ func readOnce(ctx context.Context, ec *nodes.ExecContext, c *client.Client, item
 			return nil, fmt.Errorf("mark as read: %w", err)
 		}
 	}
-	ec.Log(nodes.LogInfo, fmt.Sprintf("%s: %d message(s)", o.mailbox, len(out)))
 	return out, nil
 }
 
