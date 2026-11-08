@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { NodeDef } from "../types";
+import { NodeIcon } from "./NodeIcon";
 
 interface Props {
   defs: NodeDef[];
@@ -218,7 +219,7 @@ export function NodePalette({ defs, onAdd }: Props) {
                         onDoubleClick={() => onAdd(d)}
                         onMouseEnter={() => searching && setActive(i)}
                       >
-                        <span className="dot" style={{ background: d.color }} />
+                        <NodeIcon def={d} size={18} />
                         <span className="palette-item-text">
                           <span className="palette-item-name">{highlight(d.name, terms)}</span>
                           {searching && d.description && (

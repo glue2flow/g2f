@@ -14,7 +14,7 @@ tinygo:
 
 bundle: plugin.wasm
 	rm -f mistral.zip
-	zip -j mistral.zip plugin.yaml plugin.wasm
+	zip -j mistral.zip plugin.yaml plugin.wasm icon.svg
 
 plugin.wasm:
 	@echo "build plugin.wasm first: make go | make tinygo" && exit 1

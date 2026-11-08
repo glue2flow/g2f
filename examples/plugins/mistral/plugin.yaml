@@ -5,6 +5,7 @@ name: Mistral AI
 version: 1.0.0
 description: Send a prompt to Mistral AI and use the answer in your workflow (input -> output)
 color: "#FA520F"
+icon: icon.svg # Mistral AI mark, from github.com/mistralai/mistral-common
 
 runtime: wasm
 wasm: plugin.wasm

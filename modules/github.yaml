@@ -5,6 +5,7 @@ version: 1.0.0
 name: GitHub
 description: GitHub REST API
 color: "#24292f"
+icon: icons/github.svg # GitHub mark, from github.com/primer/octicons
 baseUrl: https://api.github.com
 
 params:

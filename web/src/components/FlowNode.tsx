@@ -1,5 +1,6 @@
 import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
 import { outputsFor, type NodeDef, type Step } from "../types";
+import { NodeIcon, TriggerBadge } from "./NodeIcon";
 
 export interface FlowNodeData extends Record<string, unknown> {
   type: string;
@@ -12,8 +13,6 @@ export interface FlowNodeData extends Record<string, unknown> {
 }
 
 export type FlowNodeType = Node<FlowNodeData, "g2f">;
-
-const triggerIcon: Record<string, string> = { manual: "▶", schedule: "⏱", webhook: "⚡", call: "↪", error: "⚠" };
 
 export function FlowNode({ data, selected }: NodeProps<FlowNodeType>) {
   const def = data.def;
@@ -39,7 +38,10 @@ export function FlowNode({ data, selected }: NodeProps<FlowNodeType>) {
           </div>
         );
       })}
-      <div className="flow-node-icon">{def?.trigger ? triggerIcon[def.trigger] : def?.name.slice(0, 1)}</div>
+      <div className="flow-node-icon">
+        <NodeIcon def={def} />
+        <TriggerBadge def={def} />
+      </div>
       <div className="flow-node-body">
         <div className="flow-node-name">{data.name}</div>
         <div className="flow-node-type">{def?.name ?? `unknown: ${data.type}`}</div>

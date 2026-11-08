@@ -7,13 +7,16 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
+	"path"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -46,6 +49,8 @@ type Bundle struct {
 	Manifest    *nodes.Manifest
 	RawManifest []byte
 	Wasm        []byte
+	// Icons holds the icon files the manifest references (path -> data URI).
+	Icons map[string]string
 }
 
 func (b *Bundle) digest() string {
@@ -53,12 +58,61 @@ func (b *Bundle) digest() string {
 	h.Write(b.RawManifest)
 	h.Write([]byte{0})
 	h.Write(b.Wasm)
+	names := make([]string, 0, len(b.Icons))
+	for n := range b.Icons {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	for _, n := range names {
+		h.Write([]byte{0})
+		h.Write([]byte(n + "=" + b.Icons[n]))
+	}
 	return hex.EncodeToString(h.Sum(nil))
 }
 
+// resolveIcons validates the manifest's icons, reading icon files with read.
+func (b *Bundle) resolveIcons(read nodes.IconFiles) error {
+	icons, err := b.Manifest.ResolveIcons(read)
+	if err != nil {
+		return fmt.Errorf("manifest: %w", err)
+	}
+	b.Icons = icons
+	return nil
+}
+
+// dirFiles reads icon files from a directory on disk.
+func dirFiles(dir string) nodes.IconFiles {
+	return func(name string) ([]byte, error) {
+		f, err := os.Open(filepath.Join(dir, filepath.FromSlash(name)))
+		if err != nil {
+			return nil, err
+		}
+		defer f.Close()
+		return io.ReadAll(io.LimitReader(f, nodes.MaxIconSize+1))
+	}
+}
+
+// storedIcons serves icon files saved with an imported plugin.
+func storedIcons(icons map[string]string) nodes.IconFiles {
+	return func(name string) ([]byte, error) {
+		uri, ok := icons[name]
+		if !ok {
+			return nil, fmt.Errorf("file not stored with the plugin")
+		}
+		_, payload, _ := strings.Cut(uri, ",")
+		return base64.StdEncoding.DecodeString(payload)
+	}
+}
+
 // ParseBundle accepts a YAML manifest (http runtime) or a .zip containing
-// plugin.yaml (or manifest.yaml) plus the WebAssembly file it names.
+// plugin.yaml (or manifest.yaml) plus the WebAssembly file it names and the
+// icon files it references. A bare YAML upload can only have inline icons.
 func ParseBundle(filename string, data []byte) (*Bundle, error) {
+	return parseBundle(filename, data, nil)
+}
+
+// parseBundle is ParseBundle; files reads icon files next to a YAML manifest.
+func parseBundle(filename string, data []byte, files nodes.IconFiles) (*Bundle, error) {
 	if len(data) > maxBundleSize {
 		return nil, fmt.Errorf("plugin exceeds %d MiB", maxBundleSize>>20)
 	}
@@ -71,7 +125,11 @@ func ParseBundle(filename string, data []byte) (*Bundle, error) {
 		if m.Runtime == "wasm" {
 			return nil, errors.New("wasm plugins must be uploaded as a .zip containing the manifest and the .wasm file")
 		}
-		return &Bundle{Manifest: m, RawManifest: data}, nil
+		b := &Bundle{Manifest: m, RawManifest: data}
+		if err := b.resolveIcons(files); err != nil {
+			return nil, err
+		}
+		return b, nil
 	}
 	if ext != ".zip" {
 		return nil, errors.New("upload a .yaml manifest or a .zip bundle")
@@ -81,14 +139,14 @@ func ParseBundle(filename string, data []byte) (*Bundle, error) {
 	if err != nil {
 		return nil, fmt.Errorf("invalid zip: %w", err)
 	}
-	files := map[string]*zip.File{}
+	entries := map[string]*zip.File{}
 	for _, f := range zr.File {
 		// Bundles may be zipped with or without a top-level folder.
-		files[filepath.Base(f.Name)] = f
+		entries[filepath.Base(f.Name)] = f
 	}
-	mf := files["plugin.yaml"]
+	mf := entries["plugin.yaml"]
 	if mf == nil {
-		mf = files["manifest.yaml"]
+		mf = entries["manifest.yaml"]
 	}
 	if mf == nil {
 		return nil, errors.New("zip must contain plugin.yaml")
@@ -102,8 +160,24 @@ func ParseBundle(filename string, data []byte) (*Bundle, error) {
 		return nil, err
 	}
 	b := &Bundle{Manifest: m, RawManifest: raw}
+	// Icon paths are relative to the manifest inside the zip.
+	root := path.Dir(mf.Name)
+	byPath := map[string]*zip.File{}
+	for _, f := range zr.File {
+		byPath[path.Clean(f.Name)] = f
+	}
+	err = b.resolveIcons(func(name string) ([]byte, error) {
+		f := byPath[path.Join(root, name)]
+		if f == nil {
+			return nil, fmt.Errorf("not in the zip")
+		}
+		return readZip(f, nodes.MaxIconSize+1)
+	})
+	if err != nil {
+		return nil, err
+	}
 	if m.Runtime == "wasm" {
-		wf := files[filepath.Base(m.Wasm)]
+		wf := entries[filepath.Base(m.Wasm)]
 		if wf == nil {
 			return nil, fmt.Errorf("zip does not contain %s", m.Wasm)
 		}
@@ -174,7 +248,11 @@ func (m *Manager) LoadDir(ctx context.Context, dir string) (int, error) {
 		case strings.HasSuffix(e.Name(), ".yaml"), strings.HasSuffix(e.Name(), ".yml"), strings.HasSuffix(e.Name(), ".zip"):
 			var data []byte
 			if data, err = os.ReadFile(path); err == nil {
-				b, err = ParseBundle(e.Name(), data)
+				if strings.HasSuffix(e.Name(), ".zip") {
+					b, err = ParseBundle(e.Name(), data)
+				} else {
+					b, err = parseBundle(e.Name(), data, dirFiles(dir))
+				}
 			}
 		default:
 			continue
@@ -205,6 +283,9 @@ func bundleFromDir(dir string) (*Bundle, error) {
 		return nil, err
 	}
 	b := &Bundle{Manifest: mf, RawManifest: raw}
+	if err := b.resolveIcons(dirFiles(dir)); err != nil {
+		return nil, err
+	}
 	if mf.Runtime == "wasm" {
 		if b.Wasm, err = os.ReadFile(filepath.Join(dir, filepath.Base(mf.Wasm))); err != nil {
 			return nil, fmt.Errorf("read wasm (build the plugin first?): %w", err)
@@ -281,7 +362,7 @@ func (m *Manager) Import(ctx context.Context, filename string, data []byte, by s
 	}
 	rec := &store.PluginRecord{
 		Module: module, Version: b.Manifest.Version, Manifest: b.RawManifest,
-		Wasm: b.Wasm, SHA256: b.digest(), InstalledBy: by,
+		Wasm: b.Wasm, Icons: b.Icons, SHA256: b.digest(), InstalledBy: by,
 	}
 	if err := m.store.SavePlugin(ctx, rec); err != nil {
 		return nil, err
@@ -371,8 +452,11 @@ func (m *Manager) Sync(ctx context.Context) error {
 		}
 		mf, err := nodes.ParseManifest(rec.Manifest)
 		if err == nil {
-			at := rec.InstalledAt
-			err = m.install(ctx, &Bundle{Manifest: mf, RawManifest: rec.Manifest, Wasm: rec.Wasm}, "imported", rec.InstalledBy, &at)
+			b := &Bundle{Manifest: mf, RawManifest: rec.Manifest, Wasm: rec.Wasm}
+			if err = b.resolveIcons(storedIcons(rec.Icons)); err == nil {
+				at := rec.InstalledAt
+				err = m.install(ctx, b, "imported", rec.InstalledBy, &at)
+			}
 		}
 		if err != nil {
 			m.log.Error("install plugin", "module", rec.Module, "err", err)

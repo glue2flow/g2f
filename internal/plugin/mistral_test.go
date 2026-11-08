@@ -49,9 +49,13 @@ func mistralZip(t *testing.T, host string) []byte {
 		t.Fatal(err)
 	}
 	manifest = bytes.Replace(manifest, []byte("  - api.mistral.ai"), []byte("  - "+host), 1)
+	icon, err := os.ReadFile(filepath.Join(mistralDir, "icon.svg"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
-	for name, data := range map[string][]byte{"mistral/plugin.yaml": manifest, "mistral/plugin.wasm": wasm} {
+	for name, data := range map[string][]byte{"mistral/plugin.yaml": manifest, "mistral/plugin.wasm": wasm, "mistral/icon.svg": icon} {
 		w, _ := zw.Create(name)
 		_, _ = w.Write(data)
 	}
@@ -93,8 +97,12 @@ func TestMistralWasmPlugin(t *testing.T) {
 		t.Fatal(err)
 	}
 	mgr := NewManager(reg, newMemStore(), discard)
-	if _, err := mgr.Import(context.Background(), "mistral.zip", mistralZip(t, "127.0.0.1"), "alice"); err != nil {
+	info, err := mgr.Import(context.Background(), "mistral.zip", mistralZip(t, "127.0.0.1"), "alice")
+	if err != nil {
 		t.Fatal(err)
+	}
+	if !strings.HasPrefix(info.Icon, "data:image/svg+xml;base64,") {
+		t.Fatalf("mistral icon: %q", info.Icon)
 	}
 
 	run := func(sec mistralSecrets, params map[string]any) *engine.Result {

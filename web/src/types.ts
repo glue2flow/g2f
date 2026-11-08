@@ -92,6 +92,8 @@ export interface NodeDef {
   category: string;
   description: string;
   color?: string;
+  /** Data URI of a node-specific icon; usually the module's icon is used. */
+  icon?: string;
   trigger?: "manual" | "schedule" | "webhook" | "call" | "error" | "poll";
   dynamicOutputs?: { param: string; extra?: string[] };
   inputs: string[];
@@ -191,6 +193,8 @@ export interface ModuleInfo {
   version?: string;
   description?: string;
   color?: string;
+  /** Data URI (SVG, PNG or WebP). */
+  icon?: string;
   runtime: "builtin" | "http" | "wasm" | "go";
   source: string;
   config: ParamDef[];
