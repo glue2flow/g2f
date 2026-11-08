@@ -11,7 +11,7 @@ import (
 	"github.com/glue2flow/g2f/internal/workflow"
 )
 
-// gateWF: Start -> A (always items) -> gate.a ; Start -> If(bOn) -> B -> gate.b
+// gateWF: Start -> A (always items) -> gate.a ; Start -> Condition(bOn) -> B -> gate.b
 func gateWF(gate string, bOn bool, condA string) *workflow.Workflow {
 	cond := "{{ false }}"
 	if bOn {
@@ -25,7 +25,7 @@ func gateWF(gate string, bOn bool, condA string) *workflow.Workflow {
 		Nodes: []workflow.Node{
 			{ID: "t", Name: "Start", Type: "trigger.manual"},
 			{ID: "a", Name: "A", Type: "core.set", Params: map[string]any{"fields": map[string]any{"src": "a", "ok": false}}},
-			{ID: "if", Name: "If", Type: "core.if", Params: map[string]any{"condition": cond}},
+			{ID: "if", Name: "Condition", Type: "core.if", Params: map[string]any{"condition": cond}},
 			{ID: "b", Name: "B", Type: "core.set", Params: map[string]any{"fields": map[string]any{"src": "b"}}},
 			{ID: "g", Name: "Gate", Type: "logic." + gate, Params: gp},
 			{ID: "yes", Name: "Yes", Type: "core.log"},

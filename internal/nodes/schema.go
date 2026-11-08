@@ -10,7 +10,7 @@ import (
 // fields in the dynamic content picker (⚡) before the workflow has run; after a
 // run, the recorded output is used as well.
 type OutputSchema struct {
-	// Passthrough means the items keep the fields of the input items (e.g. If,
+	// Passthrough means the items keep the fields of the input items (e.g. Condition,
 	// Log, Wait). Fields are added on top.
 	Passthrough bool `json:"passthrough,omitempty" yaml:"passthrough"`
 	// PassthroughIf names a boolean parameter that turns passthrough on

@@ -5,7 +5,7 @@
 | Category | Nodes |
 | --- | --- |
 | Triggers | Manual, Schedule, Webhook, Called by Workflow, Error Trigger, polling triggers such as Email Received (see [Triggers](triggers.md)) |
-| Core | [HTTP Request](#http-request), [Set Fields](#set-fields), [If](#if), [Switch](#switch), [Merge](#merge), [Code](#code), [Wait](#wait), [Transform Items](#transform-items), [Log](#log) |
+| Core | [HTTP Request](#http-request), [Set Fields](#set-fields), [Condition](#condition), [Switch](#switch), [Merge](#merge), [Code](#code), [Wait](#wait), [Transform Items](#transform-items), [Log](#log) |
 | Data | [Filter](#filter), [Sort](#sort), [Limit](#limit), [Split Out](#split-out), [Aggregate](#aggregate), [Map](#map), [Rename / Remove Fields](#rename--remove-fields), [Date & Time](#date--time), [CSV](#csv), [Remove Duplicates](#remove-duplicates), [Data Store](#data-store) |
 | Flow | [Execute Workflow](#execute-workflow) (incl. loops over items / batches) |
 | Logic | [And, Or, Xor](#logic-gates) |
@@ -27,10 +27,10 @@ fails on HTTP status ≥ 400.
 Adds or overwrites fields on each item. Values may use `{{ expressions }}`. With
 *Keep existing fields* off, only the configured fields are emitted.
 
-## If
+## Condition
 
 Routes each item to the `true` or `false` output by a condition such as
-`{{ json.status == 200 }}`.
+`{{ json.status == 200 }}` (if / else). Its type is `core.if`; it was called *If* before.
 
 ## Switch
 

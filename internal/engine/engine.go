@@ -3,7 +3,7 @@
 // Execution model: a run starts at one trigger node. All nodes reachable from
 // it are executed once, in topological order. A node's input is the
 // concatenation of all items arriving on its incoming edges; a node that
-// receives no items (e.g. the unused branch of an If) is skipped, and so are
+// receives no items (e.g. the unused branch of a Condition) is skipped, and so are
 // its descendants unless they receive items from elsewhere.
 //
 // The whole progress of a run lives in a serializable runState, so a run can

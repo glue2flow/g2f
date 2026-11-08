@@ -51,7 +51,7 @@ type Resumer interface {
 
 // ResumeHandler serves /webhook-resume/{executionId}/{signature} for any
 // method. The request (method, headers, query, body) becomes the Wait node's
-// output, so e.g. ?decision=approve can drive a following If node.
+// output, so e.g. ?decision=approve can drive a following Condition node.
 type ResumeHandler struct {
 	signer *ResumeSigner
 	eng    Resumer
