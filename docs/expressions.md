@@ -23,6 +23,14 @@ mixed text yields a string. Inside `map`/`filter`, wrap object literals in paren
 
 Keys that are not plain identifiers use brackets: `{{ json.user['first name'] }}`.
 
+Besides the expr builtins (`toBase64`, `fromJSON`, `map`, …) there are a few helpers:
+
+| Function | Result |
+| --- | --- |
+| `toBase64Url(s)` / `fromBase64Url(s)` | URL-safe base64 (fromBase64Url also takes standard base64; nil → `""`) |
+| `emailAddresses(v)` | `"a@x.com, \"Doe, Jane\" <j@x.com>"` or an array → `[{name, address}]` |
+| `mimeMessage({from, to, cc, bcc, replyTo, subject, text, html, headers, attachments})` | a complete RFC 5322 e-mail (UTF-8, multipart when needed); attachments are `[{filename, content (base64), contentType}]` |
+
 ## Dynamic content (⚡)
 
 You don't have to type paths. Every field that accepts expressions has a ⚡ button, like

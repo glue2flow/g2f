@@ -1,0 +1,145 @@
+# E-mail over SMTP (send) and IMAP (read, move, flag). The protocol code is Go,
+# compiled into glue2flow (runtime: go): the WebAssembly sandbox cannot open
+# TCP connections. This manifest declares the nodes and settings; removing this
+# folder from the modules directory deactivates the module.
+#
+# Setup (once per organization, by an admin): Plugins -> Email -> Settings.
+#   Gmail:     smtp.gmail.com 587 starttls / imap.gmail.com 993 tls, with an app password
+#   Microsoft: smtp.office365.com 587 starttls / outlook.office365.com 993 tls
+#              (basic auth must be allowed for the mailbox; prefer the Outlook module)
+module: email
+name: Email (SMTP/IMAP)
+version: 1.0.0
+description: Send mail over SMTP and read, move or flag mail over IMAP
+color: "#2563eb"
+runtime: go
+
+config:
+  - { name: smtpHost, label: SMTP host, placeholder: smtp.example.com }
+  - { name: smtpPort, label: SMTP port, type: number, default: 587 }
+  - name: smtpSecurity
+    label: SMTP security
+    type: select
+    default: starttls
+    options:
+      - { label: STARTTLS (port 587), value: starttls }
+      - { label: TLS (port 465), value: tls }
+      - { label: "None (no credentials, or localhost only)", value: none }
+  - { name: smtpUsername, label: SMTP username }
+  - { name: smtpPassword, label: SMTP password, type: secret }
+  - name: fromAddress
+    label: Default sender
+    placeholder: Workflows <workflows@example.com>
+    description: Used when a Send node has no From. Defaults to the SMTP username.
+  - { name: imapHost, label: IMAP host, placeholder: imap.example.com }
+  - { name: imapPort, label: IMAP port, type: number, default: 993 }
+  - name: imapSecurity
+    label: IMAP security
+    type: select
+    default: tls
+    options:
+      - { label: TLS (port 993), value: tls }
+      - { label: STARTTLS (port 143), value: starttls }
+      - { label: "None (no credentials, or localhost only)", value: none }
+  - { name: imapUsername, label: IMAP username }
+  - { name: imapPassword, label: IMAP password, type: secret }
+
+params:
+  - name: username
+    label: Username
+    description: Your own mailbox on the organization's mail server. Leave empty to use the organization's account.
+  - name: password
+    label: Password
+    type: secret
+    description: Password or app password for Username.
+
+nodes:
+  - type: send
+    name: Send Email
+    description: Send one e-mail per input item over SMTP.
+    params:
+      - { name: from, label: From, placeholder: "Jane <jane@example.com>", description: "Defaults to the organization's sender." }
+      - { name: to, label: To, required: true, placeholder: "a@example.com, b@example.com", description: "Comma separated or a JSON array." }
+      - { name: cc, label: Cc }
+      - { name: bcc, label: Bcc }
+      - { name: replyTo, label: Reply-To }
+      - { name: subject, label: Subject, required: true }
+      - { name: text, label: Text body, type: text }
+      - { name: html, label: HTML body, type: text, description: "Optional. With both bodies, mail clients choose." }
+      - name: attachments
+        label: Attachments
+        type: json
+        description: 'Optional list of {"filename", "content" (base64), "contentType"}.'
+      - name: headers
+        label: Extra headers
+        type: json
+        description: 'Optional object, e.g. {"In-Reply-To": "{{ json.messageId }}"} to answer a message.'
+    outputSchema:
+      fields:
+        - { path: messageId, type: string }
+        - { path: from, type: string }
+        - { path: recipients, type: array, description: "All envelope recipients (To, Cc, Bcc)" }
+        - { path: subject, type: string }
+
+  - type: read
+    name: Read Emails
+    description: Search a mailbox over IMAP and emit one item per message (oldest first).
+    params:
+      - { name: mailbox, label: Mailbox, default: INBOX }
+      - { name: unseenOnly, label: Only unread, type: boolean, default: true }
+      - { name: since, label: Received since, placeholder: "2026-01-31", description: "A date (YYYY-MM-DD), e.g. {{ (now() - duration('24h')).Format('2006-01-02') }}" }
+      - { name: fromFilter, label: From contains }
+      - { name: subjectFilter, label: Subject contains }
+      - { name: textFilter, label: Text contains }
+      - { name: limit, label: Max messages, type: number, default: 20, description: "The newest matching messages, at most 200." }
+      - { name: markSeen, label: Mark as read, type: boolean, default: false, description: "Flag the returned messages as read, so the next run skips them." }
+      - { name: includeAttachments, label: Include attachment content, type: boolean, default: false, description: "Adds base64 content to each attachment (up to 10 MB per message)." }
+    outputSchema:
+      fields:
+        - { path: uid, type: number, description: "IMAP UID, for Move / Set Flags" }
+        - { path: mailbox, type: string }
+        - { path: messageId, type: string }
+        - { path: subject, type: string }
+        - { path: from, type: string, description: Sender address }
+        - { path: fromName, type: string, description: Sender display name }
+        - { path: to, type: array }
+        - { path: cc, type: array }
+        - { path: replyTo, type: array }
+        - { path: date, type: string }
+        - { path: text, type: string, description: Plain-text body }
+        - { path: html, type: string, description: HTML body }
+        - { path: flags, type: array }
+        - { path: seen, type: boolean }
+        - { path: size, type: number }
+        - { path: inReplyTo, type: string }
+        - { path: references, type: array }
+        - { path: attachments, type: array, description: "{filename, contentType, size, content?}" }
+
+  - type: move
+    name: Move Email
+    description: Move messages (by UID) to another mailbox, e.g. Archive or Trash.
+    params:
+      - { name: uid, label: UID, required: true, default: "{{ json.uid }}" }
+      - { name: mailbox, label: Source mailbox, default: "{{ json.mailbox ?? 'INBOX' }}" }
+      - { name: target, label: Target mailbox, required: true, placeholder: Archive }
+    outputSchema:
+      passthrough: true
+      fields:
+        - { path: movedTo, type: string }
+
+  - type: setFlags
+    name: Set Email Flags
+    description: Add or remove flags, e.g. mark as read (\Seen) or star (\Flagged).
+    params:
+      - { name: uid, label: UID, required: true, default: "{{ json.uid }}" }
+      - { name: mailbox, label: Mailbox, default: "{{ json.mailbox ?? 'INBOX' }}" }
+      - name: action
+        label: Action
+        type: select
+        default: add
+        options:
+          - { label: Add flags, value: add }
+          - { label: Remove flags, value: remove }
+      - { name: flags, label: Flags, default: \Seen, description: "Comma separated: \\Seen, \\Flagged, \\Answered, or custom keywords." }
+    outputSchema:
+      passthrough: true

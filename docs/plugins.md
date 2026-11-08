@@ -2,12 +2,13 @@
 
 # Plugins
 
-A plugin (module) is a set of nodes described by a manifest. There are two runtimes:
+A plugin (module) is a set of nodes described by a manifest. There are three runtimes:
 
 | Runtime | Implementation | Use for |
 | --- | --- | --- |
 | `http` | YAML only: each node maps its parameters onto one HTTP request | thin REST wrappers, see [HTTP modules](http-modules.md) |
 | `wasm` | WebAssembly module (Extism PDK), sandboxed | any logic, any language (Go, JS/TS, Rust, …) |
+| `go` | Go code compiled into the server, declared by a YAML manifest | protocols the sandbox cannot speak (SMTP, IMAP, databases), see [below](#native-go-modules) |
 
 ## Included plugins
 
@@ -16,6 +17,10 @@ A plugin (module) is a set of nodes described by a manifest. There are two runti
 | GitHub | http | Get Repository, List Issues, Create Issue | [`modules/github.yaml`](../modules/github.yaml) |
 | Slack | http | Post Message (incoming webhook) | [`modules/slack.yaml`](../modules/slack.yaml) |
 | Google Sheets | http + OAuth2 | Append Row, Read Rows | [`modules/google-sheets.yaml`](../modules/google-sheets.yaml) |
+| Gmail | http + OAuth2 | Send Email, Search Messages, Get Message, Get Attachment, Change Labels, Move to Trash, List Labels | [`modules/gmail.yaml`](../modules/gmail.yaml) |
+| Outlook | http + OAuth2 | Send Email, List Messages, Get Message, Reply, Move Message, Mark as Read, List Folders | [`modules/outlook.yaml`](../modules/outlook.yaml) |
+| Microsoft Teams | http + OAuth2 | Send Channel Message, Reply in Channel Thread, Send Chat Message, List Teams / Channels / Chats | [`modules/ms-teams.yaml`](../modules/ms-teams.yaml) |
+| Email (SMTP/IMAP) | go | Send Email, Read Emails, Move Email, Set Email Flags ([docs](email.md)) | [`modules/email`](../modules/email) |
 | Telegram | wasm (Go and JS) | Send Message, Get Bot Info | [`examples/plugins/telegram`](../examples/plugins/telegram) |
 | Mistral AI | wasm (Go) | Chat (prompt → answer) | [`examples/plugins/mistral`](../examples/plugins/mistral) |
 
@@ -41,6 +46,20 @@ memory and time limit. They can make HTTP calls only to the manifest's `allowedH
 See **[examples/plugins/telegram](../examples/plugins/telegram)** for a complete WASM plugin in
 Go and JavaScript, the JSON calling convention and build instructions, and
 **[examples/plugins/mistral](../examples/plugins/mistral)** for a compact Go plugin that calls an LLM.
+
+## Native Go modules
+
+WASM plugins can only make HTTP calls. For other protocols a module is written in Go and
+compiled into glue2flow, e.g. [`modules/email`](../modules/email):
+
+- `modules/<name>/plugin.yaml` is a normal manifest with `runtime: go`. It declares the
+  nodes, parameters, `config`, `vars` and output schemas, so settings, secrets and the editor
+  work exactly as for other plugins.
+- The Go package in the same folder calls
+  `nodes.RegisterNative("<module>", map[string]nodes.ExecFunc{...})` in `init()`, with one
+  function per node type. `cmd/g2f/main.go` imports it.
+- The module is active only while its folder is in `G2F_MODULES_DIR`, so admins can remove it.
+  Go modules cannot be imported at runtime.
 
 ## Manifest reference
 

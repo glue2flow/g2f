@@ -222,6 +222,8 @@ func (m *Manager) install(ctx context.Context, b *Bundle, source, by string, at 
 	switch mf.Runtime {
 	case "http":
 		list, err = nodes.HTTPModuleNodes(mf, source)
+	case "go":
+		list, err = nodes.NativeModuleNodes(mf, source)
 	case "wasm":
 		if mod, err = compileWasm(ctx, mf, b.Wasm, m.log); err == nil {
 			list = wasmNodes(mf, mod, source)
@@ -262,6 +264,9 @@ func (m *Manager) Import(ctx context.Context, filename string, data []byte, by s
 	b, err := ParseBundle(filename, data)
 	if err != nil {
 		return nil, err
+	}
+	if b.Manifest.Runtime == "go" {
+		return nil, errors.New("go modules are compiled into glue2flow and load from the modules directory; they cannot be imported")
 	}
 	module := b.Manifest.Module
 	m.mu.Lock()

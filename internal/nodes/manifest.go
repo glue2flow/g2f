@@ -16,13 +16,15 @@ import (
 //   - "http" (default): each node maps its parameters onto one HTTP request.
 //   - "wasm": nodes are implemented in a WebAssembly module (Extism PDK) that
 //     exports an `execute` function. See examples/plugins/telegram.
+//   - "go": nodes are implemented in Go and compiled into the server (see
+//     RegisterNative), for protocols the sandbox cannot speak (SMTP, IMAP, …).
 type Manifest struct {
 	Module      string `yaml:"module"`
 	Name        string `yaml:"name"`
 	Version     string `yaml:"version"`
 	Description string `yaml:"description"`
 	Color       string `yaml:"color"`
-	Runtime     string `yaml:"runtime"` // http | wasm
+	Runtime     string `yaml:"runtime"` // http | wasm | go
 
 	// Config declares settings for the plugin itself, configured once per
 	// organization by an admin (API tokens, client secrets, base URLs).
@@ -153,7 +155,7 @@ func (m *Manifest) validate() error {
 	switch m.Runtime {
 	case "":
 		m.Runtime = "http"
-	case "http", "wasm":
+	case "http", "wasm", "go":
 	default:
 		return fmt.Errorf("unknown runtime %q", m.Runtime)
 	}

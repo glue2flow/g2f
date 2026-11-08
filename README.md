@@ -44,7 +44,8 @@ publish them to the whole organization. Roles from *viewer* to *owner*.
 Plugins get them; workflow fields don't.
 
 🔌 **Extend it in any language.** Wrap a REST API in a few lines of YAML, or write a
-sandboxed WebAssembly plugin in Go, JavaScript or Rust, and import it at runtime.
+sandboxed WebAssembly plugin in Go, JavaScript or Rust, and import it at runtime. Native Go
+modules cover protocols like SMTP and IMAP.
 
 🪶 **Small and simple to run.** One Go binary (~25 MB image) plus PostgreSQL.
 Replica-safe schedules and waits.
@@ -57,7 +58,7 @@ Replica-safe schedules and waits.
 | **Logic & flow** | If · Switch · Merge (append, join, pair) · And / Or / Xor · Execute Workflow (loops, batches) |
 | **Data** | HTTP Request · Set Fields · Transform Items · Code (sandboxed JavaScript) · Log |
 | **Long-running** | Wait for a time, a date, or an approval link, for days if needed, surviving restarts |
-| **Integrations** | GitHub · Slack · Google Sheets (OAuth2) · Telegram · Mistral AI |
+| **Integrations** | Gmail · Outlook · Microsoft Teams · Google Sheets (OAuth2) · Email (SMTP/IMAP) · GitHub · Slack · Telegram · Mistral AI |
 | **Accounts** | Users connect their own OAuth2 accounts and share them with groups |
 
 ## Try it in one minute
@@ -86,7 +87,8 @@ setup is a demo with default passwords.
 | Keycloak / OIDC sign-in, sharing by groups and organizations | ✅ Working |
 | Encrypted secrets, plugin config and vars, key rotation | ✅ Working |
 | Plugins: YAML/HTTP and WebAssembly, runtime import | ✅ Working |
-| Connected OAuth2 accounts | ✅ Working (Google Sheets included) |
+| Connected OAuth2 accounts | ✅ Working (Gmail, Google Sheets, Outlook, Teams included) |
+| Email over SMTP/IMAP (native Go module) | ✅ New |
 | Code node | 🟡 Working; script memory is not limited yet |
 | Several replicas | 🟡 Schedules, waits and plugins are replica-safe; executions running during a restart are not yet |
 | Workflow history, import/export | 🗺️ Planned |
@@ -95,8 +97,9 @@ setup is a demo with default passwords.
 
 - Reusable API-key credentials (like connections, for non-OAuth services)
 - Plugin signing and a plugin catalog
-- More OAuth2 integration packs (Gmail, Microsoft 365, HubSpot, Salesforce)
-- Built-in protocol nodes: SMTP/IMAP, Postgres/MySQL, SFTP
+- More OAuth2 integration packs (HubSpot, Salesforce, Google Calendar/Drive, SharePoint)
+- An "email received" trigger (IMAP IDLE / Gmail push) instead of schedule + read
+- More native protocol modules: Postgres/MySQL, SFTP
 - Memory limits for the Code node (e.g. QuickJS in WASM)
 - Horizontal scaling: run executions through a Postgres-backed job queue
 - Webhook rate limiting and a "test URL" that works while a workflow is inactive
@@ -107,7 +110,7 @@ setup is a demo with default passwords.
 
 | | |
 | --- | --- |
-| **Use it** | [Getting started](docs/getting-started.md) · [Nodes](docs/nodes.md) · [Triggers](docs/triggers.md) · [Expressions & ⚡](docs/expressions.md) · [Sharing](docs/sharing.md) · [Connected accounts](docs/connections.md) |
+| **Use it** | [Getting started](docs/getting-started.md) · [Nodes](docs/nodes.md) · [Triggers](docs/triggers.md) · [Expressions & ⚡](docs/expressions.md) · [Sharing](docs/sharing.md) · [Connected accounts](docs/connections.md) · [Email](docs/email.md) |
 | **Run it** | [Configuration](docs/configuration.md) · [Secrets](docs/secrets.md) · [Architecture](docs/architecture.md) |
 | **Extend it** | [Plugins](docs/plugins.md) · [HTTP modules](docs/http-modules.md) · [Telegram sample](examples/plugins/telegram) · [Mistral AI sample](examples/plugins/mistral) |
 

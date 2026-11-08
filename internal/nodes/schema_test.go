@@ -50,6 +50,8 @@ func TestManifestOutputSchema(t *testing.T) {
 func TestShippedManifestsDeclareOutputSchema(t *testing.T) {
 	files, _ := filepath.Glob("../../modules/*.yaml")
 	plugins, _ := filepath.Glob("../../examples/plugins/*/plugin.yaml")
+	native, _ := filepath.Glob("../../modules/*/plugin.yaml")
+	plugins = append(plugins, native...)
 	files = append(files, plugins...)
 	if len(files) < 5 {
 		t.Fatalf("found only %v", files)

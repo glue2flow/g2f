@@ -188,7 +188,7 @@ export interface ModuleInfo {
   version?: string;
   description?: string;
   color?: string;
-  runtime: "builtin" | "http" | "wasm";
+  runtime: "builtin" | "http" | "wasm" | "go";
   source: string;
   config: ParamDef[];
   vars: ParamDef[];

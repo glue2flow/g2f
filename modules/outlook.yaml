@@ -1,0 +1,258 @@
+# Outlook / Microsoft 365 mail via Microsoft Graph and OAuth2. Users connect
+# their own work, school or personal Microsoft account.
+#
+# Setup (once per organization, by an admin):
+#   1. Microsoft Entra admin center -> App registrations -> New registration.
+#      Supported account types: "Accounts in any organizational directory" (and
+#      personal accounts if wanted). Redirect URI (Web): <G2F_PUBLIC_URL>/oauth/callback
+#      Single-tenant apps: replace "common" in authorizeUrl/tokenUrl below with
+#      your tenant ID.
+#   2. API permissions -> Microsoft Graph (delegated): offline_access, User.Read,
+#      Mail.ReadWrite, Mail.Send.
+#   3. Certificates & secrets -> New client secret.
+#   4. glue2flow -> Plugins -> Outlook -> Settings: enter the application (client)
+#      ID and the secret value. The Microsoft Teams module can use the same app.
+module: outlook
+name: Outlook
+version: 1.0.0
+description: Send, read and organize Microsoft 365 / Outlook.com mail
+color: "#0078d4"
+baseUrl: https://graph.microsoft.com/v1.0/me
+
+config:
+  - name: clientId
+    label: Application (client) ID
+    description: From the app registration in Microsoft Entra.
+  - name: clientSecret
+    label: Client secret
+    type: secret
+
+oauth2:
+  authorizeUrl: https://login.microsoftonline.com/common/oauth2/v2.0/authorize
+  tokenUrl: https://login.microsoftonline.com/common/oauth2/v2.0/token
+  scopes: [offline_access, User.Read, Mail.ReadWrite, Mail.Send]
+  pkce: true
+  userInfo:
+    url: https://graph.microsoft.com/v1.0/me
+    field: userPrincipalName
+  apiHosts: [graph.microsoft.com]
+
+nodes:
+  - type: send
+    name: Send Email
+    description: Send one e-mail per input item; a copy is saved to Sent Items.
+    params:
+      - { name: to, label: To, required: true, placeholder: "a@example.com, Jane <jane@example.com>" }
+      - { name: cc, label: Cc }
+      - { name: bcc, label: Bcc }
+      - { name: replyTo, label: Reply-To }
+      - { name: subject, label: Subject, required: true }
+      - name: bodyType
+        label: Body format
+        type: select
+        default: Text
+        options:
+          - { label: Plain text, value: Text }
+          - { label: HTML, value: HTML }
+      - { name: body, label: Body, type: text }
+      - name: importance
+        label: Importance
+        type: select
+        default: normal
+        options:
+          - { label: Low, value: low }
+          - { label: Normal, value: normal }
+          - { label: High, value: high }
+      - name: attachments
+        label: Attachments
+        type: json
+        description: 'Optional list of {"filename", "content" (base64), "contentType"}. Up to 3 MB in total.'
+    request:
+      method: POST
+      path: /sendMail
+      body:
+        saveToSentItems: true
+        message:
+          subject: "{{ params.subject }}"
+          importance: "{{ params.importance }}"
+          body: { contentType: "{{ params.bodyType }}", content: "{{ params.body ?? '' }}" }
+          toRecipients: "{{ map(emailAddresses(params.to), ({emailAddress: #})) }}"
+          ccRecipients: "{{ map(emailAddresses(params.cc), ({emailAddress: #})) }}"
+          bccRecipients: "{{ map(emailAddresses(params.bcc), ({emailAddress: #})) }}"
+          replyTo: "{{ map(emailAddresses(params.replyTo), ({emailAddress: #})) }}"
+          attachments: >-
+            {{ map(type(params.attachments) == 'array' ? params.attachments : [], ({
+                 '@odata.type': '#microsoft.graph.fileAttachment',
+                 name: .filename, contentType: .contentType ?? 'application/octet-stream', contentBytes: .content
+               })) }}
+    output: "{{ {sent: response.status == 202, to: params.to, subject: params.subject} }}"
+    outputSchema:
+      fields:
+        - { path: sent, type: boolean }
+        - { path: to, type: string }
+        - { path: subject, type: string }
+
+  - type: list
+    name: List Messages
+    description: List messages of a folder, newest first (one item per message).
+    params:
+      - name: folder
+        label: Folder
+        default: inbox
+        description: "inbox, sentitems, drafts, archive, deleteditems, junkemail, or a folder ID"
+      - { name: unreadOnly, label: Only unread, type: boolean, default: true }
+      - name: search
+        label: Search
+        description: 'Keyword search, e.g. invoice, or from:billing@example.com. Cannot be combined with "Only unread".'
+      - name: filter
+        label: OData filter
+        description: "Advanced, e.g. hasAttachments eq true and importance eq 'high'"
+      - { name: top, label: Max messages, type: number, default: 20 }
+      - name: bodyType
+        label: Body format
+        type: select
+        default: text
+        options:
+          - { label: Plain text, value: text }
+          - { label: HTML, value: html }
+    request:
+      method: GET
+      path: /mailFolders/{{ params.folder }}/messages
+      headers:
+        Prefer: outlook.body-content-type="{{ params.bodyType }}"
+      query:
+        $top: "{{ params.top }}"
+        $search: "{{ (params.search ?? '') != '' ? '\"' + replace(params.search, '\"', '') + '\"' : '' }}"
+        $filter: >-
+          {{ join(filter([params.unreadOnly && (params.search ?? '') == '' ? 'isRead eq false' : '', params.filter ?? ''], # != ''), ' and ') }}
+    output: >-
+      {{ map(response.body.value ?? [], ({
+           id: .id, conversationId: .conversationId, subject: .subject,
+           from: .from.emailAddress.address, fromName: .from.emailAddress.name,
+           to: map(.toRecipients ?? [], .emailAddress.address),
+           cc: map(.ccRecipients ?? [], .emailAddress.address),
+           receivedDateTime: .receivedDateTime, isRead: .isRead, importance: .importance,
+           hasAttachments: .hasAttachments, bodyPreview: .bodyPreview, body: .body.content,
+           webLink: .webLink, internetMessageId: .internetMessageId
+         })) }}
+    outputSchema:
+      fields: &message
+        - { path: id, type: string, description: Message ID }
+        - { path: conversationId, type: string }
+        - { path: subject, type: string }
+        - { path: from, type: string, description: Sender address }
+        - { path: fromName, type: string }
+        - { path: to, type: array }
+        - { path: cc, type: array }
+        - { path: receivedDateTime, type: string }
+        - { path: isRead, type: boolean }
+        - { path: importance, type: string }
+        - { path: hasAttachments, type: boolean }
+        - { path: bodyPreview, type: string }
+        - { path: body, type: string }
+        - { path: webLink, type: string, description: Opens the message in Outlook on the web }
+        - { path: internetMessageId, type: string }
+
+  - type: get
+    name: Get Message
+    description: Fetch one message.
+    params:
+      - { name: messageId, label: Message ID, required: true, default: "{{ json.id }}" }
+      - name: bodyType
+        label: Body format
+        type: select
+        default: text
+        options:
+          - { label: Plain text, value: text }
+          - { label: HTML, value: html }
+    request:
+      method: GET
+      path: /messages/{{ params.messageId }}
+      headers:
+        Prefer: outlook.body-content-type="{{ params.bodyType }}"
+    output: >-
+      {{ let m = response.body; {
+           id: m.id, conversationId: m.conversationId, subject: m.subject,
+           from: m.from.emailAddress.address, fromName: m.from.emailAddress.name,
+           to: map(m.toRecipients ?? [], .emailAddress.address),
+           cc: map(m.ccRecipients ?? [], .emailAddress.address),
+           receivedDateTime: m.receivedDateTime, isRead: m.isRead, importance: m.importance,
+           hasAttachments: m.hasAttachments, bodyPreview: m.bodyPreview, body: m.body.content,
+           webLink: m.webLink, internetMessageId: m.internetMessageId
+         } }}
+    outputSchema:
+      fields: *message
+
+  - type: reply
+    name: Reply
+    description: Reply (or reply all) to a message; the reply is saved to Sent Items.
+    params:
+      - { name: messageId, label: Message ID, required: true, default: "{{ json.id }}" }
+      - { name: comment, label: Reply text, type: text, required: true }
+      - { name: replyAll, label: Reply all, type: boolean, default: false }
+    request:
+      method: POST
+      path: "/messages/{{ params.messageId }}/{{ params.replyAll ? 'replyAll' : 'reply' }}"
+      body:
+        comment: "{{ params.comment }}"
+    output: "{{ {replied: response.status == 202, messageId: params.messageId} }}"
+    outputSchema:
+      fields:
+        - { path: replied, type: boolean }
+        - { path: messageId, type: string }
+
+  - type: move
+    name: Move Message
+    description: Move a message to another folder.
+    params:
+      - { name: messageId, label: Message ID, required: true, default: "{{ json.id }}" }
+      - name: destination
+        label: Destination folder
+        required: true
+        default: archive
+        description: "archive, deleteditems, inbox, junkemail, or a folder ID"
+    request:
+      method: POST
+      path: /messages/{{ params.messageId }}/move
+      body:
+        destinationId: "{{ params.destination }}"
+    output: "{{ {id: response.body.id, parentFolderId: response.body.parentFolderId, subject: response.body.subject} }}"
+    outputSchema:
+      fields:
+        - { path: id, type: string, description: ID of the message in the new folder }
+        - { path: parentFolderId, type: string }
+        - { path: subject, type: string }
+
+  - type: markRead
+    name: Mark as Read
+    description: Mark a message as read or unread.
+    params:
+      - { name: messageId, label: Message ID, required: true, default: "{{ json.id }}" }
+      - { name: isRead, label: Read, type: boolean, default: true }
+    request:
+      method: PATCH
+      path: /messages/{{ params.messageId }}
+      body:
+        isRead: "{{ params.isRead }}"
+    output: "{{ {id: response.body.id, isRead: response.body.isRead, subject: response.body.subject} }}"
+    outputSchema:
+      fields:
+        - { path: id, type: string }
+        - { path: isRead, type: boolean }
+        - { path: subject, type: string }
+
+  - type: folders
+    name: List Folders
+    description: List mail folders (one item per folder), to find folder IDs.
+    request:
+      method: GET
+      path: /mailFolders
+      query:
+        $top: 100
+    output: "{{ map(response.body.value ?? [], ({id: .id, displayName: .displayName, unreadItemCount: .unreadItemCount, totalItemCount: .totalItemCount})) }}"
+    outputSchema:
+      fields:
+        - { path: id, type: string }
+        - { path: displayName, type: string }
+        - { path: unreadItemCount, type: number }
+        - { path: totalItemCount, type: number }

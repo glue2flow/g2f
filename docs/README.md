@@ -12,7 +12,8 @@ Everything about running, using and extending glue2flow. New here? Start with
 | [Triggers](triggers.md) | Manual, Schedule (cron / once), Webhook (auth, responses), Called by Workflow, Error Trigger |
 | [Expressions](expressions.md) | `{{ }}` syntax, variables, the ⚡ dynamic content picker |
 | [Sharing & Keycloak](sharing.md) | Scopes, roles, groups, organizations, required token claims |
-| [Connected accounts (OAuth2)](connections.md) | Letting users connect Google & co., token storage and refresh |
+| [Connected accounts (OAuth2)](connections.md) | Gmail, Outlook, Teams, Google Sheets: connecting accounts, token storage and refresh |
+| [Email (SMTP/IMAP)](email.md) | Sending and reading mail with any mail server |
 
 ## Operating glue2flow
 
@@ -26,7 +27,7 @@ Everything about running, using and extending glue2flow. New here? Start with
 
 | Page | What's inside |
 | --- | --- |
-| [Plugins](plugins.md) | Included plugins, installing, WebAssembly plugins, manifest reference, output schemas |
+| [Plugins](plugins.md) | Included plugins, installing, WebAssembly plugins, native Go modules, manifest reference, output schemas |
 | [HTTP modules](http-modules.md) | Wrapping a REST API in a few lines of YAML |
 | [Telegram plugin](../examples/plugins/telegram/README.md) | Complete WebAssembly sample in Go and JavaScript, calling convention |
 | [Mistral AI plugin](../examples/plugins/mistral/README.md) | Compact Go plugin: prompt in, LLM answer out |
@@ -39,6 +40,7 @@ Everything about running, using and extending glue2flow. New here? Start with
 - [Expressions](expressions.md)
 - [Sharing & Keycloak](sharing.md)
 - [Connected accounts (OAuth2)](connections.md)
+- [Email (SMTP/IMAP)](email.md)
 - [Secrets & plugin settings](secrets.md)
 - [Configuration](configuration.md)
 - [Architecture](architecture.md)

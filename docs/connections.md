@@ -23,6 +23,27 @@ valid access token while a node runs.
 | Sharing | A connection belongs to whoever connected it and is *Only me*, shared with *Groups*, or the *Organization*. Selecting an account in a node requires access to it. Co-editors can still save workflows using someone else's account if they do not change that selection. Only the owner or an org admin can rename, share or remove it. |
 | Errors | Known token values are scrubbed from error messages. |
 
+## Included OAuth2 plugins
+
+Each stays inactive until an admin enters the client ID and secret; the setup steps are at the
+top of each file.
+
+| Module | Nodes | Provider app |
+| --- | --- | --- |
+| [`gmail`](../modules/gmail.yaml) | Send Email (HTML, attachments, replies in threads), Search Messages, Get Message, Get Attachment, Change Labels (mark read, archive, star), Move to Trash, List Labels | Google Cloud OAuth client, Gmail API |
+| [`google-sheets`](../modules/google-sheets.yaml) | Append Row, Read Rows | Google Cloud OAuth client, Sheets API |
+| [`outlook`](../modules/outlook.yaml) | Send Email, List Messages (unread, search, OData filter), Get Message, Reply / Reply all, Move Message, Mark as Read, List Folders | Microsoft Entra app (Graph `Mail.ReadWrite`, `Mail.Send`) |
+| [`ms-teams`](../modules/ms-teams.yaml) | Send Channel Message, Reply in Channel Thread, Send Chat Message, List Teams, List Channels, List Chats | Microsoft Entra app (Graph, no admin consent needed) |
+
+Google modules can share one OAuth client, as can the two Microsoft modules. The Microsoft
+manifests use the `common` endpoint (multi-tenant apps); for a single-tenant app, put your
+tenant ID in `authorizeUrl` and `tokenUrl`.
+
+```
+Schedule (every 5 min) ─► Gmail: Search "is:unread label:support" ─► Gmail: Get Message
+   ─► Teams: Send Channel Message "New ticket: {{ json.subject }}" ─► Gmail: Change Labels (remove UNREAD)
+```
+
 ## Manifest
 
 [`modules/google-sheets.yaml`](../modules/google-sheets.yaml) (Append Row, Read Rows) is a

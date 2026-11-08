@@ -22,6 +22,10 @@ import (
 	"github.com/glue2flow/g2f/internal/secrets"
 	"github.com/glue2flow/g2f/internal/store"
 	"github.com/glue2flow/g2f/internal/trigger"
+
+	// Native (Go) modules. Each is active only while its manifest is in the
+	// modules directory.
+	_ "github.com/glue2flow/g2f/modules/email"
 )
 
 // version is set at build time via -ldflags.
