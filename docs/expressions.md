@@ -50,7 +50,7 @@ The fields come from two sources:
 
 1. the **latest run** (or the run selected in the Executions panel), with sample values;
 2. each node type's **[output schema](plugins.md#output-schema)**, so nodes that have not run yet
-   are listed too. Pass-through nodes (If, Switch, Log, …) inherit the fields of their inputs.
+   are listed too. Pass-through nodes (Condition, Switch, Log, …) inherit the fields of their inputs.
 
 `nodes['Name'][0]` is the *first* item of that node. To work with every item of an earlier
 node, use `nodes['Name']` in a [Transform Items](nodes.md#transform-items) or [Code](nodes.md#code) node.

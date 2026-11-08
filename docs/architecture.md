@@ -38,7 +38,7 @@ docs/                this documentation
 
 A run starts at one trigger node. Every node reachable from it runs once, in topological
 order. Data flows as a list of JSON **items**; a node's input is the concatenation of all
-items arriving on its incoming arrows. Nodes with several outputs (e.g. `If` → `true`/`false`)
+items arriving on its incoming arrows. Nodes with several outputs (e.g. `Condition` → `true`/`false`)
 route items to a specific handle; a node that receives no items is **skipped**.
 
 Each execution stores per-node status, duration and output (capped at

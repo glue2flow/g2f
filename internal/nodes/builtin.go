@@ -205,14 +205,15 @@ func (setNode) Execute(_ context.Context, ec *ExecContext) (Output, error) {
 	return Output{"main": out}, nil
 }
 
-// --- If ---------------------------------------------------------------------
+// --- Condition (type core.if, formerly named "If") ---------------------------
 
 type ifNode struct{}
 
 func (ifNode) Definition() Definition {
 	return Definition{
-		Type: "core.if", Name: "If", Category: "Core", Source: "builtin", Module: BuiltinModule,
-		Description: "Route each item to the true or false output.",
+		// The type stays core.if: saved workflows reference it.
+		Type: "core.if", Name: "Condition", Category: "Core", Source: "builtin", Module: BuiltinModule,
+		Description: "Route each item to the true or false output (if / else).",
 		Color:       "#f59e0b", Inputs: []string{"main"}, Outputs: []string{"true", "false"},
 		Params: []Param{{
 			Name: "condition", Label: "Condition", Type: ParamString, Required: true,
