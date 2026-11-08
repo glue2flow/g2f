@@ -35,6 +35,16 @@ type Config struct {
 	PluginSync time.Duration
 	// DisableCodeNode turns off the JavaScript Code node.
 	DisableCodeNode bool
+	// CodeMemoryMB limits the memory of Code node scripts (0: no limit,
+	// scripts run inside the server process).
+	CodeMemoryMB int
+
+	// InstanceTimeout: how long an instance may miss heartbeats before other
+	// instances take over its running executions.
+	InstanceTimeout time.Duration
+	// ShutdownGrace: how long running executions may continue on shutdown
+	// before they are handed over to another instance.
+	ShutdownGrace time.Duration
 
 	Workers          int
 	ExecutionTimeout time.Duration
@@ -113,6 +123,21 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("G2F_PLUGIN_SYNC: %w", err)
 	}
 	c.DisableCodeNode = env("G2F_DISABLE_CODE_NODE", "false") == "true"
+	if c.CodeMemoryMB, err = envInt("G2F_CODE_MEMORY_MB", 128); err != nil {
+		return nil, err
+	}
+	if c.CodeMemoryMB < 0 {
+		return nil, fmt.Errorf("G2F_CODE_MEMORY_MB must not be negative")
+	}
+	if c.InstanceTimeout, err = time.ParseDuration(env("G2F_INSTANCE_TIMEOUT", "30s")); err != nil {
+		return nil, fmt.Errorf("G2F_INSTANCE_TIMEOUT: %w", err)
+	}
+	if c.InstanceTimeout < 5*time.Second {
+		return nil, fmt.Errorf("G2F_INSTANCE_TIMEOUT must be at least 5s")
+	}
+	if c.ShutdownGrace, err = time.ParseDuration(env("G2F_SHUTDOWN_GRACE", "15s")); err != nil {
+		return nil, fmt.Errorf("G2F_SHUTDOWN_GRACE: %w", err)
+	}
 	if c.SecretKey == "" {
 		return nil, fmt.Errorf("G2F_SECRET_KEY is required (generate one with: openssl rand -base64 32)")
 	}

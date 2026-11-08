@@ -47,6 +47,14 @@ export function ExecutionsPanel({ executions, selected, canCancel, onSelect, onR
               <span className="muted small">
                 {selected.triggerType} · by {selected.triggeredBy || "system"} · v{selected.workflowVersion}
               </span>
+              {!!selected.attempts && (
+                <span
+                  className="chip small"
+                  title="The server running this execution stopped; another one continued after the last completed node."
+                >
+                  ↻ continued {selected.attempts === 1 ? "once" : `${selected.attempts}×`} after a server stop
+                </span>
+              )}
               {selected.error && <span className="error-text small">{selected.error}</span>}
               {selected.status === "waiting" && (
                 <>
