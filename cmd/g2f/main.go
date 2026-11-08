@@ -60,12 +60,6 @@ func run(log *slog.Logger) error {
 	if err := st.Migrate(ctx); err != nil {
 		return fmt.Errorf("migrate: %w", err)
 	}
-	if n, err := st.FailInterrupted(ctx); err != nil {
-		return err
-	} else if n > 0 {
-		log.Warn("marked interrupted executions as failed", "count", n)
-	}
-
 	box, err := secrets.NewBox(cfg.SecretKey, cfg.SecretKeysOld)
 	if err != nil {
 		return err
@@ -96,6 +90,7 @@ func run(log *slog.Logger) error {
 
 	oauthMgr := oauth.NewManager(st, box, reg, sec, cfg.PublicURL)
 	nodes.CodeNodeEnabled = !cfg.DisableCodeNode
+	nodes.CodeMemoryLimit = int64(cfg.CodeMemoryMB) << 20
 	signer := trigger.NewResumeSigner(cfg.SecretKey, cfg.PublicURL)
 	errDispatch := trigger.NewErrorDispatcher(st, nil, reg, log, cfg.PublicURL)
 	eng := engine.New(reg, st, log, engine.Options{
@@ -109,6 +104,15 @@ func run(log *slog.Logger) error {
 	})
 
 	errDispatch.SetEngine(eng)
+	// Executions of stopped instances (this one before a restart, or other
+	// replicas) are taken over by RunRecovery.
+	if err := eng.Register(ctx); err != nil {
+		return fmt.Errorf("register instance: %w", err)
+	}
+	log.Info("engine instance registered", "instance", eng.InstanceID())
+	recoveryCtx, stopRecovery := context.WithCancel(context.Background())
+	defer stopRecovery()
+	go eng.RunRecovery(recoveryCtx, cfg.InstanceTimeout)
 
 	sched := trigger.NewScheduler(st, eng, reg, log, trigger.SchedulerOptions{CatchUp: cfg.ScheduleCatchUp})
 	schedCtx, stopSched := context.WithCancel(context.Background())
@@ -153,7 +157,9 @@ func run(log *slog.Logger) error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	_ = httpSrv.Shutdown(shutdownCtx)
-	eng.Shutdown(20 * time.Second)
+	// Heartbeats continue while running executions finish or are handed over.
+	eng.Shutdown(cfg.ShutdownGrace, 20*time.Second)
+	stopRecovery()
 	return nil
 }
 

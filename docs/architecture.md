@@ -49,11 +49,48 @@ The engine runs acyclic graphs only. Loops are built with
 
 ## Scaling and replicas
 
+Run as many replicas as you like against the same PostgreSQL database.
+
 | Part | Several replicas |
 | --- | --- |
-| Schedules | Safe: every replica runs the scheduler, each firing is claimed once in PostgreSQL (`trigger_firings`). |
-| Wait nodes | Safe: every replica polls for due waits, each resume is claimed atomically. |
-| Polling triggers | Safe: checks happen at interval-aligned times, each is claimed once in `trigger_firings`; trigger cursors and the last check error live in `workflow_state`. |
-| Data Store, Remove Duplicates | Safe: values live in PostgreSQL (`workflow_state`); increments and "seen" checks are single atomic statements. |
-| Imported plugins | Safe: stored in PostgreSQL and reloaded by every replica (`G2F_PLUGIN_SYNC`). |
-| Running executions after a restart | Not yet: recovery assumes a single instance. A Postgres-backed job queue is on the [roadmap](../README.md#roadmap). |
+| Schedules | Every replica runs the scheduler; each firing is claimed once in PostgreSQL (`trigger_firings`). |
+| Webhooks, manual runs | Any replica can receive them; the execution runs on that replica. |
+| Wait nodes | Every replica polls for due waits; each resume is claimed atomically. |
+| Polling triggers | Checks happen at interval-aligned times; each is claimed once in `trigger_firings`. Trigger cursors and the last check error live in `workflow_state`. |
+| Data Store, Remove Duplicates | Values live in PostgreSQL (`workflow_state`); increments and "seen" checks are single atomic statements. |
+| Running executions | Survive the replica that runs them, see below. |
+| Imported plugins | Stored in PostgreSQL and reloaded by every replica (`G2F_PLUGIN_SYNC`). |
+
+### Executions survive restarts and crashes
+
+Every instance registers in `engine_instances` and sends a heartbeat every
+`G2F_INSTANCE_TIMEOUT / 3`. A running execution belongs to the instance that runs it, and
+after every node the engine saves a **checkpoint**: the steps so far and the run state.
+
+- **Crash** (kill, OOM, lost node): when an instance has sent no heartbeat for
+  `G2F_INSTANCE_TIMEOUT` (default 30 s), another instance, or the same one after its restart,
+  takes its executions over and continues each one after its last completed node.
+- **Graceful shutdown** (SIGTERM, rolling deploy): running executions get
+  `G2F_SHUTDOWN_GRACE` (default 15 s) to finish. Unfinished ones are handed back and taken
+  over by another instance within seconds.
+- **Never continued twice:** takeovers are claimed atomically (`FOR UPDATE SKIP LOCKED`),
+  and every write is fenced by owner. An instance that was cut off and comes back cannot
+  overwrite or continue a run that another instance took over.
+
+What to expect from a takeover:
+
+- Completed nodes never run again.
+- The node that was running when the instance stopped **runs again** (at-least-once). Its
+  step log says so, and the run shows *continued after a server stop* in the editor. Make
+  side effects idempotent where duplicates hurt (e.g. pass an idempotency key to an API).
+- Sub-workflow executions are not continued; the calling workflow re-runs its Execute
+  Workflow node, which starts a fresh one.
+- An execution that was taken over more than 3 times fails, so a run that crashes every
+  instance (e.g. by exhausting memory) cannot take the cluster down.
+- Executions started by versions without checkpoints (before this feature) are failed with
+  *interrupted* once they are older than `G2F_EXECUTION_TIMEOUT`, so a rolling upgrade does
+  not touch runs that old instances are still executing.
+
+Checkpoints cost one database write per node. Webhook calls that wait for the result
+(`respond: lastNode`) lose their HTTP connection when their instance stops; the run itself
+still completes on another instance.

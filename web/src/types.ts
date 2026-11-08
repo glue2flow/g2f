@@ -156,6 +156,8 @@ export interface Execution {
   steps?: Step[];
   resumeAt?: string;
   waitMode?: string;
+  /** How often the run was continued on another instance after its instance stopped. */
+  attempts?: number;
   startedAt: string;
   finishedAt?: string;
 }

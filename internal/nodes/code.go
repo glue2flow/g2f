@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/dop251/goja"
@@ -13,6 +14,11 @@ import (
 
 // CodeNodeEnabled can be switched off by administrators (G2F_DISABLE_CODE_NODE).
 var CodeNodeEnabled = true
+
+// CodeMemoryLimit is the memory a Code node script may use (G2F_CODE_MEMORY_MB).
+// Scripts then run in a separate sandbox process (see codesandbox.go). 0 runs
+// them inside the server without a limit.
+var CodeMemoryLimit int64 = 128 << 20
 
 const (
 	defaultCodeTimeout = 10 * time.Second
@@ -55,53 +61,127 @@ func (codeNode) Execute(ctx context.Context, ec *ExecContext) (Output, error) {
 	if t, err := ec.Number("timeoutSeconds", nil, 0); err == nil && t > 0 {
 		timeout = time.Duration(t * float64(time.Second))
 	}
+	req := scriptRequest{
+		Code: code, Mode: mode, Items: ec.Items, TimeoutMs: timeout.Milliseconds(),
+		Env: map[string]any{}, MemoryBytes: CodeMemoryLimit,
+	}
+	for _, name := range []string{"nodes", "trigger", "workflow", "execution"} {
+		req.Env[name] = ec.Env[name]
+	}
+
+	var res *scriptResult
+	var err error
+	if CodeMemoryLimit > 0 {
+		res, err = runSandboxed(ctx, &req)
+	} else {
+		res = runScript(ctx, &req)
+	}
+	if err != nil {
+		return nil, err
+	}
+	for _, l := range res.Logs {
+		ec.Log(l.Level, l.Message)
+	}
+	if res.Error != "" {
+		return nil, errors.New(res.Error)
+	}
+	return Output{"main": ToItems(res.Items)}, nil
+}
+
+// scriptRequest is everything a script run needs. It is JSON so it can be
+// handed to a sandbox process.
+type scriptRequest struct {
+	Code        string         `json:"code"`
+	Mode        string         `json:"mode"`
+	Items       []Item         `json:"items"`
+	Env         map[string]any `json:"env"`
+	TimeoutMs   int64          `json:"timeoutMs"`
+	MemoryBytes int64          `json:"memoryBytes"`
+}
+
+type scriptResult struct {
+	Items any         `json:"items"`
+	Logs  []scriptLog `json:"logs,omitempty"`
+	Error string      `json:"error,omitempty"`
+}
+
+type scriptLog struct {
+	Level   string `json:"level"`
+	Message string `json:"message"`
+}
+
+// runScript runs a script in a fresh VM. interrupt, if set, receives a
+// function that stops the script with the given reason (memory watchdog).
+func runScript(ctx context.Context, req *scriptRequest, interrupt ...*atomic.Pointer[func(reason string)]) *scriptResult {
+	timeout := time.Duration(req.TimeoutMs) * time.Millisecond
+	if timeout <= 0 {
+		timeout = defaultCodeTimeout
+	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	vm := goja.New()
 	vm.SetFieldNameMapper(goja.TagFieldNameMapper("json", true))
-	stop := context.AfterFunc(ctx, func() { vm.Interrupt("timeout") })
+	var reason atomic.Value
+	stopVM := func(why string) {
+		reason.CompareAndSwap(nil, why)
+		vm.Interrupt(why)
+	}
+	for _, p := range interrupt {
+		p.Store(&stopVM)
+	}
+	stop := context.AfterFunc(ctx, func() { stopVM("timeout") })
 	defer stop()
 
-	logs := 0
+	res := &scriptResult{}
 	console := vm.NewObject()
 	for name, level := range map[string]string{
 		"log": LogInfo, "info": LogInfo, "debug": LogDebug, "warn": LogWarn, "error": LogError,
 	} {
 		_ = console.Set(name, func(call goja.FunctionCall) goja.Value {
-			if logs < maxCodeLogs {
+			if len(res.Logs) < maxCodeLogs {
 				parts := make([]string, len(call.Arguments))
 				for i, a := range call.Arguments {
 					parts[i] = jsString(a)
 				}
-				ec.Log(level, strings.Join(parts, " "))
-				logs++
+				res.Logs = append(res.Logs, scriptLog{level, strings.Join(parts, " ")})
 			}
 			return goja.Undefined()
 		})
 	}
 	_ = vm.Set("console", console)
 	for _, name := range []string{"nodes", "trigger", "workflow", "execution"} {
-		if err := setCopy(vm, name, ec.Env[name]); err != nil {
-			return nil, err
+		if err := setCopy(vm, name, req.Env[name]); err != nil {
+			res.Error = err.Error()
+			return res
 		}
 	}
 
 	var out []Item
 	var err error
-	switch mode {
+	switch req.Mode {
 	case "each":
-		out, err = runEach(vm, code, ec.Items)
+		out, err = runEach(vm, req.Code, req.Items)
 	default:
-		out, err = runAll(vm, code, ec.Items)
+		out, err = runAll(vm, req.Code, req.Items)
 	}
 	if err != nil {
-		if ctx.Err() != nil {
-			return nil, fmt.Errorf("code timed out after %s", timeout)
+		switch reason.Load() {
+		case "timeout":
+			res.Error = fmt.Sprintf("code timed out after %s", timeout)
+		case "memory":
+			res.Error = memoryError(req.MemoryBytes)
+		default:
+			res.Error = err.Error()
 		}
-		return nil, err
+		return res
 	}
-	return Output{"main": out}, nil
+	res.Items = out
+	return res
+}
+
+func memoryError(limit int64) string {
+	return fmt.Sprintf("code exceeded its memory limit of %d MB", limit>>20)
 }
 
 func runAll(vm *goja.Runtime, code string, items []Item) ([]Item, error) {

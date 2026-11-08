@@ -64,7 +64,7 @@ func (s *waitStore) PauseExecution(_ context.Context, e *store.Execution, state 
 	return nil
 }
 
-func (s *waitStore) ClaimWaiting(_ context.Context, id, mode string) (*store.Execution, []byte, error) {
+func (s *waitStore) ClaimWaiting(_ context.Context, id, mode, _ string) (*store.Execution, []byte, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	e, ok := s.execs[id]

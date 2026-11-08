@@ -1,4 +1,4 @@
-.PHONY: dev-db dev-server dev-web build test web image up down plugin-sample plugin-mistral
+.PHONY: dev-db dev-server dev-web build test test-db web image up down plugin-sample plugin-mistral
 
 # Development-only encryption key for secrets. Never use it in production.
 DEV_SECRET_KEY ?= ZGV2LWtleS1kZXYta2V5LWRldi1rZXktZGV2LWtleS0=
@@ -18,6 +18,12 @@ test:
 	go vet ./...
 	go test ./...
 	cd web && npm run typecheck
+
+# Also runs the tests that need PostgreSQL (execution recovery), against the
+# dev database from `make dev-db`. Each run creates and drops its own database.
+G2F_TEST_DATABASE_URL ?= postgres://g2f:g2f@localhost:5432/g2f?sslmode=disable
+test-db:
+	G2F_TEST_DATABASE_URL='$(G2F_TEST_DATABASE_URL)' go test -race ./...
 
 web:
 	cd web && npm ci && npm run build
