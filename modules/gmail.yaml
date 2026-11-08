@@ -1,0 +1,231 @@
+# Gmail via OAuth2. Users connect their own Google account; glue2flow stores and
+# refreshes the tokens and adds them to requests to gmail.googleapis.com.
+#
+# Setup (once per organization, by an admin):
+#   1. Google Cloud console -> APIs & Services: enable the "Gmail API".
+#   2. OAuth consent screen: add the scope .../auth/gmail.modify.
+#   3. Credentials -> Create OAuth client ID -> "Web application".
+#      Authorized redirect URI: <G2F_PUBLIC_URL>/oauth/callback
+#   4. glue2flow -> Plugins -> Gmail -> Settings: enter client ID and secret.
+# The Google Sheets module can use the same OAuth client.
+module: gmail
+name: Gmail
+version: 1.0.0
+description: Send, search and organize mail with your Google account
+color: "#ea4335"
+baseUrl: https://gmail.googleapis.com/gmail/v1/users/me
+
+config:
+  - name: clientId
+    label: OAuth client ID
+    description: From Google Cloud console (Web application client).
+  - name: clientSecret
+    label: OAuth client secret
+    type: secret
+
+oauth2:
+  authorizeUrl: https://accounts.google.com/o/oauth2/v2/auth
+  tokenUrl: https://oauth2.googleapis.com/token
+  scopes:
+    - https://www.googleapis.com/auth/gmail.modify # read, send, label, trash (no permanent delete)
+    - openid
+    - email
+  pkce: true
+  authorizeParams:
+    access_type: offline # returns a refresh token
+    prompt: consent
+  userInfo:
+    url: https://openidconnect.googleapis.com/v1/userinfo
+    field: email
+  apiHosts: [gmail.googleapis.com]
+
+nodes:
+  - type: send
+    name: Send Email
+    description: Send one e-mail per input item from the connected account.
+    params:
+      - { name: to, label: To, required: true, placeholder: "a@example.com, Jane <jane@example.com>" }
+      - { name: cc, label: Cc }
+      - { name: bcc, label: Bcc }
+      - { name: replyTo, label: Reply-To }
+      - { name: subject, label: Subject, required: true }
+      - name: bodyType
+        label: Body format
+        type: select
+        default: text
+        options:
+          - { label: Plain text, value: text }
+          - { label: HTML, value: html }
+      - { name: body, label: Body, type: text }
+      - name: attachments
+        label: Attachments
+        type: json
+        description: 'Optional list of {"filename", "content" (base64), "contentType"}.'
+      - name: threadId
+        label: Thread ID
+        description: "To reply in a thread: {{ json.threadId }} of a message from Get Message."
+      - name: inReplyTo
+        label: In-Reply-To
+        description: "Message-ID header of the message you answer: {{ json.messageId }}."
+    request:
+      method: POST
+      path: /messages/send
+      body: >-
+        {{ let raw = toBase64Url(mimeMessage({
+             to: params.to, cc: params.cc, bcc: params.bcc, replyTo: params.replyTo,
+             subject: params.subject,
+             text: params.bodyType == 'html' ? '' : params.body,
+             html: params.bodyType == 'html' ? params.body : '',
+             attachments: params.attachments,
+             headers: {'In-Reply-To': params.inReplyTo ?? '', 'References': params.inReplyTo ?? ''}
+           }));
+           (params.threadId ?? '') != '' ? {raw: raw, threadId: params.threadId} : {raw: raw} }}
+    output: "{{ {id: response.body.id, threadId: response.body.threadId, labelIds: response.body.labelIds} }}"
+    outputSchema:
+      fields:
+        - { path: id, type: string, description: ID of the sent message }
+        - { path: threadId, type: string }
+        - { path: labelIds, type: array }
+
+  - type: search
+    name: Search Messages
+    description: Find messages with Gmail search syntax. Emits one item per message (id and threadId); use Get Message for the content.
+    params:
+      - name: query
+        label: Search
+        default: is:unread in:inbox
+        description: 'Gmail search, e.g. from:billing@example.com newer_than:1d has:attachment'
+      - { name: maxResults, label: Max messages, type: number, default: 20 }
+      - { name: includeSpamTrash, label: Include spam and trash, type: boolean, default: false }
+    request:
+      method: GET
+      path: /messages
+      query:
+        q: "{{ params.query }}"
+        maxResults: "{{ params.maxResults }}"
+        includeSpamTrash: "{{ params.includeSpamTrash }}"
+    output: "{{ response.body.messages ?? [] }}"
+    outputSchema:
+      fields:
+        - { path: id, type: string, description: Message ID }
+        - { path: threadId, type: string }
+
+  - type: get
+    name: Get Message
+    description: Fetch a message with headers, text and HTML body and attachment info.
+    params:
+      - { name: messageId, label: Message ID, required: true, default: "{{ json.id }}" }
+    request:
+      method: GET
+      path: /messages/{{ params.messageId }}
+      query:
+        format: full
+    output: >-
+      {{ let m = response.body;
+         let p = m.payload ?? {};
+         let l2 = flatten(map(p.parts ?? [], .parts ?? []));
+         let l3 = flatten(map(l2, .parts ?? []));
+         let ps = concat([p], p.parts ?? [], l2, l3);
+         let hs = p.headers ?? [];
+         let textPart = find(ps, .mimeType == 'text/plain' && (.filename ?? '') == '');
+         let htmlPart = find(ps, .mimeType == 'text/html' && (.filename ?? '') == '');
+         {
+           id: m.id, threadId: m.threadId, labelIds: m.labelIds ?? [], snippet: m.snippet,
+           unread: 'UNREAD' in (m.labelIds ?? []),
+           subject: find(hs, lower(.name) == 'subject').value ?? '',
+           from: find(hs, lower(.name) == 'from').value ?? '',
+           to: find(hs, lower(.name) == 'to').value ?? '',
+           cc: find(hs, lower(.name) == 'cc').value ?? '',
+           replyTo: find(hs, lower(.name) == 'reply-to').value ?? '',
+           date: find(hs, lower(.name) == 'date').value ?? '',
+           messageId: find(hs, lower(.name) == 'message-id').value ?? '',
+           text: fromBase64Url(textPart.body.data),
+           html: fromBase64Url(htmlPart.body.data),
+           attachments: map(filter(ps, (.filename ?? '') != ''),
+             ({filename: .filename, mimeType: .mimeType, size: .body.size, attachmentId: .body.attachmentId}))
+         } }}
+    outputSchema:
+      fields:
+        - { path: id, type: string }
+        - { path: threadId, type: string }
+        - { path: labelIds, type: array }
+        - { path: snippet, type: string, description: Short preview }
+        - { path: unread, type: boolean }
+        - { path: subject, type: string }
+        - { path: from, type: string, description: "e.g. Jane <jane@example.com>" }
+        - { path: to, type: string }
+        - { path: cc, type: string }
+        - { path: replyTo, type: string }
+        - { path: date, type: string }
+        - { path: messageId, type: string, description: Message-ID header (for replies) }
+        - { path: text, type: string, description: Plain-text body }
+        - { path: html, type: string, description: HTML body }
+        - { path: attachments, type: array, description: "{filename, mimeType, size, attachmentId}" }
+
+  - type: getAttachment
+    name: Get Attachment
+    description: Download an attachment as base64 (e.g. for Send Email attachments).
+    params:
+      - { name: messageId, label: Message ID, required: true, default: "{{ json.id }}" }
+      - { name: attachmentId, label: Attachment ID, required: true, default: "{{ json.attachments[0].attachmentId }}" }
+      - { name: filename, label: File name, default: "{{ json.attachments[0].filename }}" }
+    request:
+      method: GET
+      path: /messages/{{ params.messageId }}/attachments/{{ params.attachmentId }}
+    # Gmail returns URL-safe base64; convert it to standard base64.
+    output: >-
+      {{ {filename: params.filename, size: response.body.size,
+          content: replace(replace(response.body.data ?? '', '-', '+'), '_', '/')} }}
+    outputSchema:
+      fields:
+        - { path: filename, type: string }
+        - { path: size, type: number }
+        - { path: content, type: string, description: Base64 content }
+
+  - type: modify
+    name: Change Labels
+    description: Add or remove labels. Mark as read = remove UNREAD; archive = remove INBOX.
+    params:
+      - { name: messageId, label: Message ID, required: true, default: "{{ json.id }}" }
+      - { name: addLabels, label: Add labels, placeholder: "STARRED, Label_123", description: Comma separated label IDs (see List Labels). }
+      - { name: removeLabels, label: Remove labels, default: UNREAD }
+    request:
+      method: POST
+      path: /messages/{{ params.messageId }}/modify
+      body:
+        addLabelIds: "{{ filter(map(split(params.addLabels ?? '', ','), trim(#)), # != '') }}"
+        removeLabelIds: "{{ filter(map(split(params.removeLabels ?? '', ','), trim(#)), # != '') }}"
+    output: "{{ {id: response.body.id, threadId: response.body.threadId, labelIds: response.body.labelIds} }}"
+    outputSchema:
+      fields:
+        - { path: id, type: string }
+        - { path: threadId, type: string }
+        - { path: labelIds, type: array }
+
+  - type: trash
+    name: Move to Trash
+    description: Move a message to the trash.
+    params:
+      - { name: messageId, label: Message ID, required: true, default: "{{ json.id }}" }
+    request:
+      method: POST
+      path: /messages/{{ params.messageId }}/trash
+    output: "{{ {id: response.body.id, threadId: response.body.threadId, labelIds: response.body.labelIds} }}"
+    outputSchema:
+      fields:
+        - { path: id, type: string }
+        - { path: threadId, type: string }
+        - { path: labelIds, type: array }
+
+  - type: labels
+    name: List Labels
+    description: List the account's labels (one item per label), to find label IDs.
+    request:
+      method: GET
+      path: /labels
+    output: "{{ map(response.body.labels ?? [], ({id: .id, name: .name, type: .type})) }}"
+    outputSchema:
+      fields:
+        - { path: id, type: string }
+        - { path: name, type: string }
+        - { path: type, type: string, description: system or user }

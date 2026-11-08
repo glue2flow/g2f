@@ -3,6 +3,7 @@ package expression
 import (
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -77,5 +78,20 @@ func TestNormalizeInterfaceMaps(t *testing.T) {
 	}
 	if v.(map[string]any)["b"].([]any)[0].(map[string]any)["c"] != 2 {
 		t.Fatalf("got %#v", v)
+	}
+}
+
+func TestMailFunctions(t *testing.T) {
+	v, err := Render("{{ fromBase64Url(toBase64Url('hä?>')) }}", Env{})
+	if err != nil || v != "hä?>" {
+		t.Fatalf("base64url roundtrip: %v %v", v, err)
+	}
+	v, err = Render(`{{ map(emailAddresses('"Doe, Jane" <j@x.com>, b@x.com'), .address) }}`, Env{})
+	if err != nil || len(v.([]any)) != 2 || v.([]any)[0] != "j@x.com" {
+		t.Fatalf("emailAddresses: %v %v", v, err)
+	}
+	v, err = Render("{{ mimeMessage({to: 'a@x.com', subject: 'Hi', html: '<b>x</b>'}) }}", Env{})
+	if err != nil || !strings.Contains(v.(string), "Content-Type: text/html") {
+		t.Fatalf("mimeMessage: %v %v", v, err)
 	}
 }

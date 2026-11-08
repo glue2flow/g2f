@@ -281,6 +281,7 @@ pre.json { margin: 6px 0 0; white-space: pre-wrap; word-break: break-word; }
 .card-actions { display: flex; gap: 6px; margin-top: auto; padding-top: 6px; }
 .chip.rt-wasm { background: color-mix(in srgb, #8b5cf6 20%, transparent); }
 .chip.rt-http { background: color-mix(in srgb, #0ea5e9 20%, transparent); }
+.chip.rt-go { background: color-mix(in srgb, #00add8 20%, transparent); }
 
 /* Plugin settings dialog */
 .settings-section { border-top: 1px solid var(--border); padding-top: 10px; }

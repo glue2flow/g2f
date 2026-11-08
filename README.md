@@ -8,7 +8,10 @@ workflows that can be private, shared with groups, or available to the whole org
 - **Editor:** React + [React Flow](https://reactflow.dev)
 - **Auth:** Keycloak / any OIDC provider (PKCE in the browser, JWT validation in the API)
 - **Extensible:** plugins as YAML manifests (HTTP APIs) or sandboxed WebAssembly modules
-  (Go, JavaScript, Rust, …), importable at runtime
+  (Go, JavaScript, Rust, …), importable at runtime, plus native Go modules for protocols
+  such as SMTP/IMAP
+- **Integrations included:** Gmail, Outlook, Microsoft Teams, Google Sheets (OAuth2),
+  e-mail over SMTP/IMAP, GitHub, Slack
 - **Secrets:** per-node secrets and per-organization plugin settings, encrypted at rest, write-only
 
 ## Quick start (Docker)
@@ -49,7 +52,8 @@ internal/engine/     executes graphs, records executions
 internal/trigger/    scheduler (cron / one-time) and webhook endpoint
 internal/store/      PostgreSQL persistence + embedded migrations
 internal/api/        REST API, SPA hosting
-modules/             plugins loaded at startup (*.yaml, *.zip, folders)
+internal/mailmsg/    MIME e-mail builder (SMTP module, mimeMessage() expression)
+modules/             plugins loaded at startup (*.yaml, *.zip, folders); modules/email is Go
 examples/plugins/    sample WebAssembly plugins (Telegram in Go and JS, Mistral AI in Go)
 web/                 React editor
 deploy/              Keycloak realm + Postgres init for docker-compose
@@ -208,6 +212,15 @@ Any parameter can contain `{{ ... }}` expressions in the [expr language](https:/
 | `workflow.id`, `workflow.name`, `execution.id` | run metadata |
 | `params` | resolved node parameters (YAML modules only) |
 
+Besides the [expr builtins](https://expr-lang.org/docs/language-definition) (`toBase64`,
+`fromJSON`, `map`, …) there are a few helpers:
+
+| Function | Result |
+| --- | --- |
+| `toBase64Url(s)` / `fromBase64Url(s)` | URL-safe base64 (fromBase64Url also takes standard base64; nil → `""`) |
+| `emailAddresses(v)` | `"a@x.com, \"Doe, Jane\" <j@x.com>"` or an array → `[{name, address}]` |
+| `mimeMessage({from, to, cc, bcc, replyTo, subject, text, html, headers, attachments})` | a complete RFC 5322 e-mail (UTF-8, multipart when needed); attachments are `[{filename, content (base64), contentType}]` |
+
 Member access is null-safe: `{{ trigger.body.name }}` is `nil` when `body` is missing, so
 `{{ trigger.body.name ?? 'anonymous' }}` works as a default.
 A parameter that is exactly one expression keeps its type (`{{ json.count + 1 }}` → number);
@@ -308,8 +321,24 @@ valid access token while a node runs.
 | Sharing | A connection belongs to whoever connected it and is *Only me*, shared with *Groups*, or the *Organization*. Selecting an account in a node requires access to it. Co-editors can still save workflows using someone else's account if they do not change that selection. Only the owner or an org admin can rename, share or remove it. |
 | Errors | Known token values are scrubbed from error messages. |
 
-`modules/google-sheets.yaml` (Append Row, Read Rows) is a complete example. It stays inactive
-until an admin enters the Google OAuth client ID and secret.
+These OAuth2 modules are included. Each stays inactive until an admin enters the client ID and
+secret; the setup steps are at the top of each file.
+
+| Module | Nodes | Provider app |
+| --- | --- | --- |
+| [`gmail`](modules/gmail.yaml) | Send Email (HTML, attachments, replies in threads), Search Messages, Get Message, Get Attachment, Change Labels (mark read, archive, star), Move to Trash, List Labels | Google Cloud OAuth client, Gmail API |
+| [`google-sheets`](modules/google-sheets.yaml) | Append Row, Read Rows | Google Cloud OAuth client, Sheets API |
+| [`outlook`](modules/outlook.yaml) | Send Email, List Messages (unread, search, OData filter), Get Message, Reply / Reply all, Move Message, Mark as Read, List Folders | Microsoft Entra app (Graph `Mail.ReadWrite`, `Mail.Send`) |
+| [`ms-teams`](modules/ms-teams.yaml) | Send Channel Message, Reply in Channel Thread, Send Chat Message, List Teams, List Channels, List Chats | Microsoft Entra app (Graph, no admin consent needed) |
+
+Google modules can share one OAuth client, as can the two Microsoft modules. The Microsoft
+manifests use the `common` endpoint (multi-tenant apps); for a single-tenant app, put your
+tenant ID in `authorizeUrl` and `tokenUrl`.
+
+```
+Schedule (every 5 min) ─► Gmail: Search "is:unread label:support" ─► Gmail: Get Message
+   ─► Teams: Send Channel Message "New ticket: {{ json.subject }}" ─► Gmail: Change Labels (remove UNREAD)
+```
 
 ```yaml
 config:                          # OAuth app credentials (admin, encrypted)
@@ -335,6 +364,7 @@ A plugin (module) is a set of nodes described by a manifest. There are two runti
 | --- | --- | --- |
 | `http` | YAML only: each node maps its parameters onto one HTTP request | thin REST wrappers |
 | `wasm` | WebAssembly module (Extism PDK), sandboxed | any logic, any language (Go, JS/TS, Rust, …) |
+| `go` | Go code compiled into the server, declared by a YAML manifest | protocols the sandbox cannot speak (SMTP, IMAP, databases) |
 
 Install plugins in one of two ways:
 
@@ -352,6 +382,44 @@ from organization admins.
 
 See **[examples/plugins/telegram](examples/plugins/telegram)** for a complete WASM plugin in
 Go and JavaScript, the JSON calling convention and build instructions.
+
+### Native Go modules
+
+WASM plugins can only make HTTP calls. For other protocols a module is written in Go and
+compiled into glue2flow, e.g. [`modules/email`](modules/email):
+
+- `modules/<name>/plugin.yaml` is a normal manifest with `runtime: go`. It declares the
+  nodes, parameters, `config`, `vars` and output schemas, so settings, secrets and the editor
+  work exactly as for other plugins.
+- The Go package in the same folder calls `nodes.RegisterNative("<module>", map[string]nodes.ExecFunc{...})`
+  in `init()`, with one function per node type. `cmd/g2f/main.go` imports it.
+- The module is active only while its folder is in `G2F_MODULES_DIR`, so admins can remove it.
+  Go modules cannot be imported at runtime.
+
+### Email (SMTP/IMAP)
+
+The `email` module sends mail over SMTP and reads mail over IMAP. An organization admin
+enters the servers in *Plugins → Email (SMTP/IMAP) → Settings*: host, port, security
+(`tls`, `starttls`, or `none`), username, password and the default sender. Nodes can
+set their own **Username/Password** to use a personal mailbox on the same server. Node
+fields cannot change the host.
+
+| Node | What it does |
+| --- | --- |
+| **Send Email** | one mail per item: From, To/Cc/Bcc (comma separated or arrays), Reply-To, subject, text and/or HTML, attachments `[{filename, content (base64), contentType}]`, extra headers (e.g. `In-Reply-To`). Bcc stays out of the headers. |
+| **Read Emails** | searches a mailbox (unread only, since a date, From/Subject/text contains), emits the newest N messages with `uid`, `from`, `to`, `subject`, `date`, `text`, `html`, `flags`, `messageId`, attachment info (optionally with content). *Mark as read* makes the next run skip them. |
+| **Move Email** | moves messages by `uid` to another mailbox (MOVE, or copy + UID EXPUNGE). Plain EXPUNGE is never used, so other deleted messages are not purged. |
+| **Set Email Flags** | adds or removes flags such as `\Seen` or `\Flagged`. |
+
+Passwords are only sent over TLS/STARTTLS, or to `localhost`. Typical servers:
+Gmail `smtp.gmail.com:587` / `imap.gmail.com:993` with an app password; Microsoft 365
+`smtp.office365.com:587` / `outlook.office365.com:993` (if basic authentication is allowed
+for the mailbox; the Outlook module is the better choice there).
+
+```
+Schedule (every 5 min) ─► Read Emails (unread, mark as read) ─► If subject contains "invoice"
+   ─► HTTP Request (upload attachment) ─► Move Email (Archive)
+```
 
 ### Manifest reference
 
@@ -460,8 +528,9 @@ in `RegisterBuiltins`.
 
 - Reusable API-key credentials (like connections, for non-OAuth services)
 - Plugin signing and a plugin catalog
-- More OAuth2 integration packs (Gmail, Microsoft 365, HubSpot, Salesforce)
-- Built-in protocol nodes: SMTP/IMAP, Postgres/MySQL, SFTP
+- More OAuth2 integration packs (HubSpot, Salesforce, Google Calendar/Drive, SharePoint)
+- An "email received" trigger (IMAP IDLE / Gmail push) instead of schedule + read
+- More native protocol modules: Postgres/MySQL, SFTP
 - Memory limits for the Code node (e.g. QuickJS in WASM)
 - Horizontal scaling: run executions through a Postgres-backed job queue (schedules are
   already replica-safe; the restart recovery of running executions still assumes one instance)

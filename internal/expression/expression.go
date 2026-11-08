@@ -26,7 +26,8 @@ func compile(code string) (*vm.Program, error) {
 	if p, ok := cache.Load(code); ok {
 		return p.(*vm.Program), nil
 	}
-	p, err := expr.Compile(code, expr.AllowUndefinedVariables(), expr.Patch(nilSafe{}))
+	opts := append([]expr.Option{expr.AllowUndefinedVariables(), expr.Patch(nilSafe{})}, functions...)
+	p, err := expr.Compile(code, opts...)
 	if err != nil {
 		return nil, err
 	}

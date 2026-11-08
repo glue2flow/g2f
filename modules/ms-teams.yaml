@@ -1,0 +1,162 @@
+# Microsoft Teams via Microsoft Graph and OAuth2. Messages are posted as the
+# user who connected the account.
+#
+# Setup (once per organization, by an admin):
+#   1. Microsoft Entra admin center -> App registrations -> New registration
+#      (or reuse the Outlook module's app). Redirect URI (Web):
+#      <G2F_PUBLIC_URL>/oauth/callback. Single-tenant apps: replace "common"
+#      in authorizeUrl/tokenUrl below with your tenant ID.
+#   2. API permissions -> Microsoft Graph (delegated): offline_access, User.Read,
+#      Team.ReadBasic.All, Channel.ReadBasic.All, ChannelMessage.Send,
+#      Chat.ReadBasic, ChatMessage.Send. None of them needs admin consent.
+#   3. Certificates & secrets -> New client secret.
+#   4. glue2flow -> Plugins -> Microsoft Teams -> Settings: enter the
+#      application (client) ID and the secret value.
+module: ms-teams
+name: Microsoft Teams
+version: 1.0.0
+description: Post to channels and chats in Microsoft Teams
+color: "#5059c9"
+baseUrl: https://graph.microsoft.com/v1.0
+
+config:
+  - name: clientId
+    label: Application (client) ID
+    description: From the app registration in Microsoft Entra.
+  - name: clientSecret
+    label: Client secret
+    type: secret
+
+vars:
+  - { name: defaultTeamId, label: Default team ID, description: Used by channel nodes unless they set a team. }
+  - { name: defaultChannelId, label: Default channel ID, description: "e.g. 19:abc…@thread.tacv2" }
+
+oauth2:
+  authorizeUrl: https://login.microsoftonline.com/common/oauth2/v2.0/authorize
+  tokenUrl: https://login.microsoftonline.com/common/oauth2/v2.0/token
+  scopes:
+    - offline_access
+    - User.Read
+    - Team.ReadBasic.All
+    - Channel.ReadBasic.All
+    - ChannelMessage.Send
+    - Chat.ReadBasic
+    - ChatMessage.Send
+  pkce: true
+  userInfo:
+    url: https://graph.microsoft.com/v1.0/me
+    field: userPrincipalName
+  apiHosts: [graph.microsoft.com]
+
+nodes:
+  - type: sendChannelMessage
+    name: Send Channel Message
+    description: Post a message to a channel, once per input item.
+    params:
+      - { name: teamId, label: Team ID, required: true, default: "{{ vars.defaultTeamId }}", description: From List Teams. }
+      - { name: channelId, label: Channel ID, required: true, default: "{{ vars.defaultChannelId }}", description: From List Channels. }
+      - { name: subject, label: Subject, description: Optional heading of a new conversation. }
+      - &contentType
+        name: contentType
+        label: Format
+        type: select
+        default: html
+        options:
+          - { label: HTML, value: html }
+          - { label: Plain text, value: text }
+      - { name: message, label: Message, type: text, required: true, default: "Workflow {{ workflow.name }}: done" }
+    request:
+      method: POST
+      path: /teams/{{ params.teamId }}/channels/{{ params.channelId }}/messages
+      body: >-
+        {{ let msg = {body: {contentType: params.contentType, content: params.message} };
+           (params.subject ?? '') != '' ? {subject: params.subject, body: msg.body} : msg }}
+    output: &sent "{{ {id: response.body.id, webUrl: response.body.webUrl, createdDateTime: response.body.createdDateTime} }}"
+    outputSchema:
+      fields: &sentFields
+        - { path: id, type: string, description: Message ID (to reply in the thread) }
+        - { path: webUrl, type: string, description: Link to the message in Teams }
+        - { path: createdDateTime, type: string }
+
+  - type: replyToChannelMessage
+    name: Reply in Channel Thread
+    description: Reply to a channel message (adds to its thread).
+    params:
+      - { name: teamId, label: Team ID, required: true, default: "{{ vars.defaultTeamId }}" }
+      - { name: channelId, label: Channel ID, required: true, default: "{{ vars.defaultChannelId }}" }
+      - { name: messageId, label: Message ID, required: true, default: "{{ json.id }}" }
+      - *contentType
+      - { name: message, label: Message, type: text, required: true }
+    request:
+      method: POST
+      path: /teams/{{ params.teamId }}/channels/{{ params.channelId }}/messages/{{ params.messageId }}/replies
+      body:
+        body: { contentType: "{{ params.contentType }}", content: "{{ params.message }}" }
+    output: *sent
+    outputSchema:
+      fields: *sentFields
+
+  - type: sendChatMessage
+    name: Send Chat Message
+    description: Send a message to a 1:1, group or meeting chat.
+    params:
+      - { name: chatId, label: Chat ID, required: true, description: "From List Chats, e.g. 19:…@unq.gbl.spaces" }
+      - *contentType
+      - { name: message, label: Message, type: text, required: true }
+    request:
+      method: POST
+      path: /chats/{{ params.chatId }}/messages
+      body:
+        body: { contentType: "{{ params.contentType }}", content: "{{ params.message }}" }
+    output: *sent
+    outputSchema:
+      fields: *sentFields
+
+  - type: listTeams
+    name: List Teams
+    description: List the teams the connected user is a member of (one item per team).
+    request:
+      method: GET
+      path: /me/joinedTeams
+    output: "{{ map(response.body.value ?? [], ({id: .id, displayName: .displayName, description: .description})) }}"
+    outputSchema:
+      fields:
+        - { path: id, type: string, description: Team ID }
+        - { path: displayName, type: string }
+        - { path: description, type: string }
+
+  - type: listChannels
+    name: List Channels
+    description: List the channels of a team (one item per channel).
+    params:
+      - { name: teamId, label: Team ID, required: true, default: "{{ vars.defaultTeamId }}" }
+    request:
+      method: GET
+      path: /teams/{{ params.teamId }}/channels
+    output: "{{ map(response.body.value ?? [], ({id: .id, displayName: .displayName, description: .description, membershipType: .membershipType, webUrl: .webUrl})) }}"
+    outputSchema:
+      fields:
+        - { path: id, type: string, description: Channel ID }
+        - { path: displayName, type: string }
+        - { path: description, type: string }
+        - { path: membershipType, type: string, description: "standard, private or shared" }
+        - { path: webUrl, type: string }
+
+  - type: listChats
+    name: List Chats
+    description: List the connected user's chats (one item per chat).
+    params:
+      - { name: top, label: Max chats, type: number, default: 50 }
+    request:
+      method: GET
+      path: /me/chats
+      query:
+        $top: "{{ params.top }}"
+    output: "{{ map(response.body.value ?? [], ({id: .id, topic: .topic, chatType: .chatType, webUrl: .webUrl, lastUpdatedDateTime: .lastUpdatedDateTime})) }}"
+    outputSchema:
+      fields:
+        - { path: id, type: string, description: Chat ID }
+        - { path: topic, type: string, description: Empty for 1:1 chats }
+        - { path: chatType, type: string, description: "oneOnOne, group or meeting" }
+        - { path: webUrl, type: string }
+        - { path: lastUpdatedDateTime, type: string }
