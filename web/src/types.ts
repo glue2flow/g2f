@@ -106,6 +106,8 @@ export interface NodeDef {
 export interface OutputSchema {
   /** Items keep the fields of the input items. */
   passthrough?: boolean;
+  /** A boolean parameter that must be true for passthrough (e.g. keepExisting). */
+  passthroughIf?: string;
   /** A parameter whose value (object, or list of objects) describes the items. */
   fromParam?: string;
   fields?: OutputField[];

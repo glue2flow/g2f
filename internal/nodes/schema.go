@@ -13,6 +13,9 @@ type OutputSchema struct {
 	// Passthrough means the items keep the fields of the input items (e.g. If,
 	// Log, Wait). Fields are added on top.
 	Passthrough bool `json:"passthrough,omitempty" yaml:"passthrough"`
+	// PassthroughIf names a boolean parameter that turns passthrough on
+	// (e.g. Set Fields' keepExisting). Empty: always.
+	PassthroughIf string `json:"passthroughIf,omitempty" yaml:"passthroughIf"`
 	// FromParam names a parameter whose value describes the items: an object
 	// (its keys become fields) or a list of objects (the first one is used).
 	// Used where the node emits what the user configured (Set Fields, test payloads).
@@ -57,6 +60,9 @@ func (s *OutputSchema) Validate(params []Param) error {
 	}
 	if s.FromParam != "" && !hasParam(s.FromParam) {
 		return fmt.Errorf("outputSchema.fromParam: unknown parameter %q", s.FromParam)
+	}
+	if s.PassthroughIf != "" && (!s.Passthrough || !hasParam(s.PassthroughIf)) {
+		return fmt.Errorf("outputSchema.passthroughIf: needs passthrough and an existing parameter (%q)", s.PassthroughIf)
 	}
 	seen := map[string]bool{}
 	for i, f := range s.Fields {

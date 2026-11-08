@@ -165,7 +165,7 @@ func (setNode) Definition() Definition {
 				Default: map[string]any{"greeting": "Hello {{ json.name ?? 'world' }}"}},
 			{Name: "keepExisting", Label: "Keep existing fields", Type: ParamBoolean, Default: true},
 		},
-		OutputSchema: &OutputSchema{Passthrough: true, FromParam: "fields"},
+		OutputSchema: &OutputSchema{Passthrough: true, PassthroughIf: "keepExisting", FromParam: "fields"},
 	}
 }
 

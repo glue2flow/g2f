@@ -133,7 +133,10 @@ export function nodeFields(id: string, ctx: Context, seen = new Set<string>()): 
     merge(out, [declared(f)]);
     if (f.fromParam) fromParam(f.fromParam, f.path.split("."));
   }
-  if (schema.passthrough) {
+  // Recorded output already contains the passed-through fields; only guess
+  // them from the inputs for nodes that have not run.
+  const passes = schema.passthrough && (!schema.passthroughIf || [true, "true"].includes(param(schema.passthroughIf) as never));
+  if (passes && !step?.output) {
     for (const e of ctx.edges) if (e.target === id) merge(out, nodeFields(e.source, ctx, seen).fields);
   }
   return { fields: [...out.values()], dynamic: !!schema.dynamic };

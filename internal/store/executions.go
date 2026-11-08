@@ -135,7 +135,7 @@ func (s *Store) ListExecutions(ctx context.Context, workflowID string, limit int
 }
 
 // FailInterrupted marks executions left queued/running by a previous process as failed.
-// Assumes a single glue2flow instance; see README for scaling notes.
+// Assumes a single glue2flow instance; see docs/architecture.md (scaling).
 func (s *Store) FailInterrupted(ctx context.Context) (int64, error) {
 	tag, err := s.pool.Exec(ctx, `UPDATE executions SET status='error',
 		error='interrupted: server restarted', finished_at=now()

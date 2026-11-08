@@ -1,0 +1,48 @@
+# glue2flow documentation
+
+Everything about running, using and extending glue2flow. New here? Start with
+**[Getting started](getting-started.md)**.
+
+## Using glue2flow
+
+| Page | What's inside |
+| --- | --- |
+| [Getting started](getting-started.md) | Docker quick start, demo users, local development, your first workflow |
+| [Built-in nodes](nodes.md) | HTTP Request, Set Fields, If, Switch, Merge, Code, Wait, Transform, Log, Execute Workflow, logic gates |
+| [Triggers](triggers.md) | Manual, Schedule (cron / once), Webhook (auth, responses), Called by Workflow, Error Trigger |
+| [Expressions](expressions.md) | `{{ }}` syntax, variables, the ⚡ dynamic content picker |
+| [Sharing & Keycloak](sharing.md) | Scopes, roles, groups, organizations, required token claims |
+| [Connected accounts (OAuth2)](connections.md) | Letting users connect Google & co., token storage and refresh |
+
+## Operating glue2flow
+
+| Page | What's inside |
+| --- | --- |
+| [Configuration](configuration.md) | All `G2F_*` environment variables, health check |
+| [Secrets & plugin settings](secrets.md) | Per-node secrets, plugin config vs. vars, encryption, key rotation |
+| [Architecture](architecture.md) | Repository layout, execution model, running several replicas |
+
+## Extending glue2flow
+
+| Page | What's inside |
+| --- | --- |
+| [Plugins](plugins.md) | Included plugins, installing, WebAssembly plugins, manifest reference, output schemas |
+| [HTTP modules](http-modules.md) | Wrapping a REST API in a few lines of YAML |
+| [Telegram plugin](../examples/plugins/telegram/README.md) | Complete WebAssembly sample in Go and JavaScript, calling convention |
+| [Mistral AI plugin](../examples/plugins/mistral/README.md) | Compact Go plugin: prompt in, LLM answer out |
+
+## All pages
+
+- [Getting started](getting-started.md)
+- [Built-in nodes](nodes.md)
+- [Triggers](triggers.md)
+- [Expressions](expressions.md)
+- [Sharing & Keycloak](sharing.md)
+- [Connected accounts (OAuth2)](connections.md)
+- [Secrets & plugin settings](secrets.md)
+- [Configuration](configuration.md)
+- [Architecture](architecture.md)
+- [Plugins](plugins.md)
+- [HTTP modules](http-modules.md)
+
+Back to the [project page](../README.md).

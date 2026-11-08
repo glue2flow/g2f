@@ -34,10 +34,11 @@ func TestManifestOutputSchema(t *testing.T) {
 		t.Fatalf("schema not carried into definition: %+v", def.OutputSchema)
 	}
 	for in, want := range map[string]string{
-		"    outputSchema: {fields: [{path: 'a..b'}]}\n":        "invalid path",
-		"    outputSchema: {fields: [{path: a, type: date}]}\n": "unknown type",
-		"    outputSchema: {fromParam: nope}\n":                 "unknown parameter",
-		"    outputSchema: {fields: [{path: a}, {path: a}]}\n":  "duplicate field",
+		"    outputSchema: {fields: [{path: 'a..b'}]}\n":               "invalid path",
+		"    outputSchema: {fields: [{path: a, type: date}]}\n":        "unknown type",
+		"    outputSchema: {fromParam: nope}\n":                        "unknown parameter",
+		"    outputSchema: {passthrough: true, passthroughIf: nope}\n": "passthroughIf",
+		"    outputSchema: {fields: [{path: a}, {path: a}]}\n":         "duplicate field",
 	} {
 		if _, err := ParseManifest([]byte(base + in)); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%q: got %v, want %q", in, err, want)
