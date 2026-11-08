@@ -17,11 +17,15 @@
   <a href="#roadmap">Roadmap</a>
 </p>
 
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
+</p>
+
 ![The glue2flow editor: a support ticket workflow from a webhook through a Switch to a Telegram notification. The ⚡ picker lists the fields of earlier nodes with sample values from the last run.](docs/img/editor.png)
 
 ---
 
-**glue2flow** (short: **g2f**) is an open-source workflow automation tool in the spirit of
+**glue2flow** (short: **g2f**) is an open-source (MIT) workflow automation tool in the spirit of
 n8n and Power Automate. Webhooks, schedules, APIs, approvals and AI models become one flow
 that your whole organization can share, with sign-in through your existing Keycloak.
 
@@ -115,3 +119,7 @@ Full index: **[docs/](docs/README.md)**
 [React Flow](https://reactflow.dev) · [expr](https://expr-lang.org) ·
 [Extism](https://extism.org) + [wazero](https://wazero.io) · [goja](https://github.com/dop251/goja) ·
 [Keycloak](https://www.keycloak.org)
+
+## License
+
+glue2flow is released under the [MIT License](LICENSE).
