@@ -68,6 +68,10 @@ nodes:
       body:
         values: ["{{ params.values }}"]
     output: "{{ {updatedRange: response.body.updates.updatedRange, updatedRows: response.body.updates.updatedRows} }}"
+    outputSchema:
+      fields:
+        - { path: updatedRange, type: string, description: "Range that was written, e.g. Sheet1!A5:C5" }
+        - { path: updatedRows, type: number }
 
   - type: readRows
     name: Read Rows
@@ -79,3 +83,6 @@ nodes:
       {{ let rows = response.body.values ?? [];
          let head = len(rows) > 0 ? rows[0] : [];
          map(rows[1:], let row = #; fromPairs(map(head, [#, (#index < len(row) ? row[#index] : nil)]))) }}
+    # One item per row, keyed by the column names in the first row.
+    outputSchema:
+      dynamic: true

@@ -35,6 +35,12 @@ func (scheduleTrigger) Definition() Definition {
 			{Name: "timezone", Label: "Timezone", Type: ParamString, Default: "UTC", NoExpression: true,
 				Placeholder: "Europe/Berlin"},
 		},
+		OutputSchema: &OutputSchema{Fields: fields(
+			"firedAt:string:Time the run started (RFC 3339, UTC)",
+			"scheduledAt:string:Planned time of this run, in the trigger's timezone",
+			"timezone:string:Timezone of the schedule",
+			"manual:boolean:Set when run from the editor",
+		)},
 	}
 }
 
@@ -189,6 +195,11 @@ func (webhookTrigger) Definition() Definition {
 			{Name: "testBody", Label: "Test body", Type: ParamJSON, NoExpression: true, Default: map[string]any{},
 				Description: "Body used when the workflow is run manually from the editor."},
 		},
+		OutputSchema: &OutputSchema{Fields: append(webhookRequestFields[:3:3],
+			OutputField{Path: "body", Type: "any", Description: "Parsed JSON or form body, or the raw text", FromParam: "testBody"},
+			webhookRequestFields[4],
+			OutputField{Path: "test", Type: "boolean", Description: "Set when run from the editor"},
+		)},
 	}
 }
 

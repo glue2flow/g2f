@@ -70,7 +70,28 @@ nodes:
         label: Send silently
         type: boolean
         default: false
+    # The sent Message object of the Bot API (only the commonly used fields).
+    outputSchema:
+      fields:
+        - { path: message_id, type: number }
+        - { path: date, type: number, description: Unix time }
+        - { path: text, type: string }
+        - { path: chat.id, type: number }
+        - { path: chat.type, type: string, description: "private, group, supergroup or channel" }
+        - { path: chat.title, type: string }
+        - { path: chat.username, type: string }
+        - { path: from.id, type: number, description: The bot's user id }
+        - { path: from.username, type: string }
 
   - type: getMe
     name: Get Bot Info
     description: Return the bot's profile. Useful to check that the token works.
+    outputSchema:
+      fields:
+        - { path: id, type: number }
+        - { path: is_bot, type: boolean }
+        - { path: first_name, type: string }
+        - { path: username, type: string }
+        - { path: can_join_groups, type: boolean }
+        - { path: can_read_all_group_messages, type: boolean }
+        - { path: supports_inline_queries, type: boolean }

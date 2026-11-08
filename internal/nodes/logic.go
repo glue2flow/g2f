@@ -47,6 +47,7 @@ func (g gateNode) Definition() Definition {
 			{Name: "conditionB", Label: "Input B is true when", Type: ParamString, Default: "{{ true }}",
 				Placeholder: "{{ json.approved }}"},
 		},
+		OutputSchema: passthroughSchema,
 	}
 }
 

@@ -1,6 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { connectAccount } from "../lib/connect";
+import { insertExpression, type ContentGroup } from "../lib/dynamicContent";
+import { DynamicContent } from "./DynamicContent";
 import { isSecretRef, parseList, type Connection, type NodeDef, type ParamDef, type Workflow } from "../types";
 import type { FlowNodeData } from "./FlowNode";
 
@@ -10,11 +12,13 @@ interface Props {
   readOnly: boolean;
   /** Extra info rendered under the header, e.g. a webhook URL. */
   extra?: React.ReactNode;
+  /** Fields of earlier nodes for the ⚡ dynamic content picker. */
+  content?: ContentGroup[];
   onChange: (patch: Partial<FlowNodeData>) => void;
   onDelete: () => void;
 }
 
-export function ParamPanel({ nodeId, data, readOnly, extra, onChange, onDelete }: Props) {
+export function ParamPanel({ nodeId, data, readOnly, extra, content, onChange, onDelete }: Props) {
   const def = data.def;
   const setParam = (name: string, value: unknown) => onChange({ params: { ...data.params, [name]: value } });
 
@@ -44,6 +48,8 @@ export function ParamPanel({ nodeId, data, readOnly, extra, onChange, onDelete }
               module={def.module}
               value={data.params[p.name]}
               readOnly={readOnly}
+              content={def.trigger ? undefined : content}
+              codeItem={data.params.mode === "each" ? "item" : "items[0]"}
               onChange={(v) => setParam(p.name, v)}
             />
           ))}
@@ -81,15 +87,40 @@ function Field({
   module,
   value,
   readOnly,
+  content,
+  codeItem,
   onChange,
 }: {
   def: ParamDef;
   module: string;
   value: unknown;
   readOnly: boolean;
+  content?: ContentGroup[];
+  /** What `json` is called in code fields (item or items[0]). */
+  codeItem: string;
   onChange: (v: unknown) => void;
 }) {
   const v = value ?? def.default;
+  const ref = useRef<HTMLInputElement & HTMLTextAreaElement>(null);
+  const isCode = def.type === "code";
+  const canPick =
+    !!content && !readOnly && (isCode ? true : !def.noExpression && ["string", "text", "json", "", undefined].includes(def.type));
+  // Caret of the last edit; until the user placed one, insert at the end.
+  const sel = useRef<[number, number]>(undefined);
+  const pick = (expr: string) => {
+    const el = ref.current;
+    const cur = el?.value ?? String(v ?? "");
+    const [start, end] = sel.current && sel.current[1] <= cur.length ? sel.current : [cur.length, cur.length];
+    const r = insertExpression(cur, start, end, expr, isCode ? "code" : def.type === "json" ? "json" : "text");
+    if (def.type === "json") jsonInsert.current?.(r.value);
+    else onChange(r.value);
+    sel.current = [r.caret, r.caret];
+    requestAnimationFrame(() => {
+      el?.focus();
+      el?.setSelectionRange(r.caret, r.caret);
+    });
+  };
+  const jsonInsert = useRef<(text: string) => void>(undefined);
   const label = (
     <span className="field-label">
       {def.label}
@@ -124,6 +155,7 @@ function Field({
     case "text":
       input = (
         <textarea
+          ref={ref}
           rows={4}
           disabled={readOnly}
           placeholder={def.placeholder}
@@ -133,11 +165,21 @@ function Field({
       );
       break;
     case "json":
-      input = <JsonField value={v} readOnly={readOnly} placeholder={def.placeholder} onChange={onChange} />;
+      input = (
+        <JsonField
+          value={v}
+          readOnly={readOnly}
+          placeholder={def.placeholder}
+          inputRef={ref}
+          insertRef={jsonInsert}
+          onChange={onChange}
+        />
+      );
       break;
     case "code":
       input = (
         <textarea
+          ref={ref}
           className="mono code"
           rows={14}
           spellCheck={false}
@@ -191,12 +233,35 @@ function Field({
     default:
       input = (
         <input
+          ref={ref}
           disabled={readOnly}
           placeholder={def.placeholder}
           value={String(v ?? "")}
           onChange={(e) => onChange(e.target.value)}
         />
       );
+  }
+  if (canPick) {
+    const remember = (e: React.SyntheticEvent) => {
+      const t = e.target as HTMLInputElement;
+      if (t === ref.current && t.selectionStart !== null) sel.current = [t.selectionStart, t.selectionEnd ?? t.selectionStart];
+    };
+    input = (
+      <div
+        className={`dc-wrap ${def.type === "string" || !def.type ? "single" : ""}`}
+        onSelect={remember}
+        onKeyUp={remember}
+        onMouseUp={remember}
+      >
+        {input}
+        <DynamicContent
+          groups={content}
+          code={isCode}
+          mapBase={isCode ? (b) => (b === "json" ? codeItem : b) : undefined}
+          onPick={pick}
+        />
+      </div>
+    );
   }
   return (
     <label className="field">
@@ -212,11 +277,16 @@ function JsonField({
   value,
   readOnly,
   placeholder,
+  inputRef,
+  insertRef,
   onChange,
 }: {
   value: unknown;
   readOnly: boolean;
   placeholder?: string;
+  inputRef?: React.Ref<HTMLTextAreaElement>;
+  /** Set to a function that replaces the text (dynamic content) and commits it. */
+  insertRef?: React.RefObject<((text: string) => void) | undefined>;
   onChange: (v: unknown) => void;
 }) {
   const toText = (v: unknown) => (v === undefined || v === null ? "" : typeof v === "string" ? v : JSON.stringify(v, null, 2));
@@ -224,26 +294,34 @@ function JsonField({
   const [invalid, setInvalid] = useState(false);
   useEffect(() => setText(toText(value)), [value]);
 
+  const commit = (text: string) => {
+    if (text.trim() === "") return onChange(undefined);
+    try {
+      onChange(JSON.parse(text));
+      setInvalid(false);
+    } catch {
+      // Not JSON: keep as string so {{ expressions }} still work.
+      setInvalid(!text.includes("{{"));
+      onChange(text);
+    }
+  };
+  if (insertRef)
+    insertRef.current = (t: string) => {
+      setText(t);
+      commit(t);
+    };
+
   return (
     <>
       <textarea
+        ref={inputRef}
         className={`mono ${invalid ? "invalid" : ""}`}
         rows={5}
         disabled={readOnly}
         placeholder={placeholder}
         value={text}
         onChange={(e) => setText(e.target.value)}
-        onBlur={() => {
-          if (text.trim() === "") return onChange(undefined);
-          try {
-            onChange(JSON.parse(text));
-            setInvalid(false);
-          } catch {
-            // Not JSON: keep as string so {{ expressions }} still work.
-            setInvalid(!text.includes("{{"));
-            onChange(text);
-          }
-        }}
+        onBlur={() => commit(text)}
       />
       {invalid && <span className="field-desc error-text">Not valid JSON</span>}
     </>

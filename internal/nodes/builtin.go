@@ -56,6 +56,7 @@ func (manualTrigger) Definition() Definition {
 			Description: "Default item emitted when run from the editor without a payload.",
 			Default:     map[string]any{},
 		}},
+		OutputSchema: &OutputSchema{FromParam: "payload"},
 	}
 }
 
@@ -93,6 +94,11 @@ func (httpNode) Definition() Definition {
 			{Name: "timeoutSeconds", Label: "Timeout (s)", Type: ParamNumber, Default: 30},
 			{Name: "failOnError", Label: "Fail on HTTP status >= 400", Type: ParamBoolean, Default: true},
 		},
+		OutputSchema: &OutputSchema{Fields: fields(
+			"status:number:HTTP status code",
+			"headers:object:Response headers",
+			"body:any:Parsed JSON body, or the raw text",
+		)},
 	}
 }
 
@@ -159,6 +165,7 @@ func (setNode) Definition() Definition {
 				Default: map[string]any{"greeting": "Hello {{ json.name ?? 'world' }}"}},
 			{Name: "keepExisting", Label: "Keep existing fields", Type: ParamBoolean, Default: true},
 		},
+		OutputSchema: &OutputSchema{Passthrough: true, FromParam: "fields"},
 	}
 }
 
@@ -200,6 +207,7 @@ func (ifNode) Definition() Definition {
 			Name: "condition", Label: "Condition", Type: ParamString, Required: true,
 			Placeholder: "{{ json.status == 200 }}", Default: "{{ true }}",
 		}},
+		OutputSchema: passthroughSchema,
 	}
 }
 
@@ -229,7 +237,8 @@ func (transformNode) Definition() Definition {
 		Description: "Evaluate one expression over all items (variable `items`) and emit the result. " +
 			"Arrays become multiple items, e.g. {{ filter(items, .active) }} or {{ map(items, ({name: .login})) }} (wrap object literals in parentheses inside map/filter).",
 		Color: "#8b5cf6", Inputs: []string{"main"}, Outputs: []string{"main"},
-		Params: []Param{{Name: "expression", Label: "Expression", Type: ParamText, Required: true, Default: "{{ items }}"}},
+		Params:       []Param{{Name: "expression", Label: "Expression", Type: ParamText, Required: true, Default: "{{ items }}"}},
+		OutputSchema: dynamicSchema,
 	}
 }
 
@@ -281,6 +290,7 @@ func (logNode) Definition() Definition {
 				{Value: LogWarn, Label: "Warning"}, {Value: LogError, Label: "Error"},
 			}},
 		},
+		OutputSchema: passthroughSchema,
 	}
 }
 

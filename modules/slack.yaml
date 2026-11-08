@@ -25,3 +25,6 @@ nodes:
       body:
         text: "{{ params.text }}"
     output: "{{ {ok: response.status == 200} }}"
+    outputSchema:
+      fields:
+        - { path: ok, type: boolean, description: True when Slack accepted the message }

@@ -70,6 +70,9 @@ func (waitNode) Definition() Definition {
 				ShowIf:      map[string][]string{"mode": {WaitWebhook}},
 				Description: "Then the input items continue on the 'timeout' output. 0 waits forever."},
 		},
+		// Time-based waits emit the input items. When the resume URL is called,
+		// "main" emits the request instead.
+		OutputSchema: &OutputSchema{Passthrough: true, Fields: webhookRequestFields},
 	}
 }
 
@@ -158,6 +161,8 @@ func (executeWorkflowNode) Definition() Definition {
 			{Name: "delaySeconds", Label: "Pause between runs (s)", Type: ParamNumber, Default: 0, NoExpression: true,
 				ShowIf: map[string][]string{"mode": {"each", "batch"}}},
 		},
+		// The called workflow's last node decides the output.
+		OutputSchema: dynamicSchema,
 	}
 }
 
@@ -217,6 +222,7 @@ func (callTrigger) Definition() Definition {
 			Name: "payload", Label: "Test items", Type: ParamJSON, NoExpression: true, Default: []any{map[string]any{}},
 			Description: "Items used when the workflow is run manually from the editor.",
 		}},
+		OutputSchema: &OutputSchema{FromParam: "payload"},
 	}
 }
 
@@ -245,6 +251,17 @@ func (errorTrigger) Definition() Definition {
 				ShowIf: map[string][]string{"scope": {"selected"}}},
 			{Name: "includeManual", Label: "Also for manual test runs", Type: ParamBoolean, Default: false, NoExpression: true},
 		},
+		OutputSchema: &OutputSchema{Fields: fields(
+			"workflow.id:string",
+			"workflow.name:string:Name of the failed workflow",
+			"workflow.url:string:Link to the failed workflow in the editor",
+			"execution.id:string",
+			"execution.triggerType:string",
+			"execution.triggeredBy:string",
+			"execution.startedAt:string",
+			"failedNode:string:Name of the node that failed",
+			"error:string:Error message",
+		)},
 	}
 }
 

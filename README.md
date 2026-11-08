@@ -214,6 +214,15 @@ A parameter that is exactly one expression keeps its type (`{{ json.count + 1 }}
 mixed text yields a string. Inside `map`/`filter`, wrap object literals in parentheses:
 `{{ map(items, ({id: .id})) }}`.
 
+**Dynamic content (⚡).** Every field that accepts expressions has a ⚡ button. It lists
+the fields of all upstream nodes (closest first), the trigger, the plugin's `vars` and
+the workflow metadata. Clicking a field inserts the expression at the cursor: `{{ json.text }}`
+for the directly connected node, `{{ nodes['HTTP Request'][0].body.id }}` for earlier ones.
+Inside an open `{{ }}` only the path is inserted. In JSON fields it is quoted, and in Code
+fields it is inserted without braces, with `item` or `items[0]` in place of `json`.
+The fields come from the latest run (with sample values) and from each node type's
+`outputSchema`, so nodes that have not run yet are listed too.
+
 ## Sharing model
 
 Each workflow has an **owner**, an **organization** and a **scope**:
@@ -370,7 +379,17 @@ nodes:
       - { name: chatId, required: true }
     inputs: [main]            # optional, default [main]
     outputs: [main]           # optional, default [main]
+    outputSchema:             # optional: fields of the emitted items, for the ⚡ picker
+      fields:
+        - { path: message_id, type: number }
+        - { path: chat.id, type: number, description: Chat the message was sent to }
+      # passthrough: true     # items keep the input's fields (plus the ones above)
+      # fromParam: fields     # a parameter whose object value describes the items
+      # dynamic: true         # shape not known in advance; only run data is shown
 ```
+
+`type` is `string`, `number`, `boolean`, `object`, `array` or `any`. Paths use dots for
+nesting; parent objects need not be listed.
 
 ## Writing HTTP modules
 

@@ -28,6 +28,22 @@ nodes:
     request:
       method: GET
       path: /repos/{{ params.owner }}/{{ params.repo }}
+    outputSchema:
+      fields:
+        - { path: id, type: number }
+        - { path: name, type: string }
+        - { path: full_name, type: string, description: owner/name }
+        - { path: description, type: string }
+        - { path: html_url, type: string, description: Link to the repository }
+        - { path: private, type: boolean }
+        - { path: default_branch, type: string }
+        - { path: stargazers_count, type: number }
+        - { path: forks_count, type: number }
+        - { path: open_issues_count, type: number }
+        - { path: language, type: string }
+        - { path: owner.login, type: string }
+        - { path: created_at, type: string }
+        - { path: pushed_at, type: string }
 
   - type: issues.list
     name: List Issues
@@ -50,6 +66,12 @@ nodes:
         state: "{{ params.state }}"
         per_page: 50
     output: "{{ map(response.body, ({number: .number, title: .title, url: .html_url, user: .user.login})) }}"
+    outputSchema:
+      fields:
+        - { path: number, type: number, description: Issue number }
+        - { path: title, type: string }
+        - { path: url, type: string, description: Link to the issue }
+        - { path: user, type: string, description: Login of the author }
 
   - type: issues.create
     name: Create Issue
@@ -65,3 +87,13 @@ nodes:
       body:
         title: "{{ params.title }}"
         body: "{{ params.body }}"
+    outputSchema:
+      fields:
+        - { path: id, type: number }
+        - { path: number, type: number, description: Issue number }
+        - { path: title, type: string }
+        - { path: body, type: string }
+        - { path: state, type: string }
+        - { path: html_url, type: string, description: Link to the issue }
+        - { path: user.login, type: string, description: Author }
+        - { path: created_at, type: string }

@@ -37,7 +37,8 @@ Output item:
 }
 ```
 
-(`data` only with *Force JSON output*.)
+(`data` only with *Force JSON output*.) These fields are declared under `outputSchema` in
+`plugin.yaml`, so later nodes can pick them with ⚡, e.g. `{{ json.text }}`.
 
 ## Keys
 

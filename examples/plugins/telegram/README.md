@@ -6,7 +6,7 @@ WebAssembly module and work with the same [`plugin.yaml`](plugin.yaml).
 
 ```
 telegram/
-├── plugin.yaml     manifest: module, nodes, parameters, config, vars, sandbox settings
+├── plugin.yaml     manifest: module, nodes, parameters, output schema, config, vars, sandbox settings
 ├── go/main.go      Go implementation (Extism Go PDK)
 ├── js/index.js     JavaScript implementation (Extism JS PDK)
 ├── js/index.d.ts   declares the exported function for the JS compiler
@@ -48,6 +48,12 @@ The plugin writes `{"items": [...]}` (or `{"outputs": {"main": [...], "other": [
 for several outputs) to the output. Errors go through the PDK's error function
 (`pdk.SetError` / `throw`) or `{"error": "message"}`. glue2flow strips URL paths from plugin
 errors and scrubs known secret values from all error messages before storing them.
+
+## Output schema
+
+Each node declares the fields it emits under `outputSchema`, e.g. `message_id`, `chat.id`
+and `text` for *Send Message*. The editor's ⚡ picker offers them in later nodes
+(`{{ nodes['Telegram'][0].message_id }}`) before the workflow has ever run.
 
 ## Secrets and configuration
 

@@ -23,7 +23,17 @@ import { ExecutionsPanel } from "../components/ExecutionsPanel";
 import { ResizableSide } from "../components/ResizableSide";
 import { TriggerInfo } from "../components/TriggerInfo";
 import { NodePalette } from "../components/NodePalette";
-import { atLeast, type ClientConfig, type Execution, type Graph, type NodeDef, type User, type Workflow } from "../types";
+import { contentGroups } from "../lib/dynamicContent";
+import {
+  atLeast,
+  type ClientConfig,
+  type Execution,
+  type Graph,
+  type ModuleInfo,
+  type NodeDef,
+  type User,
+  type Workflow,
+} from "../types";
 
 const nodeTypes = { g2f: FlowNode };
 
@@ -87,6 +97,9 @@ function EditorInner({ id, defs, user, config }: Props) {
   const [selectedId, setSelectedId] = useState<string>();
   const [executions, setExecutions] = useState<Execution[]>([]);
   const [execution, setExecution] = useState<Execution>();
+  // Latest run with node outputs: sample data for the ⚡ field picker.
+  const [latest, setLatest] = useState<Execution>();
+  const [modules, setModules] = useState<ModuleInfo[]>([]);
   const [showSharing, setShowSharing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ kind: "error" | "info"; text: string }>();
@@ -116,6 +129,23 @@ function EditorInner({ id, defs, user, config }: Props) {
       .then(setExecutions)
       .catch(() => {});
   }, [id]);
+
+  useEffect(() => {
+    api
+      .plugins()
+      .then(setModules)
+      .catch(() => {});
+  }, []);
+
+  // The list has no step outputs: fetch the newest run that has them.
+  const latestId = executions.find((e) => e.status !== "queued" && e.status !== "running")?.id;
+  useEffect(() => {
+    if (!latestId) return;
+    api
+      .execution(latestId)
+      .then(setLatest)
+      .catch(() => {});
+  }, [latestId]);
 
   useEffect(() => {
     load();
@@ -280,6 +310,14 @@ function EditorInner({ id, defs, user, config }: Props) {
   if (!wf) return message ? <div className="alert error">{message.text}</div> : <div className="loading">Loading…</div>;
 
   const selected = nodes.find((n) => n.id === selectedId);
+  const sample = execution?.steps?.length ? execution : latest;
+  const content = selected
+    ? contentGroups(
+        selected.id,
+        { nodes, edges, execution: sample },
+        modules.find((m) => m.module === selected.data.def?.module && m.runtime !== "builtin")?.vars,
+      )
+    : undefined;
   const hasTrigger = nodes.some((n) => n.data.def?.trigger);
 
   return (
@@ -395,6 +433,7 @@ function EditorInner({ id, defs, user, config }: Props) {
               data={selected.data}
               readOnly={!canEdit}
               extra={<TriggerInfo workflow={wf} nodeId={selected.id} data={selected.data} config={config} dirty={dirty} />}
+              content={content}
               onChange={(p) => updateNode(selected.id, p)}
               onDelete={() => deleteNode(selected.id)}
             />

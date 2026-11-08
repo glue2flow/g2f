@@ -90,6 +90,8 @@ type Definition struct {
 	Params      []Param     `json:"params"`
 	// DynamicOutputs makes the outputs depend on a parameter (e.g. Switch cases).
 	DynamicOutputs *DynamicOutputs `json:"dynamicOutputs,omitempty"`
+	// OutputSchema describes the emitted items (for the editor's field picker).
+	OutputSchema *OutputSchema `json:"outputSchema,omitempty"`
 	// Module is the plugin module the node belongs to ("builtin" for Go nodes).
 	Module string `json:"module"`
 	Source string `json:"source"` // builtin | file:<name> | imported

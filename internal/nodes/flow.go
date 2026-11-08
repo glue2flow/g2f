@@ -25,6 +25,7 @@ func (switchNode) Definition() Definition {
 				Description: "Comma separated; each case becomes an output. Unmatched items go to 'default'."},
 			{Name: "ignoreCase", Label: "Ignore case", Type: ParamBoolean, Default: false},
 		},
+		OutputSchema: passthroughSchema,
 	}
 	d.Outputs = d.OutputsFor(nil)
 	return d
@@ -77,6 +78,8 @@ func (mergeNode) Definition() Definition {
 					{"Only matches (inner)", "inner"}, {"All of A (left)", "left"}, {"Everything (outer)", "outer"},
 				}},
 		},
+		// Items of A and B, or both merged into one: the fields of both inputs.
+		OutputSchema: passthroughSchema,
 	}
 }
 

@@ -41,6 +41,7 @@ func (codeNode) Definition() Definition {
 					"(or null to drop the item). Also available: nodes, trigger, workflow, execution, console.log()."},
 			{Name: "timeoutSeconds", Label: "Timeout (s)", Type: ParamNumber, Default: 10, NoExpression: true},
 		},
+		OutputSchema: dynamicSchema,
 	}
 }
 

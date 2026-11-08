@@ -96,6 +96,8 @@ type ManifestNode struct {
 	Params      []Param  `yaml:"params"`
 	Inputs      []string `yaml:"inputs"`  // default [main]
 	Outputs     []string `yaml:"outputs"` // default [main]
+	// OutputSchema describes the emitted items, for the editor's field picker.
+	OutputSchema *OutputSchema `yaml:"outputSchema"`
 
 	// http runtime
 	Request ManifestRequest `yaml:"request"`
@@ -205,6 +207,9 @@ func (m *Manifest) validate() error {
 		seen[n.Type] = true
 		if err := normalizeParams(n.Params, n.Type); err != nil {
 			return err
+		}
+		if err := n.OutputSchema.Validate(append(append([]Param{}, m.Params...), n.Params...)); err != nil {
+			return fmt.Errorf("node %s: %w", n.Type, err)
 		}
 		if m.Runtime == "http" && n.Request.URL == "" && m.BaseURL == "" {
 			return fmt.Errorf("node %s: request.url or module baseUrl required", n.Type)
@@ -336,6 +341,6 @@ func (m *Manifest) NodeDefinition(n ManifestNode, source string) Definition {
 	return Definition{
 		Type: m.Module + "." + n.Type, Name: n.Name, Category: category, Description: n.Description,
 		Color: m.Color, Inputs: n.Inputs, Outputs: n.Outputs, Params: params,
-		Module: m.Module, Source: source,
+		OutputSchema: n.OutputSchema, Module: m.Module, Source: source,
 	}
 }

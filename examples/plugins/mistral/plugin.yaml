@@ -70,3 +70,12 @@ nodes:
         type: boolean
         default: false
         description: The model must answer with a valid JSON object (also mention JSON in the prompt).
+    outputSchema:
+      fields:
+        - { path: text, type: string, description: The model's answer }
+        - { path: model, type: string }
+        - { path: finishReason, type: string, description: "stop, length, …" }
+        - { path: usage.promptTokens, type: number }
+        - { path: usage.completionTokens, type: number }
+        - { path: usage.totalTokens, type: number }
+        - { path: data, type: any, description: Parsed answer (only with Force JSON output) }

@@ -97,8 +97,27 @@ export interface NodeDef {
   inputs: string[];
   outputs: string[];
   params: ParamDef[];
+  outputSchema?: OutputSchema;
   module: string;
   source: string;
+}
+
+/** Describes the items a node emits (see internal/nodes/schema.go). */
+export interface OutputSchema {
+  /** Items keep the fields of the input items. */
+  passthrough?: boolean;
+  /** A parameter whose value (object, or list of objects) describes the items. */
+  fromParam?: string;
+  fields?: OutputField[];
+  /** Shape depends on code or another workflow: only run data can tell. */
+  dynamic?: boolean;
+}
+
+export interface OutputField {
+  path: string;
+  type?: "string" | "number" | "boolean" | "object" | "array" | "any";
+  description?: string;
+  fromParam?: string;
 }
 
 export type ExecStatus = "queued" | "running" | "waiting" | "success" | "error";
