@@ -9,7 +9,7 @@ COPY web/ ./
 RUN npm run build
 
 # --- Server (Go) ------------------------------------------------------------
-FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS server
+FROM --platform=$BUILDPLATFORM golang:1.27-alpine AS server
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
