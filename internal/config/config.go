@@ -63,7 +63,10 @@ type AuthConfig struct {
 	Issuer string
 	// JWKSURL optionally overrides where signing keys are fetched from. Useful in
 	// docker-compose where the browser and the backend reach Keycloak via different hosts.
-	JWKSURL     string
+	JWKSURL string
+	// TokenURL optionally overrides the token endpoint used by server-side
+	// logins (form triggers). Default: derived from JWKSURL, else the issuer.
+	TokenURL    string
 	ClientID    string
 	GroupsClaim string
 	OrgClaim    string
@@ -90,6 +93,7 @@ func Load() (*Config, error) {
 			Mode:            AuthMode(env("G2F_AUTH_MODE", string(AuthOIDC))),
 			Issuer:          strings.TrimRight(env("G2F_OIDC_ISSUER", ""), "/"),
 			JWKSURL:         env("G2F_OIDC_JWKS_URL", ""),
+			TokenURL:        env("G2F_OIDC_TOKEN_URL", ""),
 			ClientID:        env("G2F_OIDC_CLIENT_ID", "g2f"),
 			GroupsClaim:     env("G2F_OIDC_GROUPS_CLAIM", "groups"),
 			OrgClaim:        env("G2F_OIDC_ORG_CLAIM", "org"),

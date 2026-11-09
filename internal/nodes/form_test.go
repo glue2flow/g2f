@@ -100,3 +100,29 @@ func TestFormKey(t *testing.T) {
 		}
 	}
 }
+
+func TestFormProtection(t *testing.T) {
+	f, err := ParseForm(map[string]any{"protection": "email", "emailDomains": "Example.com, @acme.org"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for addr, want := range map[string]bool{
+		"a@example.com": true, "a@mail.acme.org": true, "a@notexample.com": false, "a@example.com.evil": false,
+	} {
+		if got := f.EmailAllowed(addr); got != want {
+			t.Errorf("EmailAllowed(%q) = %v", addr, got)
+		}
+	}
+	if _, err := ParseForm(map[string]any{"protection": "magic"}); err == nil {
+		t.Fatal("unknown protection accepted")
+	}
+	if _, err := ParseForm(map[string]any{"emailDomains": "localhost"}); err == nil {
+		t.Fatal("invalid domain accepted")
+	}
+	if _, err := ParseForm(map[string]any{"fields": []any{map[string]any{"key": "submittedBy", "label": "X"}}}); err == nil {
+		t.Fatal("reserved key accepted")
+	}
+	if f, _ := ParseForm(nil); f.Protection != FormProtectNone {
+		t.Fatalf("default protection %q", f.Protection)
+	}
+}

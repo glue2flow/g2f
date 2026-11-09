@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/glue2flow/g2f/internal/expression"
+	"github.com/glue2flow/g2f/internal/mailmsg"
 	"github.com/glue2flow/g2f/internal/nodes"
 )
 
@@ -69,12 +70,36 @@ func isLocal(host string) bool {
 // config. A Username/Password on the node replaces the organization's account
 // (the host stays the one configured by the admin).
 func settings(ec *nodes.ExecContext, proto string, defPort int, defSecurity string) (server, error) {
-	cfg := func(k string) string { return strings.TrimSpace(expression.Stringify(ec.Config[proto+k])) }
+	s, err := serverConfig(ec.Config, proto, defPort, defSecurity)
+	if err != nil {
+		return s, err
+	}
+	var first nodes.Item
+	if len(ec.Items) > 0 {
+		first = ec.Items[0]
+	}
+	user, err := ec.String("username", first, 0)
+	if err != nil {
+		return s, err
+	}
+	if user = strings.TrimSpace(user); user != "" {
+		pass, err := ec.String("password", first, 0)
+		if err != nil {
+			return s, err
+		}
+		s.username, s.password = user, pass
+	}
+	return s, s.checkCredentials()
+}
+
+// serverConfig reads the organization's server of a protocol from the module config.
+func serverConfig(config map[string]any, proto string, defPort int, defSecurity string) (server, error) {
+	cfg := func(k string) string { return strings.TrimSpace(expression.Stringify(config[proto+k])) }
 	s := server{
 		host:     cfg("Host"),
 		security: strings.ToLower(cfg("Security")),
 		username: cfg("Username"),
-		password: expression.Stringify(ec.Config[proto+"Password"]),
+		password: expression.Stringify(config[proto+"Password"]),
 	}
 	if s.host == "" {
 		return s, fmt.Errorf("%s is not configured: an admin must set the %s host in Plugins → Email → Settings", strings.ToUpper(proto), strings.ToUpper(proto))
@@ -95,22 +120,7 @@ func settings(ec *nodes.ExecContext, proto string, defPort int, defSecurity stri
 	default:
 		return s, fmt.Errorf("invalid %s security %q", proto, s.security)
 	}
-	var first nodes.Item
-	if len(ec.Items) > 0 {
-		first = ec.Items[0]
-	}
-	user, err := ec.String("username", first, 0)
-	if err != nil {
-		return s, err
-	}
-	if user = strings.TrimSpace(user); user != "" {
-		pass, err := ec.String("password", first, 0)
-		if err != nil {
-			return s, err
-		}
-		s.username, s.password = user, pass
-	}
-	return s, s.checkCredentials()
+	return s, nil
 }
 
 // dial opens a TCP (or TLS) connection that is closed when ctx ends.
@@ -185,4 +195,66 @@ func copyItem(item nodes.Item) nodes.Item {
 		out[k] = v
 	}
 	return out
+}
+
+// Configured reports whether the module config (Plugins → Email → Settings)
+// has an SMTP server, so SendText can be used.
+func Configured(config map[string]any) bool {
+	return strings.TrimSpace(expression.Stringify(config["smtpHost"])) != ""
+}
+
+// SendText sends a plain-text message with the organization's SMTP account
+// and default sender. It is used outside workflows, e.g. for the access codes
+// of form triggers.
+func SendText(ctx context.Context, config map[string]any, to, subject, text string) error {
+	srv, err := serverConfig(config, "smtp", 587, "starttls")
+	if err != nil {
+		return err
+	}
+	if err := srv.checkCredentials(); err != nil {
+		return err
+	}
+	from := strings.TrimSpace(expression.Stringify(config["fromAddress"]))
+	if from == "" {
+		from = srv.username
+	}
+	if !strings.Contains(from, "@") {
+		return fmt.Errorf("no sender address: set the default sender in Plugins → Email → Settings")
+	}
+	ctx, cancel := context.WithTimeout(ctx, commandTimeout)
+	defer cancel()
+	c, err := connectSMTP(ctx, srv)
+	if err != nil {
+		return ctxErr(ctx, err)
+	}
+	defer c.Close()
+	if _, err := deliver(c, &mailmsg.Message{From: from, To: []string{to}, Subject: subject, Text: text}); err != nil {
+		return ctxErr(ctx, err)
+	}
+	return c.Quit()
+}
+
+// OrgMailer sends plain-text messages with an organization's e-mail settings
+// (e.g. access codes of form triggers). Settings is secrets.Service.ModuleSettings.
+type OrgMailer struct {
+	Settings func(ctx context.Context, org, module string) (config, vars map[string]any, err error)
+}
+
+func (m OrgMailer) Configured(ctx context.Context, org string) (bool, error) {
+	cfg, _, err := m.Settings(ctx, org, "email")
+	if err != nil {
+		return false, err
+	}
+	return Configured(cfg), nil
+}
+
+func (m OrgMailer) SendText(ctx context.Context, org, to, subject, text string) error {
+	cfg, _, err := m.Settings(ctx, org, "email")
+	if err != nil {
+		return err
+	}
+	if !Configured(cfg) {
+		return fmt.Errorf("e-mail is not configured for organization %q", org)
+	}
+	return SendText(ctx, cfg, to, subject, text)
 }

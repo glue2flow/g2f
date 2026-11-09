@@ -54,7 +54,7 @@ replicas when you need them: if one stops, another continues its runs where they
 
 | | |
 | --- | --- |
-| **Triggers** | Manual · Schedule (cron, once, timezones) · Webhook (token / HMAC) · Form (text and multiple-choice questions) · Called by Workflow · Error Trigger · Polling: Email Received (IMAP), Gmail and Outlook New Email |
+| **Triggers** | Manual · Schedule (cron, once, timezones) · Webhook (token / HMAC) · Form (text and multiple-choice questions; open, captcha, Keycloak login or e-mail code) · Called by Workflow · Error Trigger · Polling: Email Received (IMAP), Gmail and Outlook New Email |
 | **Logic & flow** | Condition (if / else) · Switch · Merge (append, join, pair) · And / Or / Xor · Execute Workflow (loops, batches) |
 | **Data** | HTTP Request · Set Fields · Filter · Sort · Limit · Split Out · Aggregate · Map · Rename / Remove Fields · Date & Time · CSV · Transform Items · Code (JavaScript, isolated with a memory limit) · Log |
 | **Memory** | Remove Duplicates (within a run or across runs) · Data Store (values, counters between runs) |

@@ -110,6 +110,18 @@ export function TriggerInfo({ workflow, nodeId, data, dirty }: Props) {
 
   if (info.form) {
     const f = info.form;
+    const protection = {
+      none: "open to anyone",
+      captcha: "captcha",
+      login: "Keycloak login",
+      email: "e-mail access code",
+    }[f.protection];
+    const who = {
+      none: "Anyone with the link can answer",
+      captcha: "Anyone with the link who solves a small sum can answer",
+      login: "Members of your organization can answer after signing in with Keycloak",
+      email: "Anyone who confirms an e-mail address with a code sent to it can answer",
+    }[f.protection];
     return (
       <div className="info-box">
         <div className="row">
@@ -117,7 +129,9 @@ export function TriggerInfo({ workflow, nodeId, data, dirty }: Props) {
           <span className="chip">
             {f.questions} question{f.questions === 1 ? "" : "s"}
           </span>
+          <span className="chip">{protection}</span>
         </div>
+        {f.warning && <div className="error-text" style={{ marginTop: 6 }}>{f.warning}</div>}
         <div className="field-label" style={{ marginTop: 6 }}>
           Form URL{dirty && <span className="muted"> (saved version)</span>}
         </div>
@@ -131,9 +145,15 @@ export function TriggerInfo({ workflow, nodeId, data, dirty }: Props) {
           </a>
         </div>
         <p className="small" style={{ margin: "6px 0 0" }}>
-          Anyone with the link can answer while the workflow is active. Each submission starts a run with one item: the
-          answers by question key, plus <code>submittedAt</code>. Add <code>?key=value</code> to the link to prefill
-          answers.
+          {who} while the workflow is active. Each submission starts a run with one item: the answers by question key,
+          plus <code>submittedAt</code>
+          {(f.protection === "login" || f.protection === "email") && (
+            <>
+              {" "}
+              and <code>submittedBy</code>
+            </>
+          )}
+          . Add <code>?key=value</code> to the link to prefill answers.
         </p>
       </div>
     );

@@ -6,9 +6,11 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/glue2flow/g2f/internal/config"
 	"github.com/glue2flow/g2f/internal/nodes"
 	"github.com/glue2flow/g2f/internal/trigger"
 	"github.com/glue2flow/g2f/internal/workflow"
+	"github.com/glue2flow/g2f/modules/email"
 )
 
 type triggerInfo struct {
@@ -34,8 +36,11 @@ type webhookInfo struct {
 }
 
 type formInfo struct {
-	URL       string `json:"url"`
-	Questions int    `json:"questions"`
+	URL        string `json:"url"`
+	Questions  int    `json:"questions"`
+	Protection string `json:"protection"`
+	// Warning explains why the protection cannot work as configured.
+	Warning string `json:"warning,omitempty"`
 }
 
 type scheduleInfo struct {
@@ -86,7 +91,18 @@ func (s *Server) listTriggers(w http.ResponseWriter, r *http.Request) {
 				info.Error = err.Error()
 				break
 			}
-			info.Form = &formInfo{URL: trigger.FormURL(s.cfg.PublicURL, wf.ID, n.ID), Questions: len(f.Fields)}
+			info.Form = &formInfo{URL: trigger.FormURL(s.cfg.PublicURL, wf.ID, n.ID), Questions: len(f.Fields), Protection: f.Protection}
+			switch f.Protection {
+			case nodes.FormProtectEmail:
+				cfg, _, err := s.secrets.ModuleSettings(r.Context(), wf.OrgID, "email")
+				if err != nil || !email.Configured(cfg) {
+					info.Form.Warning = "E-mail is not configured: an admin must set the SMTP server in Plugins → Email → Settings. Until then the form is unavailable."
+				}
+			case nodes.FormProtectLogin:
+				if s.cfg.Auth.Mode == config.AuthNone {
+					info.Form.Warning = "Authentication is disabled on this server (G2F_AUTH_MODE=none): everyone answers as the development user."
+				}
+			}
 		case nodes.TriggerPoll:
 			d := nodes.PollInterval(n.Params)
 			info.Poll = &pollInfo{IntervalMinutes: d.Minutes(), Next: time.Now().Truncate(d).Add(d)}

@@ -31,8 +31,19 @@ const (
 	maxFormTextareaLn = 10000
 )
 
-// FormSubmittedAt is the output field holding the submission time; field keys may not use it.
-const FormSubmittedAt = "submittedAt"
+// Output fields added to the answers; question keys may not use them.
+const (
+	FormSubmittedAt = "submittedAt"
+	FormSubmittedBy = "submittedBy"
+)
+
+// Form protection modes: who may answer.
+const (
+	FormProtectNone    = "none"
+	FormProtectCaptcha = "captcha" // a simple arithmetic question
+	FormProtectLogin   = "login"   // sign in with the organization's Keycloak
+	FormProtectEmail   = "email"   // confirm an e-mail address with a one-time code
+)
 
 var formKeyRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
@@ -59,12 +70,27 @@ func (formTrigger) Definition() Definition {
 			{Name: "fields", Label: "Questions", Type: ParamFormFields, NoExpression: true, Required: true,
 				Default:     defaultFormFields(),
 				Description: "Each answer becomes a field of the output item, named by the question's key."},
+			{Name: "protection", Label: "Protection", Type: ParamSelect, Default: FormProtectNone, NoExpression: true, Options: []Option{
+				{"None – anyone with the link", FormProtectNone},
+				{"Simple captcha (e.g. 12 + 7 = ?)", FormProtectCaptcha},
+				{"Sign in with Keycloak (organization members)", FormProtectLogin},
+				{"Access code sent by e-mail", FormProtectEmail},
+			}, Description: "Login adds submittedBy (sub, username, name, email); access codes add submittedBy.email. Access codes need Plugins → Email → Settings."},
+			{Name: "emailDomains", Label: "Allowed e-mail domains", Type: ParamString, NoExpression: true,
+				ShowIf:      map[string][]string{"protection": {FormProtectEmail}},
+				Placeholder: "example.com, example.org",
+				Description: "Optional. Only addresses of these domains (and their subdomains) can request a code."},
 			{Name: "submitLabel", Label: "Submit button", Type: ParamString, Default: "Submit", NoExpression: true},
 			{Name: "successMessage", Label: "Message after submitting", Type: ParamText, NoExpression: true,
 				Default: "Thank you! Your response has been recorded."},
 		},
 		OutputSchema: &OutputSchema{FormFieldsParam: "fields", Fields: fields(
 			FormSubmittedAt+":string:Time the form was submitted (RFC 3339, UTC)",
+			FormSubmittedBy+":object:Who answered (login or access code protection)",
+			FormSubmittedBy+".email:string:E-mail address (login or access code)",
+			FormSubmittedBy+".username:string:Keycloak username (login)",
+			FormSubmittedBy+".name:string:Display name (login)",
+			FormSubmittedBy+".sub:string:Keycloak user id (login)",
 			"test:boolean:Set when run from the editor",
 		)},
 	}
@@ -85,6 +111,12 @@ func (formTrigger) Execute(_ context.Context, ec *ExecContext) (Output, error) {
 		return nil, err
 	}
 	item := Item{FormSubmittedAt: time.Now().UTC().Format(time.RFC3339), "test": true}
+	switch f.Protection {
+	case FormProtectLogin:
+		item[FormSubmittedBy] = map[string]any{"sub": "test-user", "username": "test", "name": "Test User", "email": "test@example.com"}
+	case FormProtectEmail:
+		item[FormSubmittedBy] = map[string]any{"email": "test@example.com"}
+	}
 	for _, fl := range f.Fields {
 		switch fl.Type {
 		case FormChoice:
@@ -116,6 +148,9 @@ type Form struct {
 	Fields         []FormField
 	SubmitLabel    string
 	SuccessMessage string
+	Protection     string
+	// EmailDomains restricts access codes to these domains (empty: any).
+	EmailDomains []string
 }
 
 // ParseForm validates and parses the parameters of a form trigger.
@@ -131,6 +166,22 @@ func ParseForm(params map[string]any) (*Form, error) {
 		Description:    str("description", ""),
 		SubmitLabel:    str("submitLabel", "Submit"),
 		SuccessMessage: str("successMessage", "Thank you! Your response has been recorded."),
+		Protection:     str("protection", FormProtectNone),
+	}
+	switch f.Protection {
+	case FormProtectNone, FormProtectCaptcha, FormProtectLogin, FormProtectEmail:
+	default:
+		return nil, fmt.Errorf("invalid protection %q", f.Protection)
+	}
+	for _, d := range strings.FieldsFunc(str("emailDomains", ""), func(r rune) bool { return r == ',' || r == ' ' || r == ';' || r == '\n' }) {
+		d = strings.ToLower(strings.TrimPrefix(strings.TrimSpace(d), "@"))
+		if d == "" {
+			continue
+		}
+		if !strings.Contains(d, ".") || strings.ContainsAny(d, "@/") {
+			return nil, fmt.Errorf("invalid e-mail domain %q", d)
+		}
+		f.EmailDomains = append(f.EmailDomains, d)
 	}
 	raw, ok := params["fields"]
 	if !ok || raw == nil {
@@ -168,7 +219,7 @@ func ParseForm(params map[string]any) (*Form, error) {
 		if !formKeyRe.MatchString(fl.Key) {
 			return nil, fmt.Errorf("%s: key %q may only contain letters, digits and _ and must not start with a digit", name, fl.Key)
 		}
-		if fl.Key == FormSubmittedAt || fl.Key == "test" {
+		if fl.Key == FormSubmittedAt || fl.Key == FormSubmittedBy || fl.Key == "test" {
 			return nil, fmt.Errorf("%s: key %q is reserved", name, fl.Key)
 		}
 		if seen[fl.Key] {
@@ -315,4 +366,22 @@ func (f *Form) Submit(values map[string][]string) (Item, map[string]string) {
 	}
 	item[FormSubmittedAt] = time.Now().UTC().Format(time.RFC3339)
 	return item, nil
+}
+
+// EmailAllowed reports whether an access code may be sent to the address
+// (already lower-case) under the form's domain restriction.
+func (f *Form) EmailAllowed(addr string) bool {
+	if len(f.EmailDomains) == 0 {
+		return true
+	}
+	_, domain, ok := strings.Cut(addr, "@")
+	if !ok {
+		return false
+	}
+	for _, d := range f.EmailDomains {
+		if domain == d || strings.HasSuffix(domain, "."+d) {
+			return true
+		}
+	}
+	return false
 }

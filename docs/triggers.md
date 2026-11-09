@@ -9,7 +9,7 @@ Every workflow starts at a trigger node. A workflow may have several triggers.
 | **Manual** | a user with role `runner`+ clicks ▶ Run, or `POST /api/workflows/{id}/run` | the node's test payload (or `items` from the request body) |
 | **Schedule** | the workflow is **active** and the time is due | `{firedAt, scheduledAt, timezone}` |
 | **Webhook** | the workflow is **active** and `/webhook/{workflowId}/{nodeId}` is called | `{method, headers, query, body, receivedAt}` |
-| **Form** | the workflow is **active** and someone submits the form at `/form/{workflowId}/{nodeId}` | the answers by question key, plus `submittedAt` |
+| **Form** | the workflow is **active** and someone submits the form at `/form/{workflowId}/{nodeId}` | the answers by question key, plus `submittedAt` (and `submittedBy` with login or access code) |
 | **Called by Workflow** | an [Execute Workflow](nodes.md#execute-workflow) node of another workflow calls it | the caller's items |
 | **Error Trigger** | a watched workflow fails | `{workflow, execution, failedNode, error}` |
 | **Polling triggers** (Email Received, Gmail / Outlook New Email, …) | the workflow is **active** and a periodic check finds new items | one item per new item, e.g. per e-mail |
@@ -90,9 +90,38 @@ Publishes a simple web form, like a very small Microsoft Forms or LimeSurvey. Sh
 - After submitting, the page shows the *Message after submitting* (with a link to answer
   again). Reloading does not submit twice.
 - Query parameters prefill answers: `…/form/<workflow-id>/<node-id>?team=Sales`.
-- Anyone who has the link can answer; there is no sign-in. Deactivate the workflow to close
-  the form. The page uses no JavaScript and works on phones.
-- ▶ Run in the editor emits one sample answer per question.
+- Deactivate the workflow to close the form. The page uses no JavaScript and works on phones.
+- ▶ Run in the editor emits one sample answer per question (and a sample `submittedBy`).
+
+### Protection
+
+*Protection* decides who can answer:
+
+| Protection | The person answering… | Adds to the item |
+| --- | --- | --- |
+| **None** | just opens the link | – |
+| **Simple captcha** | also solves a small sum (`12 + 7 = ?`) | – |
+| **Sign in with Keycloak** | signs in with their organization account | `submittedBy`: `sub`, `username`, `name`, `email` |
+| **Access code by e-mail** | enters an address and the 6-digit code sent to it | `submittedBy.email` |
+
+- **Captcha** keeps simple bots out, not determined attackers. Each question can be
+  answered once; a wrong answer shows a new one, and the other answers are kept.
+- **Sign in** uses the editor's Keycloak client (`G2F_OIDC_CLIENT_ID`, authorization code with
+  PKCE). The form's URL must be allowed as a redirect URI of the client, e.g.
+  `https://g2f.example.com/*` (the demo realm allows `http://localhost:8080/*`). Only members
+  of the workflow's organization can answer. The backend redeems the code at the token
+  endpoint, see `G2F_OIDC_TOKEN_URL` in [Configuration](configuration.md). With
+  `G2F_AUTH_MODE=none` everyone answers as the development user.
+- **Access codes** are sent with the organization's e-mail account (Plugins → Email →
+  Settings, SMTP host and default sender). Without it the form shows *Form unavailable* and
+  the editor warns. *Allowed e-mail domains* (e.g. `example.com`) restricts which addresses
+  can request a code; subdomains are included. A code is valid for 15 minutes and once; after
+  5 wrong tries a new one is needed. Each address can request 5 codes per hour, each client
+  IP 20.
+- After signing in or confirming the address, the browser remembers it for 12 hours for this
+  form (an HTTP-only cookie). *Not you?* forgets a confirmed address.
+- Tokens and cookies are signed with a key derived from `G2F_SECRET_KEY`; one-time use and
+  limits are kept in PostgreSQL, so they work across replicas.
 
 ## Called by Workflow
 

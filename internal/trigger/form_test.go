@@ -31,7 +31,7 @@ func serveForm(t *testing.T, wf *workflow.Workflow, method, path string, form ur
 	t.Helper()
 	reg := registry(t)
 	eng := &recordingEngine{ch: make(chan engine.Request, 4)}
-	h := NewFormHandler(newFakeStore(wf), eng, reg, discard)
+	h := NewFormHandler(newFakeStore(wf), eng, reg, discard, FormOptions{SecretKey: "k", State: newFakeState()})
 	var body *strings.Reader
 	if form != nil {
 		body = strings.NewReader(form.Encode())
@@ -133,7 +133,7 @@ func TestFormRunsEngine(t *testing.T) {
 	reg := registry(t)
 	st := newFakeStore(wf)
 	eng := engine.New(reg, st, discard, engine.Options{})
-	h := NewFormHandler(st, eng, reg, discard)
+	h := NewFormHandler(st, eng, reg, discard, FormOptions{SecretKey: "k"})
 	req := httptest.NewRequest("POST", "/form/wf/form", strings.NewReader("name=Ada&team=Support"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()

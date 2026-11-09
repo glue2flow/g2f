@@ -25,7 +25,7 @@ import (
 
 	// Native (Go) modules. Each is active only while its manifest is in the
 	// modules directory.
-	_ "github.com/glue2flow/g2f/modules/email"
+	"github.com/glue2flow/g2f/modules/email"
 )
 
 // version is set at build time via -ldflags.
@@ -124,11 +124,14 @@ func run(log *slog.Logger) error {
 		Config: cfg, Store: st, Registry: reg, Engine: eng, Auth: authn, Logger: log,
 		Listener: sched,
 		Webhooks: trigger.NewWebhookHandler(st, eng, reg, sec, log, cfg.WebhookMaxWait),
-		Forms:    trigger.NewFormHandler(st, eng, reg, log),
-		Resume:   trigger.NewResumeHandler(signer, eng, log),
-		Secrets:  sec,
-		Plugins:  plugins,
-		OAuth:    oauthMgr,
+		Forms: trigger.NewFormHandler(st, eng, reg, log, trigger.FormOptions{
+			SecretKey: cfg.SecretKey, PublicURL: cfg.PublicURL,
+			State: st, Auth: authn, Mailer: email.OrgMailer{Settings: sec.ModuleSettings},
+		}),
+		Resume:  trigger.NewResumeHandler(signer, eng, log),
+		Secrets: sec,
+		Plugins: plugins,
+		OAuth:   oauthMgr,
 	})
 	go plugins.Run(schedCtx, cfg.PluginSync)
 	go eng.RunResumer(schedCtx, 2*time.Second)

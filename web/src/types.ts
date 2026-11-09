@@ -208,7 +208,7 @@ export interface TriggerInfo {
   listening: boolean;
   error?: string;
   webhook?: { url: string; method: string; auth: "none" | "token" | "hmac"; header?: string; respond: string };
-  form?: { url: string; questions: number };
+  form?: { url: string; questions: number; protection: "none" | "captcha" | "login" | "email"; warning?: string };
   schedule?: { mode: "cron" | "once"; timezone: string; next: string[] };
   poll?: { intervalMinutes: number; next: string };
 }
