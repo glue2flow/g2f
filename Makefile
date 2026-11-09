@@ -12,7 +12,7 @@ dev-web:
 
 dev-db:
 	docker run -d --name g2f-postgres -p 5432:5432 \
-		-e POSTGRES_USER=g2f -e POSTGRES_PASSWORD=g2f -e POSTGRES_DB=g2f postgres:16-alpine
+		-e POSTGRES_USER=g2f -e POSTGRES_PASSWORD=g2f -e POSTGRES_DB=g2f postgres:18-alpine
 
 test:
 	go vet ./...

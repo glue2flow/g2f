@@ -11,13 +11,13 @@ name: g2f
 
 services:
   postgres:
-    image: postgres:16-alpine
+    image: postgres:18-alpine
     environment:
       POSTGRES_USER: g2f
       POSTGRES_PASSWORD: g2f
       POSTGRES_DB: g2f
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - pgdata:/var/lib/postgresql
       - ./deploy/postgres/init.sql:/docker-entrypoint-initdb.d/10-keycloak.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U g2f -d g2f"]
