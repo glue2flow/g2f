@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # --- Editor (React) ---------------------------------------------------------
-FROM node:22-alpine AS web
+FROM --platform=$BUILDPLATFORM node:22-alpine AS web
 WORKDIR /src/web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci --no-audit --no-fund
@@ -9,7 +9,7 @@ COPY web/ ./
 RUN npm run build
 
 # --- Server (Go) ------------------------------------------------------------
-FROM golang:1.25-alpine AS server
+FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS server
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
@@ -17,7 +17,8 @@ COPY cmd ./cmd
 COPY internal ./internal
 COPY modules ./modules
 ARG VERSION=dev
-RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o /out/g2f ./cmd/g2f
+ARG TARGETOS TARGETARCH
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o /out/g2f ./cmd/g2f
 
 # --- Runtime ----------------------------------------------------------------
 # distroless/static: no shell, no package manager, runs as non-root.
