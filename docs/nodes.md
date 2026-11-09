@@ -4,7 +4,7 @@
 
 | Category | Nodes |
 | --- | --- |
-| Triggers | Manual, Schedule, Webhook, Called by Workflow, Error Trigger, polling triggers such as Email Received (see [Triggers](triggers.md)) |
+| Triggers | Manual, Schedule, Webhook, Form, Called by Workflow, Error Trigger, polling triggers such as Email Received (see [Triggers](triggers.md)) |
 | Core | [HTTP Request](#http-request), [Set Fields](#set-fields), [Condition](#condition), [Switch](#switch), [Merge](#merge), [Code](#code), [Wait](#wait), [Transform Items](#transform-items), [Log](#log) |
 | Data | [Filter](#filter), [Sort](#sort), [Limit](#limit), [Split Out](#split-out), [Aggregate](#aggregate), [Map](#map), [Rename / Remove Fields](#rename--remove-fields), [Date & Time](#date--time), [CSV](#csv), [Remove Duplicates](#remove-duplicates), [Data Store](#data-store) |
 | Flow | [Execute Workflow](#execute-workflow) (incl. loops over items / batches) |

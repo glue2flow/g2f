@@ -14,6 +14,7 @@ glue2flow is configured with environment variables.
 | `G2F_AUTH_MODE` | `oidc` | `oidc` or `none` (development only) |
 | `G2F_OIDC_ISSUER` | – | expected token issuer, e.g. `https://sso.example.com/realms/g2f` |
 | `G2F_OIDC_JWKS_URL` | `<issuer>/protocol/openid-connect/certs` | where to fetch signing keys |
+| `G2F_OIDC_TOKEN_URL` | `G2F_OIDC_JWKS_URL` with `/certs` → `/token`, else `<issuer>/protocol/openid-connect/token` | token endpoint for sign-in to [forms](triggers.md#form) |
 | `G2F_OIDC_CLIENT_ID` | `g2f` | client id (checked against `azp`/`aud`) |
 | `G2F_OIDC_GROUPS_CLAIM` | `groups` | see [Keycloak setup](sharing.md#keycloak-setup) |
 | `G2F_OIDC_ORG_CLAIM` | `org` | |

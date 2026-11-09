@@ -15,6 +15,7 @@ func RegisterBuiltins(r *Registry) error {
 		manualTrigger{},
 		scheduleTrigger{},
 		webhookTrigger{},
+		formTrigger{},
 		callTrigger{},
 		errorTrigger{},
 		httpNode{},

@@ -3,6 +3,7 @@ import { api } from "../api";
 import { connectAccount } from "../lib/connect";
 import { insertExpression, type ContentGroup } from "../lib/dynamicContent";
 import { DynamicContent } from "./DynamicContent";
+import { FormBuilder } from "./FormBuilder";
 import { isSecretRef, parseList, type Connection, type NodeDef, type ParamDef, type Workflow } from "../types";
 import type { FlowNodeData } from "./FlowNode";
 
@@ -140,6 +141,15 @@ function Field({
           />
           {label}
         </label>
+      );
+    case "formFields":
+      // Not wrapped in <label>: the builder holds many inputs.
+      return (
+        <div className="field">
+          {label}
+          <FormBuilder value={v} readOnly={readOnly} onChange={onChange} />
+          {def.description && <span className="field-desc">{def.description}</span>}
+        </div>
       );
     case "select":
       input = (

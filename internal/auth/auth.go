@@ -71,7 +71,11 @@ func (a *Authenticator) Authenticate(r *http.Request) (*User, error) {
 	if !ok || raw == "" {
 		return nil, fmt.Errorf("missing bearer token")
 	}
-	tok, err := a.verifier.Verify(r.Context(), raw)
+	return a.verify(r.Context(), raw)
+}
+
+func (a *Authenticator) verify(ctx context.Context, raw string) (*User, error) {
+	tok, err := a.verifier.Verify(ctx, raw)
 	if err != nil {
 		return nil, err
 	}

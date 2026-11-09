@@ -20,6 +20,9 @@ type OutputSchema struct {
 	// (its keys become fields) or a list of objects (the first one is used).
 	// Used where the node emits what the user configured (Set Fields, test payloads).
 	FromParam string `json:"fromParam,omitempty" yaml:"fromParam"`
+	// FormFieldsParam names a form-builder parameter (see ParamFormFields):
+	// each question's key becomes a field.
+	FormFieldsParam string `json:"formFieldsParam,omitempty" yaml:"-"`
 	// Fields lists the fields of each output item.
 	Fields []OutputField `json:"fields,omitempty" yaml:"fields"`
 	// Dynamic means the shape depends on code or another workflow and cannot

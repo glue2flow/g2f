@@ -6,9 +6,11 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/glue2flow/g2f/internal/config"
 	"github.com/glue2flow/g2f/internal/nodes"
 	"github.com/glue2flow/g2f/internal/trigger"
 	"github.com/glue2flow/g2f/internal/workflow"
+	"github.com/glue2flow/g2f/modules/email"
 )
 
 type triggerInfo struct {
@@ -19,6 +21,7 @@ type triggerInfo struct {
 	// (workflow active and node enabled). Manual triggers are always runnable.
 	Listening bool          `json:"listening"`
 	Webhook   *webhookInfo  `json:"webhook,omitempty"`
+	Form      *formInfo     `json:"form,omitempty"`
 	Schedule  *scheduleInfo `json:"schedule,omitempty"`
 	Poll      *pollInfo     `json:"poll,omitempty"`
 	Error     string        `json:"error,omitempty"`
@@ -30,6 +33,14 @@ type webhookInfo struct {
 	Auth    string `json:"auth"`
 	Header  string `json:"header,omitempty"`
 	Respond string `json:"respond"`
+}
+
+type formInfo struct {
+	URL        string `json:"url"`
+	Questions  int    `json:"questions"`
+	Protection string `json:"protection"`
+	// Warning explains why the protection cannot work as configured.
+	Warning string `json:"warning,omitempty"`
 }
 
 type scheduleInfo struct {
@@ -73,6 +84,24 @@ func (s *Server) listTriggers(w http.ResponseWriter, r *http.Request) {
 			info.Webhook = &webhookInfo{
 				URL: trigger.URL(s.cfg.PublicURL, wf.ID, n.ID), Method: cfg.Method,
 				Auth: cfg.Auth, Header: cfg.Header, Respond: cfg.Respond,
+			}
+		case nodes.TriggerForm:
+			f, err := nodes.ParseForm(n.Params)
+			if err != nil {
+				info.Error = err.Error()
+				break
+			}
+			info.Form = &formInfo{URL: trigger.FormURL(s.cfg.PublicURL, wf.ID, n.ID), Questions: len(f.Fields), Protection: f.Protection}
+			switch f.Protection {
+			case nodes.FormProtectEmail:
+				cfg, _, err := s.secrets.ModuleSettings(r.Context(), wf.OrgID, "email")
+				if err != nil || !email.Configured(cfg) {
+					info.Form.Warning = "E-mail is not configured: an admin must set the SMTP server in Plugins → Email → Settings. Until then the form is unavailable."
+				}
+			case nodes.FormProtectLogin:
+				if s.cfg.Auth.Mode == config.AuthNone {
+					info.Form.Warning = "Authentication is disabled on this server (G2F_AUTH_MODE=none): everyone answers as the development user."
+				}
 			}
 		case nodes.TriggerPoll:
 			d := nodes.PollInterval(n.Params)
