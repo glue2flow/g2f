@@ -24,7 +24,12 @@ type Manifest struct {
 	Version     string `yaml:"version"`
 	Description string `yaml:"description"`
 	Color       string `yaml:"color"`
-	Runtime     string `yaml:"runtime"` // http | wasm | go
+	// Icon is an SVG, PNG or WebP file next to the manifest (e.g.
+	// icons/gmail.svg), inline SVG markup, or a base64 data URI. See
+	// ResolveIcons; IconURI holds the validated data URI.
+	Icon    string `yaml:"icon"`
+	IconURI string `yaml:"-"`
+	Runtime string `yaml:"runtime"` // http | wasm | go
 
 	// Config declares settings for the plugin itself, configured once per
 	// organization by an admin (API tokens, client secrets, base URLs).
@@ -92,12 +97,15 @@ type OAuth2UserInfo struct {
 const ConnectionParam = "connection"
 
 type ManifestNode struct {
-	Type        string   `yaml:"type"`
-	Name        string   `yaml:"name"`
-	Description string   `yaml:"description"`
-	Params      []Param  `yaml:"params"`
-	Inputs      []string `yaml:"inputs"`  // default [main]
-	Outputs     []string `yaml:"outputs"` // default [main]
+	Type        string `yaml:"type"`
+	Name        string `yaml:"name"`
+	Description string `yaml:"description"`
+	// Icon overrides the module icon for this node (same formats).
+	Icon    string   `yaml:"icon"`
+	IconURI string   `yaml:"-"`
+	Params  []Param  `yaml:"params"`
+	Inputs  []string `yaml:"inputs"`  // default [main]
+	Outputs []string `yaml:"outputs"` // default [main]
 	// OutputSchema describes the emitted items, for the editor's field picker.
 	OutputSchema *OutputSchema `yaml:"outputSchema"`
 	// Trigger "poll" makes the node a polling trigger: it is checked every few
@@ -354,7 +362,7 @@ func normalizeParams(ps []Param, where string) error {
 func (m *Manifest) Info(source string) ModuleInfo {
 	return ModuleInfo{
 		Module: m.Module, Name: m.Name, Version: m.Version, Description: m.Description,
-		Color: m.Color, Runtime: m.Runtime, Source: source, Config: m.Config, Vars: m.Vars, AllowedHosts: m.AllowedHosts,
+		Color: m.Color, Icon: m.IconURI, Runtime: m.Runtime, Source: source, Config: m.Config, Vars: m.Vars, AllowedHosts: m.AllowedHosts,
 		OAuth2: m.OAuth2,
 	}
 }
@@ -377,7 +385,7 @@ func (m *Manifest) NodeDefinition(n ManifestNode, source string) Definition {
 	category := m.Name
 	return Definition{
 		Type: m.Module + "." + n.Type, Name: n.Name, Category: category, Description: n.Description,
-		Color: m.Color, Trigger: trigger, Inputs: n.Inputs, Outputs: n.Outputs, Params: params,
+		Color: m.Color, Icon: n.IconURI, Trigger: trigger, Inputs: n.Inputs, Outputs: n.Outputs, Params: params,
 		OutputSchema: n.OutputSchema, Module: m.Module, Source: source,
 	}
 }

@@ -67,7 +67,9 @@ compiled into glue2flow, e.g. [`modules/email`](../modules/email):
 module: telegram              # unique id, prefix of node types (telegram.sendMessage)
 name: Telegram
 version: 1.0.0
-runtime: wasm                 # http (default) | wasm
+color: "#229ED9"              # tile/border color in the editor
+icon: icon.svg                # optional, see "Icons" below
+runtime: wasm                 # http (default) | wasm | go
 wasm: plugin.wasm             # wasm: file inside the zip
 allowedHosts: [api.telegram.org]
 timeout: 20s                  # wasm: per node run (default 30s)
@@ -95,6 +97,28 @@ nodes:
 
 Config, vars and secret parameters are explained in [Secrets & plugin settings](secrets.md),
 OAuth2 (`oauth2:`) in [Connected accounts](connections.md).
+
+### Icons
+
+`icon` shows a logo instead of the colored tile with the plugin's first letter. It may be:
+
+- a file next to the manifest: `icon.svg`, `icons/logo.png` (in a plugin folder, a `.zip`
+  bundle, or the modules directory for single-file YAML modules such as
+  [`modules/github.yaml`](../modules/github.yaml) → `modules/icons/github.svg`);
+- inline SVG markup (`icon: |` followed by `<svg …>…</svg>`), the only option when a bare
+  `.yaml` file is imported;
+- a base64 `data:` URI.
+
+SVG, PNG and WebP are accepted (detected from the content), at most 32 KB; square images
+work best. A node can set its own `icon` to override the plugin's. Icons of imported plugins
+are stored with the plugin, so every replica shows them.
+
+The editor shows icons only as images (`<img>`), where browsers never run scripts. SVGs are
+checked anyway: scripts, event handlers, embedded documents and references to anything outside
+the file are refused.
+
+Without an icon, the node shows the plugin's color with the first letter of its name.
+Built-in nodes have their own line icons.
 
 ### Polling triggers
 

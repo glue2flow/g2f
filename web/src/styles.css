@@ -196,7 +196,19 @@ a.btn { color: var(--text); }
 .flow-node.st-success { box-shadow: 0 0 0 2px color-mix(in srgb, var(--success) 50%, transparent); }
 .flow-node.st-error { box-shadow: 0 0 0 2px color-mix(in srgb, var(--danger) 70%, transparent); }
 .flow-node.st-skipped { opacity: 0.6; }
-.flow-node-icon { width: 28px; height: 28px; border-radius: 6px; display: grid; place-items: center; background: var(--node-color); color: #fff; font-weight: 700; font-size: 13px; }
+.flow-node-icon { position: relative; flex: none; }
+/* Node and plugin icons (NodeIcon): built-in line icon or letter on the node color, plugin logo on a white tile. */
+.node-icon { display: inline-grid; place-items: center; flex: none; border-radius: 22%; box-sizing: border-box; line-height: 1; vertical-align: middle; }
+.node-icon-builtin, .node-icon-letter { background: var(--node-color); color: #fff; }
+.node-icon-letter { font-weight: 700; font-size: calc(var(--node-icon-size, 28px) * 0.46); }
+.node-icon-gate { font-weight: 700; font-size: 11px; letter-spacing: -0.5px; }
+.node-icon-image { background: #fff; border: 1.5px solid var(--node-color); padding: calc(var(--node-icon-size, 28px) * 0.12); }
+.node-icon-image img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.node-trigger-badge { position: absolute; right: -5px; bottom: -5px; width: 14px; height: 14px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+.palette-item .node-icon { margin-top: 1px; }
+.list-head .btn .node-icon { margin-right: 4px; }
+.row-icon { display: inline-flex; align-items: center; gap: 6px; }
 .flow-node-name { font-weight: 600; font-size: 13px; }
 .flow-node-type { font-size: 11px; color: var(--muted); }
 .flow-node-status { position: absolute; top: -9px; right: 8px; font-size: 10px; padding: 0 6px; border-radius: 8px; background: var(--surface); border: 1px solid var(--border); }

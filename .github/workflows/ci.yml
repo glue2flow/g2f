@@ -1,0 +1,213 @@
+name: CI
+
+# Pushes to main and all pull requests run the tests (other branches are
+# tested through their pull request, so they are not built twice).
+# A semver tag (v1.2.3 or 1.2.3, optionally with a pre-release like 1.2.3-rc.1)
+# additionally:
+#   - builds and pushes the Docker image to GHCR with the tag as g2f version,
+#   - bumps the version on main if the tag is greater than main's version.
+#   - creates a GitHub release for the tag (pre-release for -rc etc.).
+#
+# The g2f version lives in web/package.json (and web/package-lock.json).
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*.*.*", "[0-9]+.[0-9]+.[0-9]+*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: g2f
+          POSTGRES_PASSWORD: g2f
+          POSTGRES_DB: g2f
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U g2f -d g2f"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test (with PostgreSQL)
+        env:
+          G2F_TEST_DATABASE_URL: postgres://g2f:g2f@localhost:5432/g2f?sslmode=disable
+        run: go test -race ./...
+
+      - name: Install web dependencies
+        working-directory: web
+        run: npm ci --no-audit --no-fund
+
+      - name: Typecheck and build web
+        working-directory: web
+        run: npm run build
+
+  version:
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - name: Parse tag
+        id: v
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          version="${tag#v}"
+          if ! [[ "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Tag '$tag' is not a semver version"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  docker:
+    needs: [test, version]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - name: Set g2f version from tag
+        working-directory: web
+        run: npm version "${{ needs.version.outputs.version }}" --no-git-tag-version --allow-same-version
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=semver,pattern={{version}},value=${{ needs.version.outputs.version }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ needs.version.outputs.version }}
+            type=semver,pattern={{major}},value=${{ needs.version.outputs.version }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: VERSION=${{ needs.version.outputs.version }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  bump-main:
+    needs: [test, version]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: bump-main
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - name: Compare tag with main's version
+        id: cmp
+        working-directory: web
+        env:
+          NEW: ${{ needs.version.outputs.version }}
+        run: |
+          current="$(node -p "require('./package.json').version")"
+          echo "main: $current, tag: $NEW"
+
+          # Semver precedence: compare MAJOR.MINOR.PATCH, then a release beats
+          # a pre-release, then pre-releases compare by version sort.
+          # Build metadata (+...) is ignored.
+          gt() {
+            local a="${1%%+*}" b="${2%%+*}"
+            local ac="${a%%-*}" bc="${b%%-*}"
+            local ap="" bp=""
+            [[ "$a" == *-* ]] && ap="${a#*-}"
+            [[ "$b" == *-* ]] && bp="${b#*-}"
+            if [[ "$ac" != "$bc" ]]; then
+              [[ "$(printf '%s\n%s\n' "$ac" "$bc" | sort -V | tail -n1)" == "$ac" ]]
+              return
+            fi
+            [[ -z "$ap" && -z "$bp" ]] && return 1
+            [[ -z "$ap" ]] && return 0
+            [[ -z "$bp" ]] && return 1
+            [[ "$ap" != "$bp" && "$(printf '%s\n%s\n' "$ap" "$bp" | sort -V | tail -n1)" == "$ap" ]]
+          }
+
+          if gt "$NEW" "$current"; then
+            echo "bump=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Tag is not greater than main's version, nothing to bump."
+            echo "bump=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Bump version on main
+        if: steps.cmp.outputs.bump == 'true'
+        env:
+          NEW: ${{ needs.version.outputs.version }}
+        run: |
+          (cd web && npm version "$NEW" --no-git-tag-version)
+          git config user.name "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          git add web/package.json web/package-lock.json
+          git commit -m "Bump version to $NEW"
+          git push origin HEAD:main
+
+  release:
+    needs: [version, docker]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          args=(--repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes --verify-tag)
+          [[ "$VERSION" == *-* ]] && args+=(--prerelease)
+          gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
+            || gh release create "$GITHUB_REF_NAME" "${args[@]}" \
+                 --notes "Docker image: \`ghcr.io/${GITHUB_REPOSITORY}:${VERSION}\`"

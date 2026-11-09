@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 import { connectAccount } from "../lib/connect";
 import type { Connection, ModuleInfo, Scope, User } from "../types";
+import { NodeIcon } from "../components/NodeIcon";
 
 const scopeLabel: Record<Scope, string> = { private: "Only me", group: "Groups", org: "Organization" };
 
@@ -66,7 +67,7 @@ export function Connections({ user }: { user: User }) {
         <div className="spacer" />
         {modules.map((m) => (
           <button key={m.module} className="btn" onClick={() => connect(m.module)}>
-            <span className="dot" style={{ background: m.color }} /> Connect {m.name}
+            <NodeIcon module={m} size={18} /> Connect {m.name}
           </button>
         ))}
       </div>
@@ -106,7 +107,11 @@ export function Connections({ user }: { user: User }) {
                     <strong>{c.name}</strong>
                   )}
                 </td>
-                <td>{name(c.module)}</td>
+                <td>
+                  <span className="row-icon">
+                    <NodeIcon module={modules.find((m) => m.module === c.module)} size={18} /> {name(c.module)}
+                  </span>
+                </td>
                 <td className="muted">{c.account || "–"}</td>
                 <td>{c.ownerSub === user.sub ? "you" : c.ownerName}</td>
                 <td>

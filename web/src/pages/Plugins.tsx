@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { SecretField } from "../components/ParamPanel";
 import { SECRET_REF, type ClientConfig, type ConfigValue, type ModuleInfo, type User } from "../types";
+import { NodeIcon } from "../components/NodeIcon";
 
 export function Plugins({ user, config, onChanged }: { user: User; config: ClientConfig; onChanged: () => void }) {
   const [modules, setModules] = useState<ModuleInfo[]>();
@@ -81,7 +82,7 @@ export function Plugins({ user, config, onChanged }: { user: User; config: Clien
           {modules.map((m) => (
             <div key={m.module} className="card">
               <div className="card-head">
-                <span className="dot" style={{ background: m.color }} />
+                <NodeIcon module={m} size={22} />
                 <strong>{m.name}</strong>
                 {m.version && <span className="muted small">v{m.version}</span>}
                 <div className="spacer" />

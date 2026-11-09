@@ -103,17 +103,18 @@ func (s *Store) SetPluginConfig(ctx context.Context, org, module, by string, set
 
 // PluginRecord is an imported plugin.
 type PluginRecord struct {
-	Module      string    `json:"module"`
-	Version     string    `json:"version"`
-	Manifest    []byte    `json:"-"`
-	Wasm        []byte    `json:"-"`
-	SHA256      string    `json:"sha256"`
-	InstalledBy string    `json:"installedBy"`
-	InstalledAt time.Time `json:"installedAt"`
+	Module      string            `json:"module"`
+	Version     string            `json:"version"`
+	Manifest    []byte            `json:"-"`
+	Wasm        []byte            `json:"-"`
+	Icons       map[string]string `json:"-"` // icon files: path -> data URI
+	SHA256      string            `json:"sha256"`
+	InstalledBy string            `json:"installedBy"`
+	InstalledAt time.Time         `json:"installedAt"`
 }
 
 func (s *Store) ListPlugins(ctx context.Context) ([]*PluginRecord, error) {
-	rows, err := s.pool.Query(ctx, `SELECT module, version, manifest, wasm, sha256, installed_by, installed_at
+	rows, err := s.pool.Query(ctx, `SELECT module, version, manifest, wasm, icons, sha256, installed_by, installed_at
 		FROM plugins ORDER BY module`)
 	if err != nil {
 		return nil, err
@@ -123,7 +124,7 @@ func (s *Store) ListPlugins(ctx context.Context) ([]*PluginRecord, error) {
 	for rows.Next() {
 		var p PluginRecord
 		var manifest string
-		if err := rows.Scan(&p.Module, &p.Version, &manifest, &p.Wasm, &p.SHA256, &p.InstalledBy, &p.InstalledAt); err != nil {
+		if err := rows.Scan(&p.Module, &p.Version, &manifest, &p.Wasm, &p.Icons, &p.SHA256, &p.InstalledBy, &p.InstalledAt); err != nil {
 			return nil, err
 		}
 		p.Manifest = []byte(manifest)
@@ -151,12 +152,16 @@ func (s *Store) PluginDigests(ctx context.Context) (map[string]string, error) {
 }
 
 func (s *Store) SavePlugin(ctx context.Context, p *PluginRecord) error {
-	return s.pool.QueryRow(ctx, `INSERT INTO plugins (module, version, manifest, wasm, sha256, installed_by)
-		VALUES ($1,$2,$3,$4,$5,$6)
+	icons := p.Icons
+	if icons == nil {
+		icons = map[string]string{}
+	}
+	return s.pool.QueryRow(ctx, `INSERT INTO plugins (module, version, manifest, wasm, icons, sha256, installed_by)
+		VALUES ($1,$2,$3,$4,$5,$6,$7)
 		ON CONFLICT (module) DO UPDATE SET version=EXCLUDED.version, manifest=EXCLUDED.manifest,
-			wasm=EXCLUDED.wasm, sha256=EXCLUDED.sha256, installed_by=EXCLUDED.installed_by, installed_at=now()
+			wasm=EXCLUDED.wasm, icons=EXCLUDED.icons, sha256=EXCLUDED.sha256, installed_by=EXCLUDED.installed_by, installed_at=now()
 		RETURNING installed_at`,
-		p.Module, p.Version, string(p.Manifest), p.Wasm, p.SHA256, p.InstalledBy).Scan(&p.InstalledAt)
+		p.Module, p.Version, string(p.Manifest), p.Wasm, icons, p.SHA256, p.InstalledBy).Scan(&p.InstalledAt)
 }
 
 func (s *Store) DeletePlugin(ctx context.Context, module string) error {

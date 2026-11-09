@@ -83,15 +83,18 @@ type Param struct {
 
 // Definition is the public description of a node type served to the editor.
 type Definition struct {
-	Type        string      `json:"type"`
-	Name        string      `json:"name"`
-	Category    string      `json:"category"`
-	Description string      `json:"description"`
-	Color       string      `json:"color,omitempty"`
-	Trigger     TriggerKind `json:"trigger,omitempty"`
-	Inputs      []string    `json:"inputs"`
-	Outputs     []string    `json:"outputs"`
-	Params      []Param     `json:"params"`
+	Type        string `json:"type"`
+	Name        string `json:"name"`
+	Category    string `json:"category"`
+	Description string `json:"description"`
+	Color       string `json:"color,omitempty"`
+	// Icon is a data URI for nodes whose icon differs from their module's
+	// (ModuleInfo.Icon); usually empty.
+	Icon    string      `json:"icon,omitempty"`
+	Trigger TriggerKind `json:"trigger,omitempty"`
+	Inputs  []string    `json:"inputs"`
+	Outputs []string    `json:"outputs"`
+	Params  []Param     `json:"params"`
 	// DynamicOutputs makes the outputs depend on a parameter (e.g. Switch cases).
 	DynamicOutputs *DynamicOutputs `json:"dynamicOutputs,omitempty"`
 	// OutputSchema describes the emitted items (for the editor's field picker).
@@ -335,10 +338,11 @@ type ModuleInfo struct {
 	Version      string      `json:"version,omitempty"`
 	Description  string      `json:"description,omitempty"`
 	Color        string      `json:"color,omitempty"`
-	Runtime      string      `json:"runtime"` // builtin | http | wasm
-	Source       string      `json:"source"`  // builtin | file:<name> | imported
-	Config       []Param     `json:"config"`  // plugin-only settings per organization
-	Vars         []Param     `json:"vars"`    // per-organization values usable in node fields
+	Icon         string      `json:"icon,omitempty"` // data URI (SVG, PNG or WebP)
+	Runtime      string      `json:"runtime"`        // builtin | http | wasm | go
+	Source       string      `json:"source"`         // builtin | file:<name> | imported
+	Config       []Param     `json:"config"`         // plugin-only settings per organization
+	Vars         []Param     `json:"vars"`           // per-organization values usable in node fields
 	AllowedHosts []string    `json:"allowedHosts,omitempty"`
 	OAuth2       *OAuth2Spec `json:"oauth2,omitempty"`
 	Nodes        []string    `json:"nodes"`
