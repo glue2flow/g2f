@@ -71,7 +71,32 @@ export type ParamType =
   | "code"
   | "workflow"
   | "workflows"
-  | "connection";
+  | "connection"
+  | "formFields";
+
+/** One question of a Form Trigger (see internal/nodes/form.go). */
+export interface FormFieldDef {
+  key: string;
+  label: string;
+  type: "text" | "textarea" | "choice" | "multichoice";
+  required?: boolean;
+  options?: string[];
+  placeholder?: string;
+  help?: string;
+}
+
+const keyTranslit: Record<string, string> = { ä: "ae", ö: "oe", ü: "ue", ß: "ss", é: "e", è: "e", à: "a", ç: "c" };
+
+/** Derives a question key from its label, like nodes.FormKey: "E-mail address" → "e_mail_address". */
+export function formKey(label: string): string {
+  const s = label
+    .toLowerCase()
+    .replace(/[äöüßéèàç]/g, (c) => keyTranslit[c])
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  if (!s) return "field";
+  return /^[0-9]/.test(s) ? `q_${s}` : s;
+}
 
 export interface ParamDef {
   name: string;
@@ -92,7 +117,7 @@ export interface NodeDef {
   category: string;
   description: string;
   color?: string;
-  trigger?: "manual" | "schedule" | "webhook" | "call" | "error" | "poll";
+  trigger?: "manual" | "schedule" | "webhook" | "form" | "call" | "error" | "poll";
   dynamicOutputs?: { param: string; extra?: string[] };
   inputs: string[];
   outputs: string[];
@@ -110,6 +135,8 @@ export interface OutputSchema {
   passthroughIf?: string;
   /** A parameter whose value (object, or list of objects) describes the items. */
   fromParam?: string;
+  /** A form-builder parameter: each question's key becomes a field. */
+  formFieldsParam?: string;
   fields?: OutputField[];
   /** Shape depends on code or another workflow: only run data can tell. */
   dynamic?: boolean;
@@ -177,10 +204,11 @@ export const atLeast = (r: Role | undefined, min: Role) => !!r && roleRank[r] >=
 export interface TriggerInfo {
   nodeId: string;
   name: string;
-  kind: "manual" | "schedule" | "webhook" | "call" | "error" | "poll";
+  kind: "manual" | "schedule" | "webhook" | "form" | "call" | "error" | "poll";
   listening: boolean;
   error?: string;
   webhook?: { url: string; method: string; auth: "none" | "token" | "hmac"; header?: string; respond: string };
+  form?: { url: string; questions: number };
   schedule?: { mode: "cron" | "once"; timezone: string; next: string[] };
   poll?: { intervalMinutes: number; next: string };
 }

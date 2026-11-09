@@ -17,7 +17,7 @@ export function TriggerInfo({ workflow, nodeId, data, dirty }: Props) {
   const [info, setInfo] = useState<Info>();
 
   useEffect(() => {
-    if (kind !== "webhook" && kind !== "schedule" && kind !== "poll") return;
+    if (kind !== "webhook" && kind !== "form" && kind !== "schedule" && kind !== "poll") return;
     api
       .triggers(workflow.id)
       .then((list) => setInfo(list.find((t) => t.nodeId === nodeId)))
@@ -54,7 +54,7 @@ export function TriggerInfo({ workflow, nodeId, data, dirty }: Props) {
   if (kind === "manual") {
     return <div className="info-box">Select this node and click ▶ Run to start the workflow from here.</div>;
   }
-  if (kind !== "webhook" && kind !== "schedule" && kind !== "poll") return null;
+  if (kind !== "webhook" && kind !== "form" && kind !== "schedule" && kind !== "poll") return null;
   if (!info) {
     return <div className="info-box">{dirty ? "Save the workflow to activate this trigger." : "Loading…"}</div>;
   }
@@ -104,6 +104,37 @@ export function TriggerInfo({ workflow, nodeId, data, dirty }: Props) {
           <summary className="small">curl example</summary>
           <pre className="json">{curl}</pre>
         </details>
+      </div>
+    );
+  }
+
+  if (info.form) {
+    const f = info.form;
+    return (
+      <div className="info-box">
+        <div className="row">
+          {status}
+          <span className="chip">
+            {f.questions} question{f.questions === 1 ? "" : "s"}
+          </span>
+        </div>
+        <div className="field-label" style={{ marginTop: 6 }}>
+          Form URL{dirty && <span className="muted"> (saved version)</span>}
+        </div>
+        <div className="row">
+          <code className="url">{f.url}</code>
+          <button className="btn small" onClick={() => navigator.clipboard?.writeText(f.url)}>
+            Copy
+          </button>
+          <a className="btn small" href={f.url} target="_blank" rel="noreferrer">
+            Open
+          </a>
+        </div>
+        <p className="small" style={{ margin: "6px 0 0" }}>
+          Anyone with the link can answer while the workflow is active. Each submission starts a run with one item: the
+          answers by question key, plus <code>submittedAt</code>. Add <code>?key=value</code> to the link to prefill
+          answers.
+        </p>
       </div>
     );
   }

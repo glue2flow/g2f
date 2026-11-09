@@ -9,6 +9,7 @@ export default defineConfig({
     proxy: {
       "/api": "http://localhost:8080",
       "/webhook": "http://localhost:8080",
+      "/form": "http://localhost:8080",
     },
   },
 });

@@ -124,6 +124,7 @@ func run(log *slog.Logger) error {
 		Config: cfg, Store: st, Registry: reg, Engine: eng, Auth: authn, Logger: log,
 		Listener: sched,
 		Webhooks: trigger.NewWebhookHandler(st, eng, reg, sec, log, cfg.WebhookMaxWait),
+		Forms:    trigger.NewFormHandler(st, eng, reg, log),
 		Resume:   trigger.NewResumeHandler(signer, eng, log),
 		Secrets:  sec,
 		Plugins:  plugins,

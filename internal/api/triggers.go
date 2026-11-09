@@ -19,6 +19,7 @@ type triggerInfo struct {
 	// (workflow active and node enabled). Manual triggers are always runnable.
 	Listening bool          `json:"listening"`
 	Webhook   *webhookInfo  `json:"webhook,omitempty"`
+	Form      *formInfo     `json:"form,omitempty"`
 	Schedule  *scheduleInfo `json:"schedule,omitempty"`
 	Poll      *pollInfo     `json:"poll,omitempty"`
 	Error     string        `json:"error,omitempty"`
@@ -30,6 +31,11 @@ type webhookInfo struct {
 	Auth    string `json:"auth"`
 	Header  string `json:"header,omitempty"`
 	Respond string `json:"respond"`
+}
+
+type formInfo struct {
+	URL       string `json:"url"`
+	Questions int    `json:"questions"`
 }
 
 type scheduleInfo struct {
@@ -74,6 +80,13 @@ func (s *Server) listTriggers(w http.ResponseWriter, r *http.Request) {
 				URL: trigger.URL(s.cfg.PublicURL, wf.ID, n.ID), Method: cfg.Method,
 				Auth: cfg.Auth, Header: cfg.Header, Respond: cfg.Respond,
 			}
+		case nodes.TriggerForm:
+			f, err := nodes.ParseForm(n.Params)
+			if err != nil {
+				info.Error = err.Error()
+				break
+			}
+			info.Form = &formInfo{URL: trigger.FormURL(s.cfg.PublicURL, wf.ID, n.ID), Questions: len(f.Fields)}
 		case nodes.TriggerPoll:
 			d := nodes.PollInterval(n.Params)
 			info.Poll = &pollInfo{IntervalMinutes: d.Minutes(), Next: time.Now().Truncate(d).Add(d)}

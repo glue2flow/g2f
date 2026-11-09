@@ -9,6 +9,7 @@ Every workflow starts at a trigger node. A workflow may have several triggers.
 | **Manual** | a user with role `runner`+ clicks ▶ Run, or `POST /api/workflows/{id}/run` | the node's test payload (or `items` from the request body) |
 | **Schedule** | the workflow is **active** and the time is due | `{firedAt, scheduledAt, timezone}` |
 | **Webhook** | the workflow is **active** and `/webhook/{workflowId}/{nodeId}` is called | `{method, headers, query, body, receivedAt}` |
+| **Form** | the workflow is **active** and someone submits the form at `/form/{workflowId}/{nodeId}` | the answers by question key, plus `submittedAt` |
 | **Called by Workflow** | an [Execute Workflow](nodes.md#execute-workflow) node of another workflow calls it | the caller's items |
 | **Error Trigger** | a watched workflow fails | `{workflow, execution, failedNode, error}` |
 | **Polling triggers** (Email Received, Gmail / Outlook New Email, …) | the workflow is **active** and a periodic check finds new items | one item per new item, e.g. per e-mail |
@@ -68,6 +69,30 @@ YAML plugins can declare their own polling triggers, see [Plugins](plugins.md#po
 curl -X POST http://localhost:8080/webhook/<workflow-id>/<node-id> \
   -H 'X-G2F-Token: s3cret' -H 'Content-Type: application/json' -d '{"name":"Ada"}'
 ```
+
+## Form
+
+Publishes a simple web form, like a very small Microsoft Forms or LimeSurvey. Share the
+*Form URL* shown in the editor; every submission starts one run.
+
+- Question types: *Short text*, *Long text*, *Single choice* (radio buttons) and
+  *Multiple choice* (checkboxes). Each question can be required and have a help text.
+- Each answer becomes a field of the output item, named by the question's *key* (derived from
+  the label, editable): text and single choice as a string (empty if unanswered), multiple
+  choice as an array in the configured order. `submittedAt` is added.
+
+  ```json
+  {"name": "Ada", "food": "Sushi", "diet": ["Vegan"], "comment": "", "submittedAt": "2026-11-09T10:00:00Z"}
+  ```
+- Answers are checked on the server: required questions, choices must be one of the options,
+  at most 1,000 characters for short and 10,000 for long text. Invalid submissions show the
+  form again with the answers kept and do not start a run.
+- After submitting, the page shows the *Message after submitting* (with a link to answer
+  again). Reloading does not submit twice.
+- Query parameters prefill answers: `…/form/<workflow-id>/<node-id>?team=Sales`.
+- Anyone who has the link can answer; there is no sign-in. Deactivate the workflow to close
+  the form. The page uses no JavaScript and works on phones.
+- ▶ Run in the editor emits one sample answer per question.
 
 ## Called by Workflow
 

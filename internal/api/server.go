@@ -42,6 +42,7 @@ type Server struct {
 	log      *slog.Logger
 	listener ChangeListener
 	webhooks http.Handler
+	forms    http.Handler
 	resume   http.Handler
 	secrets  *secrets.Service
 	plugins  *plugin.Manager
@@ -59,6 +60,8 @@ type Deps struct {
 	Listener ChangeListener
 	// Webhooks handles /webhook/*; optional.
 	Webhooks http.Handler
+	// Forms handles /form/* (form triggers); optional.
+	Forms http.Handler
 	// Resume handles /webhook-resume/* (Wait nodes); optional.
 	Resume  http.Handler
 	Secrets *secrets.Service
@@ -69,7 +72,7 @@ type Deps struct {
 func New(d Deps) *Server {
 	return &Server{
 		cfg: d.Config, store: d.Store, reg: d.Registry, engine: d.Engine,
-		auth: d.Auth, log: d.Logger, listener: d.Listener, webhooks: d.Webhooks,
+		auth: d.Auth, log: d.Logger, listener: d.Listener, webhooks: d.Webhooks, forms: d.Forms,
 		secrets: d.Secrets, plugins: d.Plugins, resume: d.Resume, oauth: d.OAuth,
 	}
 }
@@ -120,6 +123,9 @@ func (s *Server) Handler() http.Handler {
 	if s.webhooks != nil {
 		r.Handle("/webhook/*", s.webhooks)
 	}
+	if s.forms != nil {
+		r.Handle("/form/*", s.forms)
+	}
 	if s.resume != nil {
 		r.Handle("/webhook-resume/*", s.resume)
 	}
@@ -134,7 +140,8 @@ func (s *Server) requestLogger(next http.Handler) http.Handler {
 		ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
 		start := time.Now()
 		next.ServeHTTP(ww, r)
-		if strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/webhook/") {
+		if strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/webhook/") ||
+			strings.HasPrefix(r.URL.Path, "/form/") {
 			s.log.Info("http", "method", r.Method, "path", r.URL.Path, "status", ww.Status(),
 				"duration", time.Since(start).Round(time.Millisecond))
 		}

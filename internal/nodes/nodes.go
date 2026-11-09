@@ -31,6 +31,8 @@ const (
 	TriggerManual   TriggerKind = "manual"
 	TriggerSchedule TriggerKind = "schedule"
 	TriggerWebhook  TriggerKind = "webhook"
+	// TriggerForm serves a public HTML form; each submission starts a run.
+	TriggerForm TriggerKind = "form"
 )
 
 type ParamType string
@@ -53,6 +55,8 @@ const (
 	ParamConnection ParamType = "connection"
 	// ParamDateTime is a local date-time string "YYYY-MM-DDTHH:MM".
 	ParamDateTime ParamType = "datetime"
+	// ParamFormFields is the question list of a form trigger (editor shows a form builder).
+	ParamFormFields ParamType = "formFields"
 )
 
 type Option struct {

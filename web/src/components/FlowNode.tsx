@@ -13,7 +13,7 @@ export interface FlowNodeData extends Record<string, unknown> {
 
 export type FlowNodeType = Node<FlowNodeData, "g2f">;
 
-const triggerIcon: Record<string, string> = { manual: "▶", schedule: "⏱", webhook: "⚡", call: "↪", error: "⚠" };
+const triggerIcon: Record<string, string> = { manual: "▶", schedule: "⏱", webhook: "⚡", form: "☰", call: "↪", error: "⚠" };
 
 export function FlowNode({ data, selected }: NodeProps<FlowNodeType>) {
   const def = data.def;

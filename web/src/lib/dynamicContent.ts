@@ -7,7 +7,7 @@
 
 import type { Edge } from "@xyflow/react";
 import type { FlowNodeType } from "../components/FlowNode";
-import type { Execution, OutputField, ParamDef } from "../types";
+import { formKey, type Execution, type FormFieldDef, type OutputField, type ParamDef } from "../types";
 
 export type Segment = string | number;
 
@@ -129,6 +129,20 @@ export function nodeFields(id: string, ctx: Context, seen = new Set<string>()): 
   };
 
   if (schema.fromParam) fromParam(schema.fromParam, []);
+  if (schema.formFieldsParam) {
+    const qs = param(schema.formFieldsParam);
+    if (Array.isArray(qs))
+      merge(
+        out,
+        (qs as FormFieldDef[])
+          .filter((q) => q && (q.key || q.label))
+          .map((q) => ({
+            path: [q.key || formKey(q.label)],
+            type: q.type === "multichoice" ? "array" : "string",
+            description: q.label,
+          })),
+      );
+  }
   for (const f of schema.fields ?? []) {
     merge(out, [declared(f)]);
     if (f.fromParam) fromParam(f.fromParam, f.path.split("."));
