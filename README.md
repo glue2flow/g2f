@@ -14,7 +14,6 @@
   <a href="docs/getting-started.md">Get started</a> ·
   <a href="docs/README.md">Documentation</a> ·
   <a href="docs/plugins.md">Plugins</a> ·
-  <a href="#status">Status</a> ·
   <a href="#roadmap">Roadmap</a>
 </p>
 
@@ -74,30 +73,6 @@ docker compose up --build
 
 Open http://localhost:8080 and sign in as `alice` / `alice`. More demo users and local
 development without Docker: **[Getting started](docs/getting-started.md)**.
-
-## Status
-
-glue2flow is **in active development** and not yet 1.0. It works end to end, but expect
-breaking changes to APIs and manifests before a stable release. The `docker-compose.yml`
-setup is a demo with default passwords.
-
-| Area | State |
-| --- | --- |
-| Visual editor, executions view, run log | ✅ Working |
-| Triggers: manual, schedule, webhook, sub-workflow, error | ✅ Working |
-| Core nodes, logic gates, sub-workflows and loops | ✅ Working |
-| Wait / human approval (persistent, replica-safe) | ✅ Working |
-| ⚡ Dynamic content with output schemas | ✅ New |
-| Keycloak / OIDC sign-in, sharing by groups and organizations | ✅ Working |
-| Encrypted secrets, plugin config and vars, key rotation | ✅ Working |
-| Plugins: YAML/HTTP and WebAssembly, runtime import | ✅ Working |
-| Connected OAuth2 accounts | ✅ Working (Gmail, Google Sheets, Outlook, Teams included) |
-| Email over SMTP/IMAP (native Go module) | ✅ New |
-| Polling triggers, Remove Duplicates, Data Store | ✅ New |
-| Data nodes: Filter, Sort, Split Out, Aggregate, Date & Time, CSV, … | ✅ New |
-| Code node in an isolated process with a memory limit | ✅ New |
-| Several replicas: executions survive restarts, crashes and rolling deploys | ✅ New |
-| Workflow history, import/export | 🗺️ Planned |
 
 ## Roadmap
 
