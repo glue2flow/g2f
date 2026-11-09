@@ -5,6 +5,7 @@ name: CI
 # additionally:
 #   - builds and pushes the Docker image to GHCR with the tag as g2f version,
 #   - bumps the version on main if the tag is greater than main's version.
+#   - creates a GitHub release for the tag (pre-release for -rc etc.).
 #
 # The g2f version lives in web/package.json (and web/package-lock.json).
 
@@ -192,3 +193,20 @@ jobs:
           git add web/package.json web/package-lock.json
           git commit -m "Bump version to $NEW"
           git push origin HEAD:main
+
+  release:
+    needs: [version, docker]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          args=(--repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes --verify-tag)
+          [[ "$VERSION" == *-* ]] && args+=(--prerelease)
+          gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
+            || gh release create "$GITHUB_REF_NAME" "${args[@]}" \
+                 --notes "Docker image: \`ghcr.io/${GITHUB_REPOSITORY}:${VERSION}\`"

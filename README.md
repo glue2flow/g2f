@@ -10,6 +10,7 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/glue2flow/g2f/releases/latest">Latest release</a> ·
   <a href="docs/getting-started.md">Get started</a> ·
   <a href="docs/README.md">Documentation</a> ·
   <a href="docs/plugins.md">Plugins</a> ·
@@ -18,6 +19,8 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/glue2flow/g2f/actions/workflows/ci.yml"><img src="https://github.com/glue2flow/g2f/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
+  <a href="https://github.com/glue2flow/g2f/releases/latest"><img src="https://img.shields.io/github/v/release/glue2flow/g2f?sort=semver" alt="Latest release"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
 </p>
 
