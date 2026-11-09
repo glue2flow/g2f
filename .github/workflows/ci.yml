@@ -1,6 +1,7 @@
 name: CI
 
-# Every push and pull request runs the tests.
+# Pushes to main and all pull requests run the tests (other branches are
+# tested through their pull request, so they are not built twice).
 # A semver tag (v1.2.3 or 1.2.3, optionally with a pre-release like 1.2.3-rc.1)
 # additionally:
 #   - builds and pushes the Docker image to GHCR with the tag as g2f version,
@@ -11,7 +12,7 @@ name: CI
 
 on:
   push:
-    branches: ["**"]
+    branches: [main]
     tags: ["v*.*.*", "[0-9]+.[0-9]+.[0-9]+*"]
   pull_request:
   workflow_dispatch:
