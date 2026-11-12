@@ -18,7 +18,7 @@ valid access token while a node runs.
 | --- | --- |
 | Storage | Access and refresh tokens are encrypted (AES-256-GCM) and never returned by the API. |
 | Refresh | Tokens are refreshed shortly before they expire. The connection row is locked during a refresh, so parallel runs and replicas refresh only once; providers that rotate refresh tokens keep working. |
-| Flow security | Authorization code flow with PKCE (`pkce: true`). The `state` is an encrypted, 10-minute blob bound to the user, plugin and PKCE verifier, so no server-side session is needed. |
+| Flow security | Authorization code flow with PKCE (`pkce: true`). The `state` is an encrypted, 10-minute blob bound to the user, plugin and PKCE verifier, so no server-side session is needed. The flow is also bound to the browser that started it by a short-lived `HttpOnly` cookie (`g2f_oauth`) whose hash is stored in the state, so a provider link forwarded to someone else cannot be completed. |
 | Token delivery | HTTP plugins: added as `Authorization` header (or `{{ oauth.accessToken }}` in manifest templates), **only for `apiHosts`**. Requests to any other host are refused. WASM plugins: `input.oauth.accessToken`. Node fields cannot read the token. |
 | Sharing | A connection belongs to whoever connected it and is *Only me*, shared with *Groups*, or the *Organization*. Selecting an account in a node requires access to it. Co-editors can still save workflows using someone else's account if they do not change that selection. Only the owner or an org admin can rename, share or remove it. |
 | Errors | Known token values are scrubbed from error messages. |

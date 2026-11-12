@@ -5,13 +5,15 @@
 // the user consents at the provider, the provider redirects to
 // {publicUrl}/oauth/callback, and the code is exchanged for tokens which are
 // stored encrypted as a connection. The OAuth state is stateless: it is an
-// encrypted, expiring blob bound to the user, module and PKCE verifier.
+// encrypted, expiring blob bound to the user, module and PKCE verifier, and to
+// the initiating browser through a nonce cookie (see CookieName).
 package oauth
 
 import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -35,6 +37,13 @@ const (
 	refreshMargin = 60 * time.Second
 	stateAAD      = "oauth-state"
 )
+
+// CookieName is the cookie that binds a flow to the browser that started it.
+// Its value is the nonce returned by AuthorizeURL; the state only holds a hash.
+const CookieName = "g2f_oauth"
+
+// StateTTL is how long a started flow stays valid (also the cookie lifetime).
+const StateTTL = stateTTL
 
 var ErrNotFound = errors.New("connection not found")
 
@@ -79,6 +88,7 @@ type flowState struct {
 	Module   string    `json:"module"`
 	Name     string    `json:"name"`
 	Verifier string    `json:"verifier,omitempty"`
+	Nonce    string    `json:"nonce"` // base64url sha256 of the browser cookie value
 	Expires  time.Time `json:"exp"`
 }
 
@@ -104,20 +114,28 @@ func (m *Manager) appCredentials(ctx context.Context, org, module string, spec *
 	return c, nil
 }
 
-// AuthorizeURL starts the flow for u and returns the provider URL to open.
-func (m *Manager) AuthorizeURL(ctx context.Context, u *auth.User, module, name string) (string, error) {
+func nonceHash(nonce string) string {
+	sum := sha256.Sum256([]byte(nonce))
+	return base64.RawURLEncoding.EncodeToString(sum[:])
+}
+
+// AuthorizeURL starts the flow for u and returns the provider URL to open and
+// a nonce. The caller must hand the nonce to the initiating browser as the
+// CookieName cookie and pass it back to Callback.
+func (m *Manager) AuthorizeURL(ctx context.Context, u *auth.User, module, name string) (authURL, nonce string, err error) {
 	info, spec, err := m.spec(module)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	app, err := m.appCredentials(ctx, u.Org, module, spec)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	if name = strings.TrimSpace(name); name == "" {
 		name = info.Name + " account"
 	}
-	st := flowState{Sub: u.Sub, Owner: u.Name, Org: u.Org, Module: module, Name: name, Expires: m.now().Add(stateTTL)}
+	nonce = randomString(32)
+	st := flowState{Sub: u.Sub, Owner: u.Name, Org: u.Org, Module: module, Name: name, Nonce: nonceHash(nonce), Expires: m.now().Add(stateTTL)}
 	q := url.Values{
 		"response_type": {"code"},
 		"client_id":     {app.id},
@@ -138,18 +156,19 @@ func (m *Manager) AuthorizeURL(ctx context.Context, u *auth.User, module, name s
 	raw, _ := json.Marshal(st)
 	sealed, err := m.box.Seal(string(raw), stateAAD)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	q.Set("state", sealed)
 	sep := "?"
 	if strings.Contains(spec.AuthorizeURL, "?") {
 		sep = "&"
 	}
-	return spec.AuthorizeURL + sep + q.Encode(), nil
+	return spec.AuthorizeURL + sep + q.Encode(), nonce, nil
 }
 
-// Callback completes the flow and stores the new connection.
-func (m *Manager) Callback(ctx context.Context, code, state string) (*store.Connection, error) {
+// Callback completes the flow and stores the new connection. nonce is the
+// value of the CookieName cookie the browser sent; it must match the flow.
+func (m *Manager) Callback(ctx context.Context, code, state, nonce string) (*store.Connection, error) {
 	raw, err := m.box.Open(state, stateAAD)
 	if err != nil {
 		return nil, errors.New("invalid or tampered state")
@@ -160,6 +179,9 @@ func (m *Manager) Callback(ctx context.Context, code, state string) (*store.Conn
 	}
 	if m.now().After(st.Expires) {
 		return nil, errors.New("the sign-in took too long, please try again")
+	}
+	if nonce == "" || subtle.ConstantTimeCompare([]byte(nonceHash(nonce)), []byte(st.Nonce)) != 1 {
+		return nil, errors.New("this sign-in was started in another browser, please start again from the Connections page")
 	}
 	_, spec, err := m.spec(st.Module)
 	if err != nil {

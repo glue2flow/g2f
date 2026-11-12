@@ -167,7 +167,7 @@ nodes:
 func connect(t *testing.T, mgr *Manager, p *fakeProvider) *store.Connection {
 	t.Helper()
 	u := &auth.User{Sub: "bob", Name: "Bob", Org: "acme"}
-	raw, err := mgr.AuthorizeURL(context.Background(), u, "sheets", "My sheets")
+	raw, nonce, err := mgr.AuthorizeURL(context.Background(), u, "sheets", "My sheets")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +178,7 @@ func connect(t *testing.T, mgr *Manager, p *fakeProvider) *store.Connection {
 		t.Fatalf("authorize URL %s", raw)
 	}
 	p.challenge = q.Get("code_challenge")
-	c, err := mgr.Callback(context.Background(), "good-code", q.Get("state"))
+	c, err := mgr.Callback(context.Background(), "good-code", q.Get("state"), nonce)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -234,20 +234,20 @@ func TestAuthorizeCallbackAndRefresh(t *testing.T) {
 func TestCallbackRejects(t *testing.T) {
 	p := newProvider(t)
 	mgr, _ := setup(t, p)
-	if _, err := mgr.Callback(context.Background(), "good-code", "garbage"); err == nil {
+	if _, err := mgr.Callback(context.Background(), "good-code", "garbage", "n"); err == nil {
 		t.Fatal("tampered state accepted")
 	}
 	u := &auth.User{Sub: "bob", Org: "acme"}
-	raw, _ := mgr.AuthorizeURL(context.Background(), u, "sheets", "")
+	raw, nonce, _ := mgr.AuthorizeURL(context.Background(), u, "sheets", "")
 	au, _ := url.Parse(raw)
 	p.challenge = au.Query().Get("code_challenge")
-	if _, err := mgr.Callback(context.Background(), "bad-code", au.Query().Get("state")); err == nil ||
+	if _, err := mgr.Callback(context.Background(), "bad-code", au.Query().Get("state"), nonce); err == nil ||
 		!strings.Contains(err.Error(), "bad code") {
 		t.Fatalf("bad code: %v", err)
 	}
 	// Expired state.
 	mgr.now = func() time.Time { return time.Now().Add(stateTTL + time.Minute) }
-	if _, err := mgr.Callback(context.Background(), "good-code", au.Query().Get("state")); err == nil {
+	if _, err := mgr.Callback(context.Background(), "good-code", au.Query().Get("state"), nonce); err == nil {
 		t.Fatal("expired state accepted")
 	}
 }
@@ -256,8 +256,37 @@ func TestAuthorizeNeedsAppCredentials(t *testing.T) {
 	p := newProvider(t)
 	mgr, _ := setup(t, p)
 	mgr.settings = settings{}
-	_, err := mgr.AuthorizeURL(context.Background(), &auth.User{Org: "acme"}, "sheets", "")
+	_, _, err := mgr.AuthorizeURL(context.Background(), &auth.User{Org: "acme"}, "sheets", "")
 	if err == nil || !strings.Contains(err.Error(), "admin") {
 		t.Fatalf("expected admin hint, got %v", err)
+	}
+}
+
+func TestCallbackBindsBrowser(t *testing.T) {
+	p := newProvider(t)
+	mgr, st := setup(t, p)
+	u := &auth.User{Sub: "bob", Org: "acme"}
+	raw, nonce, err := mgr.AuthorizeURL(context.Background(), u, "sheets", "")
+	if err != nil || len(nonce) < 16 {
+		t.Fatalf("nonce %q %v", nonce, err)
+	}
+	au, _ := url.Parse(raw)
+	state := au.Query().Get("state")
+	p.challenge = au.Query().Get("code_challenge")
+
+	for _, bad := range []string{"", "wrong-nonce"} {
+		_, err := mgr.Callback(context.Background(), "good-code", state, bad)
+		if err == nil || !strings.Contains(err.Error(), "another browser") {
+			t.Fatalf("nonce %q: %v", bad, err)
+		}
+	}
+	st.mu.Lock()
+	n := len(st.conns)
+	st.mu.Unlock()
+	if n != 0 {
+		t.Fatalf("%d connections created by rejected callbacks", n)
+	}
+	if _, err := mgr.Callback(context.Background(), "good-code", state, nonce); err != nil {
+		t.Fatalf("right nonce: %v", err)
 	}
 }
