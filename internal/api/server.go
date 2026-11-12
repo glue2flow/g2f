@@ -79,7 +79,7 @@ func New(d Deps) *Server {
 
 func (s *Server) Handler() http.Handler {
 	r := chi.NewRouter()
-	r.Use(middleware.RequestID, middleware.RealIP, s.requestLogger, middleware.Recoverer)
+	r.Use(middleware.RequestID, clientIPMiddleware(s.cfg.TrustedProxies), s.requestLogger, middleware.Recoverer)
 
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		if err := s.store.Pool().Ping(r.Context()); err != nil {

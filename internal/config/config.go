@@ -3,6 +3,7 @@ package config
 
 import (
 	"fmt"
+	"net/netip"
 	"os"
 	"strconv"
 	"strings"
@@ -33,6 +34,9 @@ type Config struct {
 	SecretKeysOld []string
 	// PluginSync is how often imported plugins are re-read from the database.
 	PluginSync time.Duration
+	// TrustedProxies are the reverse proxies whose X-Forwarded-For header is
+	// believed when determining client addresses (rate limits, logs).
+	TrustedProxies []netip.Prefix
 	// DisableCodeNode turns off the JavaScript Code node.
 	DisableCodeNode bool
 	// CodeMemoryMB limits the memory of Code node scripts (0: no limit,
@@ -123,6 +127,9 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("G2F_WEBHOOK_MAX_WAIT: %w", err)
 	}
 
+	if c.TrustedProxies, err = parseProxies(env("G2F_TRUSTED_PROXIES", "")); err != nil {
+		return nil, fmt.Errorf("G2F_TRUSTED_PROXIES: %w", err)
+	}
 	if c.PluginSync, err = time.ParseDuration(env("G2F_PLUGIN_SYNC", "30s")); err != nil {
 		return nil, fmt.Errorf("G2F_PLUGIN_SYNC: %w", err)
 	}
@@ -185,4 +192,22 @@ func splitList(s string) []string {
 		}
 	}
 	return out
+}
+
+// parseProxies parses a comma separated list of CIDRs and single IPs.
+func parseProxies(s string) ([]netip.Prefix, error) {
+	var out []netip.Prefix
+	for _, p := range splitList(s) {
+		if pre, err := netip.ParsePrefix(p); err == nil {
+			out = append(out, pre.Masked())
+			continue
+		}
+		ip, err := netip.ParseAddr(p)
+		if err != nil {
+			return nil, fmt.Errorf("%q is not an IP address or CIDR range", p)
+		}
+		ip = ip.Unmap()
+		out = append(out, netip.PrefixFrom(ip, ip.BitLen()))
+	}
+	return out, nil
 }

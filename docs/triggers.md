@@ -117,7 +117,7 @@ Publishes a simple web form, like a very small Microsoft Forms or LimeSurvey. Sh
   the editor warns. *Allowed e-mail domains* (e.g. `example.com`) restricts which addresses
   can request a code; subdomains are included. A code is valid for 15 minutes and once; after
   5 wrong tries a new one is needed. Each address can request 5 codes per hour, each client
-  IP 20.
+  IP 20 (see `G2F_TRUSTED_PROXIES` behind a reverse proxy), and a form 200 in total.
 - After signing in or confirming the address, the browser remembers it for 12 hours for this
   form (an HTTP-only cookie). *Not you?* forgets a confirmed address.
 - Tokens and cookies are signed with a key derived from `G2F_SECRET_KEY`; one-time use and

@@ -32,6 +32,7 @@ const (
 	codeTriesPerCode   = 5
 	codesPerEmailHour  = 5
 	codesPerClientHour = 20
+	codesPerFormHour   = 200
 )
 
 // FormState is the shared state used for one-time tokens and rate limits
