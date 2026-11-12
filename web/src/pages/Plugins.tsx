@@ -207,8 +207,11 @@ function ConfigDialog({
                     )}
                   </p>
                   <div className="form">
-                    {list.map((v) => (
-                      <label key={v.name} className="field">
+                    {list.map((v) => {
+                      // Secret fields hold a button; keep them out of the <label> (see ParamPanel Field).
+                      const Wrap = v.type === "secret" ? "div" : "label";
+                      return (
+                      <Wrap key={v.name} className="field">
                         <span className="field-label">
                           {v.label}
                           {v.required && <span className="req">*</span>}
@@ -250,8 +253,9 @@ function ConfigDialog({
                             Use as <code>{`{{ vars.${v.name} }}`}</code>
                           </span>
                         )}
-                      </label>
-                    ))}
+                      </Wrap>
+                      );
+                    })}
                   </div>
                 </section>
               );
