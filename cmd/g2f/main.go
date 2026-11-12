@@ -114,7 +114,7 @@ func run(log *slog.Logger) error {
 	defer stopRecovery()
 	go eng.RunRecovery(recoveryCtx, cfg.InstanceTimeout)
 
-	sched := trigger.NewScheduler(st, eng, reg, log, trigger.SchedulerOptions{CatchUp: cfg.ScheduleCatchUp})
+	sched := trigger.NewScheduler(st, eng, reg, log, trigger.SchedulerOptions{CatchUp: cfg.ScheduleCatchUp, ExecutionRetention: cfg.ExecutionRetention})
 	schedCtx, stopSched := context.WithCancel(context.Background())
 	defer stopSched()
 	schedDone := make(chan struct{})

@@ -352,3 +352,14 @@ func (s *Store) CancelWaiting(ctx context.Context, id, by string) error {
 	}
 	return nil
 }
+
+// PruneExecutions deletes up to limit finished executions (success or error)
+// that finished more than olderThan ago, oldest first. Queued, running and
+// waiting executions are never deleted. It returns the number deleted.
+func (s *Store) PruneExecutions(ctx context.Context, olderThan time.Duration, limit int) (int64, error) {
+	tag, err := s.pool.Exec(ctx, `DELETE FROM executions WHERE id IN (
+		SELECT id FROM executions
+		WHERE status IN ('success', 'error') AND finished_at < now() - make_interval(secs => $1)
+		ORDER BY finished_at LIMIT $2)`, olderThan.Seconds(), limit)
+	return tag.RowsAffected(), err
+}

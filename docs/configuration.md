@@ -28,6 +28,7 @@ glue2flow is configured with environment variables.
 | `G2F_EXECUTION_TIMEOUT` | `5m` | per execution (active time; waiting does not count; restarts after a takeover) |
 | `G2F_MAX_STORED_ITEMS` | `100` | items stored per node output |
 | `G2F_SCHEDULE_CATCHUP` | `1h` | how late a missed one-time schedule may still run |
+| `G2F_EXECUTION_RETENTION` | `30d` | finished executions (success or error) are deleted after this long; a Go duration or days such as `30d`; `0` keeps them forever. Queued, running and waiting executions are never deleted |
 | `G2F_WEBHOOK_MAX_WAIT` | `60s` | max wait for webhooks that respond with the result |
 | `G2F_STATIC_DIR` | `./web/dist` | built editor |
 | `G2F_MODULES_DIR` | `./modules` | plugins loaded at startup |

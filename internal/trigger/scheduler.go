@@ -36,7 +36,23 @@ type statePruner interface {
 	PruneState(ctx context.Context) (int64, error)
 }
 
+// executionPruner is implemented by stores that can delete old executions.
+type executionPruner interface {
+	PruneExecutions(ctx context.Context, olderThan time.Duration, limit int) (int64, error)
+}
+
+const (
+	// pruneBatch is how many executions one delete statement removes.
+	pruneBatch = 1000
+	// pruneMaxBatches bounds the work of one prune tick.
+	pruneMaxBatches = 50
+)
+
 type SchedulerOptions struct {
+	// ExecutionRetention: finished executions older than this are deleted.
+	// 0 keeps them forever.
+	ExecutionRetention time.Duration
+
 	// CatchUp: a one-time schedule missed (e.g. during downtime) by at most this
 	// long still fires once the server is back. Recurring schedules never catch up.
 	CatchUp time.Duration
@@ -134,6 +150,7 @@ func (s *Scheduler) Run(ctx context.Context) {
 					s.log.Info("pruned expired workflow state", "count", n)
 				}
 			}
+			s.pruneExecutions(ctx)
 		}
 	}
 }
@@ -357,4 +374,28 @@ func (s *Scheduler) check(ctx context.Context, w *workflow.Workflow, nodeID stri
 		return
 	}
 	log.Info("polling trigger found new items", "items", len(items), "execution", exec.ID)
+}
+
+// pruneExecutions deletes finished executions past the retention period in
+// batches, stopping after pruneMaxBatches (the next tick continues).
+func (s *Scheduler) pruneExecutions(ctx context.Context) {
+	p, ok := s.store.(executionPruner)
+	if !ok || s.opts.ExecutionRetention <= 0 {
+		return
+	}
+	var total int64
+	for i := 0; i < pruneMaxBatches && ctx.Err() == nil; i++ {
+		n, err := p.PruneExecutions(ctx, s.opts.ExecutionRetention, pruneBatch)
+		total += n
+		if err != nil {
+			s.log.Error("prune executions", "err", err)
+			break
+		}
+		if n < pruneBatch {
+			break
+		}
+	}
+	if total > 0 {
+		s.log.Info("pruned old executions", "count", total)
+	}
 }

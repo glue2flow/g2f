@@ -355,3 +355,47 @@ func TestWebhookStripsSecretHeader(t *testing.T) {
 		t.Fatal("regular header missing")
 	}
 }
+
+// pruneStore records PruneExecutions calls and returns a full batch until
+// full batches are used up.
+type pruneStore struct {
+	*fakeStore
+	full  int
+	calls int
+	age   time.Duration
+}
+
+func (p *pruneStore) PruneExecutions(_ context.Context, age time.Duration, limit int) (int64, error) {
+	p.calls++
+	p.age = age
+	if p.calls <= p.full {
+		return int64(limit), nil
+	}
+	return 1, nil
+}
+
+func TestPruneExecutionsTick(t *testing.T) {
+	reg := nodes.NewRegistry()
+	run := func(st *pruneStore, retention time.Duration) {
+		s := NewScheduler(st, &recordingEngine{ch: make(chan engine.Request, 1)}, reg, discard, SchedulerOptions{ExecutionRetention: retention})
+		s.pruneExecutions(context.Background())
+	}
+
+	st := &pruneStore{fakeStore: newFakeStore(), full: 2}
+	run(st, 48*time.Hour)
+	if st.calls != 3 || st.age != 48*time.Hour {
+		t.Fatalf("calls %d age %v, want 3 batches at 48h", st.calls, st.age)
+	}
+
+	st = &pruneStore{fakeStore: newFakeStore(), full: 1 << 30}
+	run(st, time.Hour)
+	if st.calls != pruneMaxBatches {
+		t.Fatalf("calls %d, want the cap %d", st.calls, pruneMaxBatches)
+	}
+
+	st = &pruneStore{fakeStore: newFakeStore()}
+	run(st, 0)
+	if st.calls != 0 {
+		t.Fatal("pruned although retention is 0")
+	}
+}

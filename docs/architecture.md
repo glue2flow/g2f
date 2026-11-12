@@ -43,6 +43,8 @@ route items to a specific handle; a node that receives no items is **skipped**.
 
 Each execution stores per-node status, duration and output (capped at
 `G2F_MAX_STORED_ITEMS` items per output), which the editor shows below the canvas.
+Finished executions are deleted after `G2F_EXECUTION_RETENTION` (default 30 days); queued,
+running and waiting executions are kept.
 
 The engine runs acyclic graphs only. Loops are built with
 [Execute Workflow](nodes.md#execute-workflow) (per item or per batch).

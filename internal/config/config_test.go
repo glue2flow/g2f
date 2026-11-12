@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestParseProxies(t *testing.T) {
 	got, err := parseProxies("10.0.0.0/8, 127.0.0.1 ,::1,10.1.2.3/8")
@@ -48,5 +51,30 @@ func TestCheckDemoKeys(t *testing.T) {
 				t.Fatalf("checkDemoKeys() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestParseRetention(t *testing.T) {
+	tests := []struct {
+		in      string
+		want    time.Duration
+		wantErr bool
+	}{
+		{"30d", 30 * 24 * time.Hour, false},
+		{"12h", 12 * time.Hour, false},
+		{"1.5d", 36 * time.Hour, false},
+		{"0", 0, false},
+		{"0d", 0, false},
+		{"", 0, true},
+		{"d", 0, true},
+		{"abc", 0, true},
+		{"-1d", 0, true},
+		{"-5h", 0, true},
+	}
+	for _, tt := range tests {
+		got, err := parseRetention(tt.in)
+		if (err != nil) != tt.wantErr || got != tt.want {
+			t.Errorf("parseRetention(%q) = %v, %v", tt.in, got, err)
+		}
 	}
 }

@@ -63,6 +63,8 @@ type Config struct {
 	ExecutionTimeout time.Duration
 	// ScheduleCatchUp: how late a missed one-time schedule may still fire.
 	ScheduleCatchUp time.Duration
+	// ExecutionRetention: finished executions older than this are deleted; 0 keeps them forever.
+	ExecutionRetention time.Duration
 	// WebhookMaxWait bounds webhooks that respond with the workflow result.
 	WebhookMaxWait time.Duration
 	// MaxStoredItems caps how many items per node output are persisted with an execution.
@@ -131,6 +133,9 @@ func Load() (*Config, error) {
 
 	if c.ScheduleCatchUp, err = time.ParseDuration(env("G2F_SCHEDULE_CATCHUP", "1h")); err != nil {
 		return nil, fmt.Errorf("G2F_SCHEDULE_CATCHUP: %w", err)
+	}
+	if c.ExecutionRetention, err = parseRetention(env("G2F_EXECUTION_RETENTION", "30d")); err != nil {
+		return nil, fmt.Errorf("G2F_EXECUTION_RETENTION: %w", err)
 	}
 	if c.WebhookMaxWait, err = time.ParseDuration(env("G2F_WEBHOOK_MAX_WAIT", "60s")); err != nil {
 		return nil, fmt.Errorf("G2F_WEBHOOK_MAX_WAIT: %w", err)
@@ -258,4 +263,27 @@ func parseProxies(s string) ([]netip.Prefix, error) {
 		out = append(out, netip.PrefixFrom(ip, ip.BitLen()))
 	}
 	return out, nil
+}
+
+// parseRetention parses a Go duration or a number of days with a "d" suffix
+// ("30d"). Zero is allowed (disabled); negative values are rejected.
+func parseRetention(v string) (time.Duration, error) {
+	v = strings.TrimSpace(v)
+	var d time.Duration
+	if days, ok := strings.CutSuffix(v, "d"); ok {
+		n, err := strconv.ParseFloat(days, 64)
+		if err != nil {
+			return 0, fmt.Errorf("invalid duration %q", v)
+		}
+		d = time.Duration(n * float64(24*time.Hour))
+	} else {
+		var err error
+		if d, err = time.ParseDuration(v); err != nil {
+			return 0, err
+		}
+	}
+	if d < 0 {
+		return 0, fmt.Errorf("must not be negative")
+	}
+	return d, nil
 }
