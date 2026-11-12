@@ -67,13 +67,16 @@ func TestErrorDispatcher(t *testing.T) {
 	}
 }
 
-type fakeResumer struct{ got nodes.Item }
+type fakeResumer struct {
+	got     nodes.Item
+	gotNode string
+}
 
-func (f *fakeResumer) Resume(_ context.Context, id string, item nodes.Item) (*store.Execution, error) {
-	if id != "e1" {
+func (f *fakeResumer) Resume(_ context.Context, id, nodeID string, item nodes.Item) (*store.Execution, error) {
+	if id != "e1" || nodeID == "gone" {
 		return nil, engine.ErrNotWaiting
 	}
-	f.got = item
+	f.got, f.gotNode = item, nodeID
 	return &store.Execution{ID: id}, nil
 }
 
@@ -81,8 +84,8 @@ func TestResumeHandler(t *testing.T) {
 	signer := NewResumeSigner("k", "https://g2f.test/")
 	res := &fakeResumer{}
 	h := NewResumeHandler(signer, res, discard)
-	url := signer.URL("e1")
-	if !strings.HasPrefix(url, "https://g2f.test/webhook-resume/e1/") {
+	url := signer.URL("e1", "n/1")
+	if !strings.HasPrefix(url, "https://g2f.test/webhook-resume/e1/n%2F1/") {
 		t.Fatalf("url %s", url)
 	}
 	path := strings.TrimPrefix(url, "https://g2f.test")
@@ -98,13 +101,43 @@ func TestResumeHandler(t *testing.T) {
 	if q := res.got["query"].(map[string]any); q["decision"] != "approve" {
 		t.Fatalf("query not passed: %v", res.got)
 	}
-	if code := do("/webhook-resume/e1/deadbeef"); code != 404 {
+	if res.gotNode != "n/1" {
+		t.Fatalf("node id not passed: %q", res.gotNode)
+	}
+	if code := do("/webhook-resume/e1/n%2F1/deadbeef"); code != 404 {
 		t.Fatalf("bad signature: %d", code)
 	}
-	if code := do(strings.TrimPrefix(signer.URL("e2"), "https://g2f.test")); code != 410 {
+	if code := do("/webhook-resume/e1/" + signer.sign("e1", "n/1")); code != 404 {
+		t.Fatalf("old two-segment URL: %d", code)
+	}
+	// A signature for another node does not open this one.
+	if code := do("/webhook-resume/e1/n2/" + signer.sign("e1", "n/1")); code != 404 {
+		t.Fatalf("signature of another node: %d", code)
+	}
+	if code := do(strings.TrimPrefix(signer.URL("e2", "n"), "https://g2f.test")); code != 410 {
 		t.Fatalf("not waiting: %d", code)
 	}
-	if NewResumeSigner("other-key", "x").sign("e1") == signer.sign("e1") {
+	if code := do(strings.TrimPrefix(signer.URL("e1", "gone"), "https://g2f.test")); code != 410 {
+		t.Fatalf("not waiting at node: %d", code)
+	}
+	if NewResumeSigner("other-key", "x").sign("e1", "n") == signer.sign("e1", "n") {
 		t.Fatal("signature must depend on the key")
+	}
+}
+
+func TestResumeSignerBindsNode(t *testing.T) {
+	s := NewResumeSigner("k", "https://g2f.test")
+	sig := s.sign("e1", "a")
+	if !s.valid("e1", "a", sig) {
+		t.Fatal("own signature rejected")
+	}
+	if s.valid("e1", "b", sig) {
+		t.Fatal("signature of node a accepted for node b")
+	}
+	if s.valid("e2", "a", sig) {
+		t.Fatal("signature accepted for another execution")
+	}
+	if s.sign("e", "1a") == s.sign("e1", "a") {
+		t.Fatal("execution and node IDs must not run together")
 	}
 }

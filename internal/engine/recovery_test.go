@@ -294,3 +294,54 @@ func TestRecoveryGivesUp(t *testing.T) {
 	close(p.gate)
 	a.Shutdown(0, time.Second)
 }
+
+// A resume URL call is bound to its Wait node in the claiming SQL: a call for
+// another node claims nothing and leaves the execution waiting.
+func TestResumeBoundToWaitNodeSQL(t *testing.T) {
+	st := testDB(t)
+	e := recoveryEngine(t, st, newProbe())
+	wait := func(id, name string) workflow.Node {
+		return workflow.Node{ID: id, Name: name, Type: "core.wait", Params: map[string]any{"mode": "webhook"}}
+	}
+	wf := &workflow.Workflow{ID: uuid.NewString(), OrgID: "acme", Name: "Two approvals", OwnerSub: "alice",
+		Scope: workflow.ScopePrivate, OrgRole: workflow.RoleViewer, Version: 1, Graph: workflow.Graph{
+			Nodes: []workflow.Node{
+				{ID: "t", Name: "Start", Type: "trigger.manual", Params: map[string]any{"payload": map[string]any{"n": 1}}},
+				wait("a", "First"), wait("b", "Second"),
+			},
+			Edges: []workflow.Edge{{ID: "e1", Source: "t", Target: "a"}, {ID: "e2", Source: "a", Target: "b"}},
+		}}
+	if err := st.CreateWorkflow(context.Background(), wf, nil); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	id := start(t, e, wf)
+	awaitStatus(t, st, id, store.StatusWaiting)
+
+	item := nodes.Item{"decision": "approve"}
+	if _, err := e.Resume(ctx, id, "b", item); err != ErrNotWaiting {
+		t.Fatalf("resume of the wrong node: %v", err)
+	}
+	if got := awaitStatus(t, st, id, store.StatusWaiting); got.Status != store.StatusWaiting {
+		t.Fatal("execution left the waiting state")
+	}
+	if _, err := e.Resume(ctx, id, "a", item); err != nil {
+		t.Fatalf("resume of the waiting node: %v", err)
+	}
+	// It now waits at the second node; the first link is used up.
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		_, err := e.Resume(ctx, id, "b", item)
+		if err == nil {
+			break
+		}
+		if err != ErrNotWaiting || time.Now().After(deadline) {
+			t.Fatalf("resume of the second node: %v", err)
+		}
+		if _, err := e.Resume(ctx, id, "a", item); err != ErrNotWaiting {
+			t.Fatalf("first link reused: %v", err)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	awaitStatus(t, st, id, store.StatusSuccess)
+}

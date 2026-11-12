@@ -298,9 +298,11 @@ func (s *Store) PauseExecution(ctx context.Context, e *Execution, state []byte) 
 }
 
 // ClaimWaiting atomically moves a waiting execution to running and returns it
-// with its snapshot. With mode set, only executions waiting in that mode match.
+// with its snapshot. With mode set, only executions waiting in that mode match;
+// with nodeID set, only executions waiting at that Wait node. The node is
+// compared in the same statement, so a mismatch claims nothing.
 // Returns ErrNotFound if the execution is not (or no longer) waiting.
-func (s *Store) ClaimWaiting(ctx context.Context, id, mode, owner string) (*Execution, []byte, error) {
+func (s *Store) ClaimWaiting(ctx context.Context, id, mode, nodeID, owner string) (*Execution, []byte, error) {
 	uid, err := uuid.Parse(id)
 	if err != nil {
 		return nil, nil, ErrNotFound
@@ -310,7 +312,8 @@ func (s *Store) ClaimWaiting(ctx context.Context, id, mode, owner string) (*Exec
 	var state []byte
 	e, err := scanExecution(s.pool.QueryRow(ctx, `UPDATE executions SET status='running', owner=$3
 		WHERE id=$1 AND status='waiting' AND ($2 = '' OR wait_mode = $2)
-		RETURNING `+execCols+`, state`, uid, mode, nullUUID(owner)), true, &state)
+		AND ($4 = '' OR state->>'waitNode' = $4)
+		RETURNING `+execCols+`, state`, uid, mode, nullUUID(owner), nodeID), true, &state)
 	if err != nil {
 		return nil, nil, err
 	}

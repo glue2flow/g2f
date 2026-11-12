@@ -16,13 +16,16 @@ import (
 type WaitStore interface {
 	PauseExecution(ctx context.Context, e *store.Execution, state []byte) error
 	// ClaimWaiting marks the execution running and owned by owner ("" if the
-	// store has no RecoveryStore).
-	ClaimWaiting(ctx context.Context, id, mode, owner string) (*store.Execution, []byte, error)
+	// store has no RecoveryStore). With mode or nodeID set, only an execution
+	// waiting in that mode / at that Wait node matches; otherwise nothing is
+	// claimed and ErrNotFound is returned.
+	ClaimWaiting(ctx context.Context, id, mode, nodeID, owner string) (*store.Execution, []byte, error)
 	DueWaiting(ctx context.Context, now time.Time, limit int) ([]string, error)
 }
 
 // ErrNotWaiting is returned when resuming an execution that is not waiting
-// (already resumed, finished, cancelled, or waiting in another mode).
+// (already resumed, finished, cancelled, or waiting in another mode or at
+// another Wait node).
 var ErrNotWaiting = errors.New("execution is not waiting")
 
 // pause persists the run at node n. The execution's runtime limit applies per
@@ -72,10 +75,11 @@ func (e *Engine) completeWaitStep(exec *store.Execution, nodeID string, out node
 
 // Resume continues a waiting execution in the background.
 //
-// With item set (the resume URL was called) the Wait node emits that item on
+// With item set (the resume URL of Wait node nodeID was called) the execution
+// is resumed only if it waits at that node, and the node emits the item on
 // "main". Otherwise the resume time has come: webhook waits emit their input on
 // "timeout", time-based waits pass their input on "main".
-func (e *Engine) Resume(ctx context.Context, execID string, item nodes.Item) (*store.Execution, error) {
+func (e *Engine) Resume(ctx context.Context, execID, nodeID string, item nodes.Item) (*store.Execution, error) {
 	ws, ok := e.store.(WaitStore)
 	if !ok {
 		return nil, errors.New("waiting is not supported")
@@ -83,12 +87,14 @@ func (e *Engine) Resume(ctx context.Context, execID string, item nodes.Item) (*s
 	mode := ""
 	if item != nil {
 		mode = nodes.WaitWebhook
+	} else {
+		nodeID = "" // time-based resumes continue whatever node waits
 	}
 	owner := ""
 	if e.rs != nil {
 		owner = e.instance
 	}
-	exec, data, err := ws.ClaimWaiting(ctx, execID, mode, owner)
+	exec, data, err := ws.ClaimWaiting(ctx, execID, mode, nodeID, owner)
 	if errors.Is(err, store.ErrNotFound) {
 		return nil, ErrNotWaiting
 	}
@@ -139,7 +145,7 @@ func (e *Engine) RunResumer(ctx context.Context, every time.Duration) {
 			continue
 		}
 		for _, id := range ids {
-			if _, err := e.Resume(ctx, id, nil); err != nil && !errors.Is(err, ErrNotWaiting) {
+			if _, err := e.Resume(ctx, id, "", nil); err != nil && !errors.Is(err, ErrNotWaiting) {
 				e.log.Error("resume execution", "execution", id, "err", err)
 			}
 		}

@@ -11,7 +11,8 @@ Any parameter can contain `{{ ... }}` expressions in the [expr language](https:/
 | `nodes['Node name']` | output items of an earlier node |
 | `trigger` | the first item emitted by the trigger |
 | `workflow.id`, `workflow.name`, `execution.id` | run metadata |
-| `execution.resumeUrl` | resume URL of the next [Wait](nodes.md#wait) node |
+| `execution.resumeUrls['Node name']` | resume URL of that [Wait](nodes.md#wait) node (resumes only that node) |
+| `execution.resumeUrl` | the resume URL, only if the workflow has exactly one Wait node |
 | `vars` | the plugin's organization variables (plugin nodes only, see [Secrets](secrets.md)) |
 | `params` | resolved node parameters (YAML modules only) |
 

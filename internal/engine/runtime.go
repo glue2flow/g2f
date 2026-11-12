@@ -14,16 +14,8 @@ const MaxDepth = 5
 
 // runtime implements nodes.Runtime for one run.
 type runtime struct {
-	e      *Engine
-	st     *runState
-	execID string
-}
-
-func (r *runtime) ResumeURL() string {
-	if r.e.opts.ResumeURL == nil {
-		return ""
-	}
-	return r.e.opts.ResumeURL(r.execID)
+	e  *Engine
+	st *runState
 }
 
 // RunWorkflow runs a workflow of the same organization from its "Called by

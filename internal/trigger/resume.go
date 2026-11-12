@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/glue2flow/g2f/internal/engine"
@@ -17,7 +18,8 @@ import (
 )
 
 // ResumeSigner creates and checks the signed resume URLs of waiting executions.
-// The signature makes URLs unguessable without storing per-execution tokens.
+// A URL is bound to one Wait node of one execution and unguessable without
+// storing per-execution tokens.
 type ResumeSigner struct {
 	key       []byte
 	publicURL string
@@ -29,28 +31,28 @@ func NewResumeSigner(secretKey, publicURL string) *ResumeSigner {
 	return &ResumeSigner{key: sum[:], publicURL: strings.TrimRight(publicURL, "/")}
 }
 
-func (s *ResumeSigner) sign(execID string) string {
+func (s *ResumeSigner) sign(execID, nodeID string) string {
 	mac := hmac.New(sha256.New, s.key)
-	mac.Write([]byte(execID))
+	mac.Write([]byte(execID + "\x00" + nodeID))
 	return hex.EncodeToString(mac.Sum(nil))[:40]
 }
 
-// URL returns the resume URL of an execution.
-func (s *ResumeSigner) URL(execID string) string {
-	return s.publicURL + "/webhook-resume/" + execID + "/" + s.sign(execID)
+// URL returns the URL that resumes the given Wait node of an execution.
+func (s *ResumeSigner) URL(execID, nodeID string) string {
+	return s.publicURL + "/webhook-resume/" + execID + "/" + url.PathEscape(nodeID) + "/" + s.sign(execID, nodeID)
 }
 
-func (s *ResumeSigner) valid(execID, sig string) bool {
-	return hmac.Equal([]byte(sig), []byte(s.sign(execID)))
+func (s *ResumeSigner) valid(execID, nodeID, sig string) bool {
+	return hmac.Equal([]byte(sig), []byte(s.sign(execID, nodeID)))
 }
 
 // Resumer continues waiting executions.
 type Resumer interface {
-	Resume(ctx context.Context, execID string, item nodes.Item) (*store.Execution, error)
+	Resume(ctx context.Context, execID, nodeID string, item nodes.Item) (*store.Execution, error)
 }
 
-// ResumeHandler serves /webhook-resume/{executionId}/{signature} for any
-// method. The request (method, headers, query, body) becomes the Wait node's
+// ResumeHandler serves /webhook-resume/{executionId}/{nodeId}/{signature}
+// for any method. The request (method, headers, query, body) becomes the Wait node's
 // output, so e.g. ?decision=approve can drive a following Condition node.
 type ResumeHandler struct {
 	signer *ResumeSigner
@@ -63,8 +65,14 @@ func NewResumeHandler(signer *ResumeSigner, eng Resumer, log *slog.Logger) *Resu
 }
 
 func (h *ResumeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	parts := strings.Split(strings.Trim(strings.TrimPrefix(r.URL.Path, "/webhook-resume/"), "/"), "/")
-	if len(parts) != 2 || !h.signer.valid(parts[0], parts[1]) {
+	// Split the escaped path so a node ID containing "/" stays one segment.
+	parts := strings.Split(strings.Trim(strings.TrimPrefix(r.URL.EscapedPath(), "/webhook-resume/"), "/"), "/")
+	if len(parts) != 3 {
+		jsonError(w, http.StatusNotFound, "not found")
+		return
+	}
+	nodeID, err := url.PathUnescape(parts[1])
+	if err != nil || !h.signer.valid(parts[0], nodeID, parts[2]) {
 		jsonError(w, http.StatusNotFound, "not found")
 		return
 	}
@@ -74,7 +82,7 @@ func (h *ResumeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	item := requestItem(r, body, &nodes.Webhook{})
-	exec, err := h.eng.Resume(r.Context(), parts[0], item)
+	exec, err := h.eng.Resume(r.Context(), parts[0], nodeID, item)
 	if errors.Is(err, engine.ErrNotWaiting) {
 		jsonError(w, http.StatusGone, "this execution is no longer waiting")
 		return

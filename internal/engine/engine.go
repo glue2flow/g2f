@@ -63,8 +63,9 @@ type Options struct {
 	Tokens TokenSource
 	// Workflows is optional; without it Execute Workflow nodes fail.
 	Workflows WorkflowLoader
-	// ResumeURL builds the signed URL that resumes a waiting execution.
-	ResumeURL func(executionID string) string
+	// ResumeURL builds the signed URL that resumes the given Wait node of an
+	// execution.
+	ResumeURL func(executionID, nodeID string) string
 	// State is optional; without it the Data Store, Remove Duplicates (across
 	// runs) and polling triggers fail.
 	State StateBackend
@@ -355,16 +356,7 @@ func (e *Engine) execute(ctx context.Context, exec *store.Execution, st *runStat
 		return e.finish(exec, st, nil, err)
 	}
 
-	execInfo := map[string]any{"id": exec.ID, "triggerType": exec.TriggerType}
-	if e.opts.ResumeURL != nil {
-		execInfo["resumeUrl"] = e.opts.ResumeURL(exec.ID)
-	}
-	env := expression.Env{
-		"workflow":  map[string]any{"id": st.Workflow.ID, "name": st.Workflow.Name},
-		"execution": execInfo,
-		"nodes":     st.Outputs,
-		"trigger":   st.Trigger,
-	}
+	env := e.newEnv(st, exec)
 
 	var secrets map[string]map[string]string
 	if e.opts.Secrets != nil {
@@ -374,7 +366,7 @@ func (e *Engine) execute(ctx context.Context, exec *store.Execution, st *runStat
 	}
 	rc := &runCtx{
 		settings: map[string]moduleSettings{}, scrub: newScrubber(secrets),
-		rt: &runtime{e: e, st: st, execID: exec.ID}, log: log,
+		rt: &runtime{e: e, st: st}, log: log,
 		triggerType: exec.TriggerType, state: e.stateFor(st.Workflow.ID),
 	}
 
@@ -724,4 +716,33 @@ func (s *scrubber) clean(msg string) string {
 		msg = strings.ReplaceAll(msg, v, "••••••")
 	}
 	return msg
+}
+
+// newEnv builds the expression scope of a run. execution.resumeUrls maps the
+// name of every enabled Wait node to its resume URL, so a node before the Wait
+// can send it; execution.resumeUrl is set only if there is exactly one.
+func (e *Engine) newEnv(st *runState, exec *store.Execution) expression.Env {
+	execInfo := map[string]any{"id": exec.ID, "triggerType": exec.TriggerType}
+	if e.opts.ResumeURL != nil {
+		urls := map[string]any{}
+		var last string
+		count := 0
+		for _, n := range st.Graph.Nodes {
+			if n.Type == "core.wait" && !n.Disabled {
+				last = e.opts.ResumeURL(exec.ID, n.ID)
+				urls[n.Name] = last
+				count++
+			}
+		}
+		execInfo["resumeUrls"] = urls
+		if count == 1 {
+			execInfo["resumeUrl"] = last
+		}
+	}
+	return expression.Env{
+		"workflow":  map[string]any{"id": st.Workflow.ID, "name": st.Workflow.Name},
+		"execution": execInfo,
+		"nodes":     st.Outputs,
+		"trigger":   st.Trigger,
+	}
 }
