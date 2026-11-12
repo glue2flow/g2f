@@ -3,12 +3,21 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"net/netip"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
 	"time"
 )
+
+// demoSecretKeys are published in this repository (docker-compose.yml and the
+// Makefile). Anyone can read them, so they must not protect a real deployment.
+var demoSecretKeys = []string{
+	"ZzhnLWRlbW8ta2V5LU5PVC1mb3ItcHJvZHVjdGlvbiE=",
+	"ZGV2LWtleS1kZXYta2V5LWRldi1rZXktZGV2LWtleS0=",
+}
 
 type AuthMode string
 
@@ -152,6 +161,9 @@ func Load() (*Config, error) {
 	if c.SecretKey == "" {
 		return nil, fmt.Errorf("G2F_SECRET_KEY is required (generate one with: openssl rand -base64 32)")
 	}
+	if err = checkDemoKeys(c); err != nil {
+		return nil, err
+	}
 
 	switch c.Auth.Mode {
 	case AuthOIDC:
@@ -163,6 +175,42 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("G2F_AUTH_MODE must be 'oidc' or 'none', got %q", c.Auth.Mode)
 	}
 	return c, nil
+}
+
+// checkDemoKeys refuses the published demo keys unless the public URL is local.
+func checkDemoKeys(c *Config) error {
+	usesDemo := isDemoKey(c.SecretKey)
+	for _, k := range c.SecretKeysOld {
+		usesDemo = usesDemo || isDemoKey(k)
+	}
+	if usesDemo && !isLocalURL(c.PublicURL) {
+		return fmt.Errorf("G2F_SECRET_KEY is the public demo key; generate your own with: openssl rand -base64 32 (the demo key is only accepted when G2F_PUBLIC_URL is on localhost)")
+	}
+	return nil
+}
+
+func isDemoKey(key string) bool {
+	for _, k := range demoSecretKeys {
+		if key == k {
+			return true
+		}
+	}
+	return false
+}
+
+// isLocalURL reports whether the URL host is localhost or a loopback address.
+// URLs that cannot be parsed are not local.
+func isLocalURL(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func env(key, def string) string {

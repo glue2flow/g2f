@@ -9,7 +9,7 @@ glue2flow is configured with environment variables.
 | `G2F_LISTEN` | `:8080` | listen address |
 | `G2F_DATABASE_URL` | `postgres://g2f:g2f@localhost:5432/g2f?sslmode=disable` | PostgreSQL URL |
 | `G2F_PUBLIC_URL` | `http://localhost:8080` | external URL (used for webhook, resume and OAuth callback URLs) |
-| `G2F_SECRET_KEY` | – (required) | base64 32-byte key encrypting secrets ([Secrets](secrets.md#encryption)) |
+| `G2F_SECRET_KEY` | – (required) | base64 32-byte key encrypting secrets ([Secrets](secrets.md#encryption)). The published demo keys are refused unless `G2F_PUBLIC_URL` is on localhost |
 | `G2F_SECRET_KEYS_OLD` | – | previous keys (comma separated), for rotation |
 | `G2F_TRUSTED_PROXIES` | – | reverse proxies (comma separated IPs or CIDRs, e.g. `10.0.0.0/8, 127.0.0.1`) whose `X-Forwarded-For` header is trusted to find the client IP. Set it to your proxy's address when running behind one, otherwise all visitors share the proxy's IP for rate limits. Forwarding headers from other peers are ignored |
 | `G2F_AUTH_MODE` | `oidc` | `oidc` or `none` (development only) |
