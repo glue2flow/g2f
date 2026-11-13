@@ -4,9 +4,12 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"strings"
 	"sync"
 	"testing"
+	"time"
 
+	"github.com/glue2flow/g2f/internal/expression"
 	"github.com/glue2flow/g2f/internal/nodes"
 	"github.com/glue2flow/g2f/internal/store"
 	"github.com/glue2flow/g2f/internal/workflow"
@@ -175,4 +178,67 @@ func TestLogSinkLimitsAndScrubs(t *testing.T) {
 	if len(logs) != maxStepLogs+1 || logs[maxStepLogs].Level != "warn" {
 		t.Fatalf("got %d entries, last %+v", len(logs), logs[len(logs)-1])
 	}
+}
+
+func setNodeWorkflow(expr string) *workflow.Workflow {
+	return &workflow.Workflow{ID: "wf", Graph: workflow.Graph{
+		Nodes: []workflow.Node{
+			{ID: "t", Name: "Start", Type: "trigger.manual"},
+			{ID: "s", Name: "Set", Type: "core.set", Params: map[string]any{"fields": map[string]any{"v": expr}}},
+		},
+		Edges: []workflow.Edge{{ID: "1", Source: "t", Target: "s"}},
+	}}
+}
+
+func TestExpensiveExpressionFails(t *testing.T) {
+	old := expression.MaxSteps
+	expression.MaxSteps = 100_000
+	defer func() { expression.MaxSteps = old }()
+	e := newEngine(t)
+	start := time.Now()
+	res, err := e.Run(context.Background(), Request{
+		Workflow: setNodeWorkflow("{{ all(1..2000, all(1..2000, all(1..2000, # > 0))) }}"), TriggerType: nodes.TriggerManual,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Execution.Status != store.StatusError || !strings.Contains(res.Execution.Error, "too expensive") {
+		t.Fatalf("status %s: %s", res.Execution.Status, res.Execution.Error)
+	}
+	if d := time.Since(start); d > 5*time.Second {
+		t.Fatalf("took %v", d)
+	}
+}
+
+func TestTimeoutStopsExpressions(t *testing.T) {
+	e := newEngine(t)
+	arr := make([]any, 1000)
+	for i := range arr {
+		arr[i] = i + 1
+	}
+	items := make([]nodes.Item, 200)
+	for i := range items {
+		items[i] = nodes.Item{"arr": arr}
+	}
+	// Each item stays within the step budget (1M steps, ~0.3s), but 200 of
+	// them would run for about a minute.
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	res, err := e.Run(ctx, Request{
+		Workflow: setNodeWorkflow("{{ all(json.arr, all(json.arr, # > 0)) }}"), TriggerType: nodes.TriggerManual, Items: items,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Execution.Status == store.StatusSuccess {
+		t.Fatal("run should not succeed")
+	}
+	if !strings.Contains(res.Execution.Error, "cancelled") {
+		t.Fatalf("unexpected error: %s", res.Execution.Error)
+	}
+	if d := time.Since(start); d > 3*time.Second {
+		t.Fatalf("run kept going for %v", d)
+	}
+	t.Logf("stopped after %v: %s", time.Since(start), res.Execution.Error)
 }

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -76,5 +77,17 @@ func TestParseRetention(t *testing.T) {
 		if (err != nil) != tt.wantErr || got != tt.want {
 			t.Errorf("parseRetention(%q) = %v, %v", tt.in, got, err)
 		}
+	}
+}
+
+func TestExpressionMaxSteps(t *testing.T) {
+	t.Setenv("G2F_SECRET_KEY", "")
+	t.Setenv("G2F_EXPRESSION_MAX_STEPS", "0")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "G2F_EXPRESSION_MAX_STEPS") {
+		t.Fatalf("want error for 0, got %v", err)
+	}
+	t.Setenv("G2F_EXPRESSION_MAX_STEPS", "123")
+	if c, err := Load(); err == nil && c.ExpressionMaxSteps != 123 {
+		t.Fatalf("got %d", c.ExpressionMaxSteps)
 	}
 }

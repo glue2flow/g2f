@@ -32,6 +32,15 @@ Besides the expr builtins (`toBase64`, `fromJSON`, `map`, …) there are a few h
 | `emailAddresses(v)` | `"a@x.com, \"Doe, Jane\" <j@x.com>"` or an array → `[{name, address}]` |
 | `mimeMessage({from, to, cc, bcc, replyTo, subject, text, html, headers, attachments})` | a complete RFC 5322 e-mail (UTF-8, multipart when needed); attachments are `[{filename, content (base64), contentType}]` |
 
+## Limits
+
+One expression evaluation may run at most 2,000,000 predicate iterations (the bodies of `all`,
+`any`, `filter`, `map`, `reduce`, `sortBy`, … count one step each, nested ones add up); beyond
+that it fails with "expression is too expensive". Configure it with `G2F_EXPRESSION_MAX_STEPS`.
+Strings built with `+` are limited to 32 MiB, and expr's own memory budget caps ranges and
+arrays. A running expression is also stopped when the execution is cancelled or times out.
+Names starting with `__` are reserved and rejected in expressions.
+
 ## Dynamic content (⚡)
 
 You don't have to type paths. Every field that accepts expressions has a ⚡ button, like

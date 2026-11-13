@@ -6,8 +6,11 @@
 package expression
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
+	"reflect"
 	"strings"
 	"sync"
 
@@ -20,19 +23,201 @@ import (
 // Env is the variable scope available to expressions.
 type Env map[string]any
 
-var cache sync.Map // string -> *vm.Program
+// MaxSteps is the number of predicate iterations (all, filter, map, ...) one
+// expression evaluation may run before it is stopped (G2F_EXPRESSION_MAX_STEPS).
+var MaxSteps int64 = 2_000_000
+
+// maxCacheEntries bounds the compiled-program cache.
+const maxCacheEntries = 10_000
+
+var (
+	cacheMu sync.RWMutex
+	cache   = map[string]*vm.Program{}
+)
 
 func compile(code string) (*vm.Program, error) {
-	if p, ok := cache.Load(code); ok {
-		return p.(*vm.Program), nil
+	cacheMu.RLock()
+	p, ok := cache[code]
+	cacheMu.RUnlock()
+	if ok {
+		return p, nil
 	}
-	opts := append([]expr.Option{expr.AllowUndefinedVariables(), expr.Patch(nilSafe{})}, functions...)
+	if err := checkReserved(code); err != nil {
+		return nil, err
+	}
+	opts := append([]expr.Option{expr.AllowUndefinedVariables(), expr.Patch(nilSafe{}), expr.Patch(ticker{})}, functions...)
+	opts = append(opts, tickFunction, catFunction)
 	p, err := expr.Compile(code, opts...)
 	if err != nil {
 		return nil, err
 	}
-	cache.Store(code, p)
+	cacheMu.Lock()
+	if len(cache) >= maxCacheEntries {
+		clear(cache) // simple bound: start over instead of tracking recency
+	}
+	cache[code] = p
+	cacheMu.Unlock()
 	return p, nil
+}
+
+// checkReserved rejects user code that uses names starting with "__", which are
+// reserved for the step budget and the cancellation context.
+func checkReserved(code string) error {
+	tree, err := parser.Parse(code)
+	if err != nil {
+		return nil // reported by the compiler with better context
+	}
+	var bad string
+	ast.Walk(&tree.Node, reservedFinder{&bad})
+	if bad != "" {
+		return fmt.Errorf("names starting with \"__\" are reserved (%s)", bad)
+	}
+	return nil
+}
+
+type reservedFinder struct{ bad *string }
+
+func (f reservedFinder) Visit(n *ast.Node) {
+	switch t := (*n).(type) {
+	case *ast.IdentifierNode:
+		if strings.HasPrefix(t.Value, "__") && *f.bad == "" {
+			*f.bad = t.Value
+		}
+	case *ast.VariableDeclaratorNode:
+		if strings.HasPrefix(t.Name, "__") && *f.bad == "" {
+			*f.bad = t.Name
+		}
+	}
+}
+
+// Hidden env keys. Eval puts the budget of the current evaluation under
+// budgetKey; WithContext stores the run's context under ctxKey.
+const (
+	budgetKey = "__budget"
+	ctxKey    = "__ctx"
+	tickName  = "__tick"
+	catName   = "__cat"
+
+	// maxStringLen caps strings built with "+", which would otherwise double
+	// per let/reduce step (2^40 bytes) and kill the process.
+	maxStringLen = 32 << 20
+)
+
+// budget limits one evaluation: the number of predicate iterations and, every
+// 1024 iterations, whether the run's context is still alive.
+type budget struct {
+	steps int64
+	max   int64
+	n     uint32
+	ctx   context.Context
+}
+
+// MarshalJSON hides the budget if an expression returns the whole env ($env).
+func (*budget) MarshalJSON() ([]byte, error) { return []byte("null"), nil }
+
+func (b *budget) tick() error {
+	b.steps--
+	if b.steps < 0 {
+		return fmt.Errorf("expression is too expensive: more than %d iterations", b.max)
+	}
+	b.n++
+	if b.n&1023 == 0 && b.ctx != nil {
+		if err := b.ctx.Err(); err != nil {
+			return fmt.Errorf("expression cancelled: %w", err)
+		}
+	}
+	return nil
+}
+
+// ctxHolder carries the run's context inside an Env.
+type ctxHolder struct{ ctx context.Context }
+
+// MarshalJSON hides the context if an expression returns the whole env ($env).
+func (*ctxHolder) MarshalJSON() ([]byte, error) { return []byte("null"), nil }
+
+// WithContext returns a copy of env whose expression evaluations stop when ctx
+// is done. Scopes derived from the copy (e.g. per-item scopes) keep it.
+func WithContext(env Env, ctx context.Context) Env {
+	if ctx == nil {
+		return env
+	}
+	out := make(Env, len(env)+1)
+	maps.Copy(out, env)
+	out[ctxKey] = &ctxHolder{ctx}
+	return out
+}
+
+// tickFunction is __tick(budget, body): spends one step and returns body.
+var tickFunction = expr.Function(tickName, func(params ...any) (any, error) {
+	b, ok := params[0].(*budget)
+	if !ok {
+		return nil, fmt.Errorf("names starting with \"__\" are reserved")
+	}
+	if err := b.tick(); err != nil {
+		return nil, err
+	}
+	return params[1], nil
+}, new(func(any, any) any))
+
+// catFunction is __cat(budget, a + b): it returns the sum, rejects huge
+// strings and charges one step per KiB, so repeated appends stay metered.
+var catFunction = expr.Function(catName, func(params ...any) (any, error) {
+	b, ok := params[0].(*budget)
+	if !ok {
+		return nil, fmt.Errorf("names starting with \"__\" are reserved")
+	}
+	if s, ok := params[1].(string); ok {
+		if len(s) > maxStringLen {
+			return nil, fmt.Errorf("string is too long: more than %d bytes", maxStringLen)
+		}
+		b.steps -= int64(len(s) >> 10)
+		if b.steps < 0 {
+			return nil, fmt.Errorf("expression is too expensive: more than %d iterations", b.max)
+		}
+	}
+	return params[1], nil
+}, new(func(any, any) any))
+
+// ticker wraps the body of every predicate (all, filter, map, ...) into
+// __tick(__budget, body), so each iteration spends one step, and routes
+// non-numeric "+" through __cat. It runs on the already parsed tree, after user
+// code was checked for reserved names.
+type ticker struct{}
+
+func (ticker) Visit(n *ast.Node) {
+	switch t := (*n).(type) {
+	case *ast.PredicateNode:
+		t.Node = guard(tickName, t.Node)
+	case *ast.BinaryNode:
+		if t.Operator == "+" && !isNumber(t.Left) && !isNumber(t.Right) {
+			ast.Patch(n, guard(catName, t))
+		}
+	}
+}
+
+// guard returns fn(__budget, body).
+func guard(fn string, body ast.Node) ast.Node {
+	call := &ast.CallNode{
+		Callee:    &ast.IdentifierNode{Value: fn},
+		Arguments: []ast.Node{&ast.IdentifierNode{Value: budgetKey}, body},
+	}
+	call.SetLocation(body.Location())
+	return call
+}
+
+// isNumber reports whether n is statically a number ("+" then cannot build a string).
+func isNumber(n ast.Node) bool {
+	t := n.Type()
+	if t == nil {
+		return false
+	}
+	switch t.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
+		reflect.Float32, reflect.Float64:
+		return true
+	}
+	return false
 }
 
 // nilSafe makes every member access optional, so `trigger.body.name` yields nil
@@ -62,7 +247,19 @@ func Eval(code string, env Env) (any, error) {
 	if err != nil {
 		return nil, fmt.Errorf("expression %q: %w", code, err)
 	}
-	v, err := expr.Run(p, map[string]any(env))
+	// The env may be shared between goroutines: evaluate in a copy that holds
+	// this evaluation's budget.
+	scope := make(map[string]any, len(env)+1)
+	maps.Copy(scope, env)
+	b := &budget{steps: MaxSteps, max: MaxSteps}
+	if h, ok := env[ctxKey].(*ctxHolder); ok {
+		b.ctx = h.ctx
+		if err := b.ctx.Err(); err != nil {
+			return nil, fmt.Errorf("expression %q: expression cancelled: %w", code, err)
+		}
+	}
+	scope[budgetKey] = b
+	v, err := expr.Run(p, scope)
 	if err != nil {
 		return nil, fmt.Errorf("expression %q: %w", code, err)
 	}

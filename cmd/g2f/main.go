@@ -16,6 +16,7 @@ import (
 	"github.com/glue2flow/g2f/internal/auth"
 	"github.com/glue2flow/g2f/internal/config"
 	"github.com/glue2flow/g2f/internal/engine"
+	"github.com/glue2flow/g2f/internal/expression"
 	"github.com/glue2flow/g2f/internal/nodes"
 	"github.com/glue2flow/g2f/internal/oauth"
 	"github.com/glue2flow/g2f/internal/plugin"
@@ -91,6 +92,7 @@ func run(log *slog.Logger) error {
 	oauthMgr := oauth.NewManager(st, box, reg, sec, cfg.PublicURL)
 	nodes.CodeNodeEnabled = !cfg.DisableCodeNode
 	nodes.CodeMemoryLimit = int64(cfg.CodeMemoryMB) << 20
+	expression.MaxSteps = int64(cfg.ExpressionMaxSteps)
 	signer := trigger.NewResumeSigner(cfg.SecretKey, cfg.PublicURL)
 	errDispatch := trigger.NewErrorDispatcher(st, nil, reg, log, cfg.PublicURL)
 	eng := engine.New(reg, st, log, engine.Options{

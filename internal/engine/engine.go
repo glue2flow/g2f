@@ -580,7 +580,7 @@ func (e *Engine) runNode(ctx context.Context, st *runState, n *workflow.Node, by
 	}
 	return impl.Execute(ctx, &nodes.ExecContext{
 		Node: n, Def: &def, Items: in, Inputs: byHandle, Config: ms.config, Vars: ms.vars, OAuth: token,
-		Env: env, Logger: rc.log, Runtime: rc.rt, LogSink: rc.logSink(logs),
+		Env: expression.WithContext(env, ctx), Logger: rc.log, Runtime: rc.rt, LogSink: rc.logSink(logs),
 		State: rc.state, TriggerType: rc.triggerType,
 	})
 }

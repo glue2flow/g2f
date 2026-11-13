@@ -51,6 +51,9 @@ type Config struct {
 	// CodeMemoryMB limits the memory of Code node scripts (0: no limit,
 	// scripts run inside the server process).
 	CodeMemoryMB int
+	// ExpressionMaxSteps is the number of predicate iterations (all, filter,
+	// map, ...) one expression evaluation may run.
+	ExpressionMaxSteps int
 
 	// InstanceTimeout: how long an instance may miss heartbeats before other
 	// instances take over its running executions.
@@ -153,6 +156,12 @@ func Load() (*Config, error) {
 	}
 	if c.CodeMemoryMB < 0 {
 		return nil, fmt.Errorf("G2F_CODE_MEMORY_MB must not be negative")
+	}
+	if c.ExpressionMaxSteps, err = envInt("G2F_EXPRESSION_MAX_STEPS", 2_000_000); err != nil {
+		return nil, err
+	}
+	if c.ExpressionMaxSteps <= 0 {
+		return nil, fmt.Errorf("G2F_EXPRESSION_MAX_STEPS must be greater than 0")
 	}
 	if c.InstanceTimeout, err = time.ParseDuration(env("G2F_INSTANCE_TIMEOUT", "30s")); err != nil {
 		return nil, fmt.Errorf("G2F_INSTANCE_TIMEOUT: %w", err)

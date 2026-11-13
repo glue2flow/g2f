@@ -35,6 +35,7 @@ glue2flow is configured with environment variables.
 | `G2F_PLUGIN_SYNC` | `30s` | how often imported plugins are reloaded from the database |
 | `G2F_DISABLE_CODE_NODE` | `false` | turn off the JavaScript Code node |
 | `G2F_CODE_MEMORY_MB` | `128` | memory limit of Code node scripts; `0` runs them in the server process without a limit ([Code](nodes.md#code)) |
+| `G2F_EXPRESSION_MAX_STEPS` | `2000000` | predicate iterations (`all`, `filter`, `map`, …) one expression may run before it fails ([limits](expressions.md#limits)); must be greater than 0 |
 | `G2F_INSTANCE_TIMEOUT` | `30s` | how long an instance may miss heartbeats before others take over its executions ([replicas](architecture.md#scaling-and-replicas)) |
 | `G2F_SHUTDOWN_GRACE` | `15s` | on shutdown, how long running executions may finish before they are handed to another instance |
 
