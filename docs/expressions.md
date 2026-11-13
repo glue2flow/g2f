@@ -11,7 +11,8 @@ Any parameter can contain `{{ ... }}` expressions in the [expr language](https:/
 | `nodes['Node name']` | output items of an earlier node |
 | `trigger` | the first item emitted by the trigger |
 | `workflow.id`, `workflow.name`, `execution.id` | run metadata |
-| `execution.resumeUrl` | resume URL of the next [Wait](nodes.md#wait) node |
+| `execution.resumeUrls['Node name']` | resume URL of that [Wait](nodes.md#wait) node (resumes only that node) |
+| `execution.resumeUrl` | the resume URL, only if the workflow has exactly one Wait node |
 | `vars` | the plugin's organization variables (plugin nodes only, see [Secrets](secrets.md)) |
 | `params` | resolved node parameters (YAML modules only) |
 
@@ -30,6 +31,15 @@ Besides the expr builtins (`toBase64`, `fromJSON`, `map`, …) there are a few h
 | `toBase64Url(s)` / `fromBase64Url(s)` | URL-safe base64 (fromBase64Url also takes standard base64; nil → `""`) |
 | `emailAddresses(v)` | `"a@x.com, \"Doe, Jane\" <j@x.com>"` or an array → `[{name, address}]` |
 | `mimeMessage({from, to, cc, bcc, replyTo, subject, text, html, headers, attachments})` | a complete RFC 5322 e-mail (UTF-8, multipart when needed); attachments are `[{filename, content (base64), contentType}]` |
+
+## Limits
+
+One expression evaluation may run at most 2,000,000 predicate iterations (the bodies of `all`,
+`any`, `filter`, `map`, `reduce`, `sortBy`, … count one step each, nested ones add up); beyond
+that it fails with "expression is too expensive". Configure it with `G2F_EXPRESSION_MAX_STEPS`.
+Strings built with `+` are limited to 32 MiB, and expr's own memory budget caps ranges and
+arrays. A running expression is also stopped when the execution is cancelled or times out.
+Names starting with `__` are reserved and rejected in expressions.
 
 ## Dynamic content (⚡)
 

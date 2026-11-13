@@ -120,7 +120,13 @@ func newFormEnv(t *testing.T, params map[string]any) *formEnv {
 		mailer: &fakeMailer{configured: true},
 		auth:   &fakeAuth{user: auth.User{Sub: "u1", Username: "ada", Name: "Ada", Email: "ada@acme.test", Org: "acme"}}}
 	mux := http.NewServeMux()
-	env.srv = httptest.NewServer(mux)
+	// X-Test-Peer lets a test pretend to connect from another address.
+	env.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if p := r.Header.Get("X-Test-Peer"); p != "" {
+			r.RemoteAddr = p
+		}
+		mux.ServeHTTP(w, r)
+	}))
 	t.Cleanup(env.srv.Close)
 	h := NewFormHandler(newFakeStore(wf), env.eng, registry(t), discard, FormOptions{
 		SecretKey: "k", PublicURL: env.srv.URL, State: newFakeState(), Auth: env.auth, Mailer: env.mailer,
@@ -299,6 +305,32 @@ func TestFormAccessCodeLimits(t *testing.T) {
 	}
 	if code, _, _ := e.do("POST", "/code", url.Values{"email": {"c@b.test"}}); code != 429 {
 		t.Fatalf("code requests not limited: %d", code)
+	}
+}
+
+func TestFormAccessCodeFormCap(t *testing.T) {
+	e := newFormEnv(t, map[string]any{"protection": "email"})
+	// Each request comes from another address and e-mail, so only the
+	// per-form cap can stop them.
+	post := func(i int) int {
+		form := url.Values{"email": {fmt.Sprintf("u%d@b.test", i)}}
+		req, _ := http.NewRequest("POST", e.base+"/code", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("X-Test-Peer", fmt.Sprintf("10.1.%d.%d:1000", i/250, i%250))
+		res, err := e.client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		return res.StatusCode
+	}
+	for i := range codesPerFormHour {
+		if code := post(i); code != 200 {
+			t.Fatalf("request %d: %d", i, code)
+		}
+	}
+	if code := post(codesPerFormHour); code != 429 {
+		t.Fatalf("form cap not enforced: %d", code)
 	}
 }
 

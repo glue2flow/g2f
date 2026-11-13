@@ -80,8 +80,10 @@ Pauses an execution and stores its complete state in PostgreSQL, so waits of
 minutes, days or weeks survive restarts and deployments. Three modes:
 - *after an interval*;
 - *at a specific time* (with timezone);
-- *when the resume URL is called*: `{{ execution.resumeUrl }}` can be used in any node before
-  the Wait, e.g. in an approval message. Calling it with any HTTP method continues the run, and
+- *when the resume URL is called*: `{{ execution.resumeUrls['Node name'] }}` (or
+  `{{ execution.resumeUrl }}` if the workflow has only one Wait node) can be used in any node before
+  the Wait, e.g. in an approval message. Each URL is bound to its own Wait node and resumes only
+  that one. Calling it with any HTTP method continues the run, and
   the request (`query`, `body`, `headers`) becomes the Wait node's output.
 
 Unanswered webhook waits continue on the `timeout` output after the configured hours. Resume
@@ -90,7 +92,7 @@ button, and the execution timeout only counts active time. Every replica polls f
 each resume is claimed atomically, so it happens exactly once.
 
 ```
-Expense ─► Ask manager (Slack: "{{ execution.resumeUrl }}?decision=approve") ─► Wait ─► Switch(json.query.decision)
+Expense ─► Ask manager (Slack: "{{ execution.resumeUrls['Wait'] }}?decision=approve") ─► Wait ─► Switch(json.query.decision)
                                                                                    └─timeout─► Escalate
 ```
 

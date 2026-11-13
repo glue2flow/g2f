@@ -65,6 +65,7 @@ services:
       G2F_OIDC_PLUGIN_ADMIN_ROLE: g2f-plugin-admin
       # Encrypts node secrets and plugin settings. DEMO KEY - generate your own:
       #   openssl rand -base64 32
+      # The server refuses this demo key unless G2F_PUBLIC_URL is on localhost.
       # Rotate by moving the old key to G2F_SECRET_KEYS_OLD (comma separated).
       G2F_SECRET_KEY: ${G2F_SECRET_KEY:-ZzhnLWRlbW8ta2V5LU5PVC1mb3ItcHJvZHVjdGlvbiE=}
     ports:

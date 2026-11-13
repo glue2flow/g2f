@@ -2,7 +2,10 @@ package expression
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
+	"math"
+	"reflect"
 
 	"github.com/expr-lang/expr"
 
@@ -12,6 +15,32 @@ import (
 // functions are helpers available to every expression in addition to the
 // expr builtins (toBase64, fromBase64, …).
 var functions = []expr.Option{
+	// uniq(a) replaces the expr builtin, which compares every element with
+	// every kept one (quadratic, unbounded on large arrays and not covered by
+	// the step budget). Same result, linear time.
+	expr.DisableBuiltin("uniq"),
+	expr.Function("uniq", func(params ...any) (any, error) {
+		if len(params) != 1 {
+			return nil, fmt.Errorf("invalid number of arguments (expected 1, got %d)", len(params))
+		}
+		v := reflect.ValueOf(params[0])
+		if v.Kind() != reflect.Array && v.Kind() != reflect.Slice {
+			return nil, fmt.Errorf("cannot uniq %s", v.Kind())
+		}
+		seen := make(map[any]struct{}, v.Len())
+		out := []any{}
+		for i := 0; i < v.Len(); i++ {
+			e := v.Index(i).Interface()
+			k := uniqKey(e)
+			if _, dup := seen[k]; dup {
+				continue
+			}
+			seen[k] = struct{}{}
+			out = append(out, e)
+		}
+		return out, nil
+	}, new(func(any) []any)),
+
 	// toBase64Url(s): URL-safe base64 without padding (JWT, Gmail raw messages).
 	expr.Function("toBase64Url", func(params ...any) (any, error) {
 		return base64.RawURLEncoding.EncodeToString([]byte(Stringify(params[0]))), nil
@@ -64,3 +93,34 @@ var functions = []expr.Option{
 		return string(raw), nil
 	}, new(func(any) string)),
 }
+
+// uniqKey maps a value to a comparable key: equal numbers (1 and 1.0) share a
+// key, maps and slices are keyed by their JSON form.
+func uniqKey(v any) any {
+	rv := reflect.ValueOf(v)
+	switch rv.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return rv.Int()
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		if u := rv.Uint(); u > math.MaxInt64 {
+			return u
+		}
+		return int64(rv.Uint())
+	case reflect.Float32, reflect.Float64:
+		f := rv.Float()
+		if f == math.Trunc(f) && math.Abs(f) < 1<<62 {
+			return int64(f)
+		}
+		return f
+	case reflect.Map, reflect.Slice, reflect.Array, reflect.Struct:
+		b, err := json.Marshal(v)
+		if err != nil {
+			return new(int) // not comparable: never a duplicate
+		}
+		return jsonKey(b)
+	}
+	return v
+}
+
+// jsonKey keys maps and slices apart from plain strings.
+type jsonKey string

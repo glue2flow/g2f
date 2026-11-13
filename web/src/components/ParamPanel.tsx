@@ -273,12 +273,15 @@ function Field({
       </div>
     );
   }
+  // Interactive children (SecretField's Replace button, nested checkboxes, buttons)
+  // must not sit inside a <label>: clicks on the label text would be forwarded to them.
+  const Wrap = def.type === "secret" || def.type === "workflows" || def.type === "connection" ? "div" : "label";
   return (
-    <label className="field">
+    <Wrap className="field">
       {label}
       {input}
       {def.description && <span className="field-desc">{def.description}</span>}
-    </label>
+    </Wrap>
   );
 }
 

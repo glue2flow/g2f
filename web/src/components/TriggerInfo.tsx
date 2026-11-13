@@ -28,8 +28,10 @@ export function TriggerInfo({ workflow, nodeId, data, dirty }: Props) {
   if (data.type === "core.wait" && (data.params.mode ?? "duration") === "webhook") {
     return (
       <div className="info-box">
-        The execution pauses here until its resume URL is called (any HTTP method). Put the URL into an earlier node, e.g. an
-        approval message: <code>{"{{ execution.resumeUrl }}?decision=approve"}</code>. The request (query, body) is the output.
+        The execution pauses here until this node's resume URL is called (any HTTP method). Put the URL into an earlier node,
+        e.g. an approval message: <code>{"{{ execution.resumeUrl }}?decision=approve"}</code> (only if the workflow has a single Wait
+        node), otherwise <code>{"{{ execution.resumeUrls['Node name'] }}"}</code>. Each link resumes only its own Wait node. The
+        request (query, body) is the output.
       </div>
     );
   }

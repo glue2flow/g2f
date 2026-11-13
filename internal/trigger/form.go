@@ -473,7 +473,7 @@ func (h *FormHandler) requestCode(fr *formReq) {
 	for _, lim := range []struct {
 		key string
 		max float64
-	}{{"codes:email:" + email, codesPerEmailHour}, {"codes:ip:" + clientIP(r), codesPerClientHour}} {
+	}{{"codes:email:" + email, codesPerEmailHour}, {"codes:ip:" + clientIP(r), codesPerClientHour}, {"codes:all", codesPerFormHour}} {
 		n, err := h.opts.State.StateIncrement(ctx, fr.wf.ID, scope, lim.key, 1, time.Hour)
 		if err != nil {
 			h.log.Error("form rate limit", "err", err)

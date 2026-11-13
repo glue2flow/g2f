@@ -22,8 +22,6 @@ type Runtime interface {
 	// RunWorkflow runs another workflow of the same organization synchronously
 	// from its "Called by Workflow" trigger and returns its last node's output.
 	RunWorkflow(ctx context.Context, workflowID string, items []Item) ([]Item, error)
-	// ResumeURL is the URL that resumes this execution while it waits for a webhook.
-	ResumeURL() string
 }
 
 // Wait modes.

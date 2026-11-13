@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"sync"
@@ -64,16 +65,25 @@ func (s *waitStore) PauseExecution(_ context.Context, e *store.Execution, state 
 	return nil
 }
 
-func (s *waitStore) ClaimWaiting(_ context.Context, id, mode, _ string) (*store.Execution, []byte, error) {
+func (s *waitStore) ClaimWaiting(_ context.Context, id, mode, nodeID, _ string) (*store.Execution, []byte, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	e, ok := s.execs[id]
-	if !ok || e.Status != store.StatusWaiting || (mode != "" && e.WaitMode != mode) {
+	if !ok || e.Status != store.StatusWaiting || (mode != "" && e.WaitMode != mode) ||
+		(nodeID != "" && waitNodeOf(s.states[id]) != nodeID) {
 		return nil, nil, store.ErrNotFound
 	}
 	e.Status = store.StatusRunning
 	s.execs[id] = e
 	return &e, s.states[id], nil
+}
+
+func waitNodeOf(state []byte) string {
+	var st struct {
+		WaitNode string `json:"waitNode"`
+	}
+	_ = json.Unmarshal(state, &st)
+	return st.WaitNode
 }
 
 func (s *waitStore) DueWaiting(_ context.Context, now time.Time, _ int) ([]string, error) {
@@ -124,7 +134,7 @@ func waitEngine(t *testing.T, st *waitStore) *Engine {
 	}
 	return New(reg, st, discardLog(), Options{
 		Workflows: st,
-		ResumeURL: func(id string) string { return "https://g2f.test/webhook-resume/" + id + "/sig" },
+		ResumeURL: func(id, node string) string { return "https://g2f.test/webhook-resume/" + id + "/" + node + "/sig" },
 	})
 }
 
@@ -179,7 +189,7 @@ func TestWaitWebhookResume(t *testing.T) {
 		t.Fatalf("wait not recorded: %+v", exec)
 	}
 	link := stepOf(exec, "ask").Output["main"][0]["link"]
-	if link != "https://g2f.test/webhook-resume/"+exec.ID+"/sig" {
+	if link != "https://g2f.test/webhook-resume/"+exec.ID+"/w/sig" {
 		t.Fatalf("resume URL not available before the Wait node: %v", link)
 	}
 	if stepOf(exec, "w").Status != "waiting" {
@@ -187,7 +197,7 @@ func TestWaitWebhookResume(t *testing.T) {
 	}
 
 	// The persisted state survives a JSON round trip: resume works from it alone.
-	if _, err := e.Resume(context.Background(), exec.ID, nodes.Item{"query": map[string]any{"decision": "yes"}}); err != nil {
+	if _, err := e.Resume(context.Background(), exec.ID, "w", nodes.Item{"query": map[string]any{"decision": "yes"}}); err != nil {
 		t.Fatal(err)
 	}
 	done := st.awaitDone(t, exec.ID)
@@ -202,7 +212,7 @@ func TestWaitWebhookResume(t *testing.T) {
 		t.Fatalf("branches: exp=%s w=%s", stepOf(done, "exp").Status, stepOf(done, "w").Status)
 	}
 	// Resuming twice is rejected.
-	if _, err := e.Resume(context.Background(), exec.ID, nodes.Item{}); !errors.Is(err, ErrNotWaiting) {
+	if _, err := e.Resume(context.Background(), exec.ID, "w", nodes.Item{}); !errors.Is(err, ErrNotWaiting) {
 		t.Fatalf("second resume: %v", err)
 	}
 }
@@ -212,7 +222,7 @@ func TestWaitWebhookTimeout(t *testing.T) {
 	e := waitEngine(t, st)
 	exec := startAndPause(t, e, st, approvalWF(map[string]any{"mode": "webhook"}))
 	// Time-based resume of a webhook wait = timeout.
-	if _, err := e.Resume(context.Background(), exec.ID, nil); err != nil {
+	if _, err := e.Resume(context.Background(), exec.ID, "", nil); err != nil {
 		t.Fatal(err)
 	}
 	done := st.awaitDone(t, exec.ID)
@@ -226,7 +236,7 @@ func TestWaitDurationViaResumer(t *testing.T) {
 	e := waitEngine(t, st)
 	exec := startAndPause(t, e, st, approvalWF(map[string]any{"mode": "duration", "amount": 0.2, "unit": "seconds"}))
 	// A webhook call must not resume a time-based wait.
-	if _, err := e.Resume(context.Background(), exec.ID, nodes.Item{}); !errors.Is(err, ErrNotWaiting) {
+	if _, err := e.Resume(context.Background(), exec.ID, "w", nodes.Item{}); !errors.Is(err, ErrNotWaiting) {
 		t.Fatalf("webhook resumed a duration wait: %v", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -336,5 +346,72 @@ func TestOnFailureHook(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("OnFailure not called")
+	}
+}
+
+// twoStageWF: Start -> Set(links) -> Wait A -> Wait B -> Done (both webhook waits).
+func twoStageWF() *workflow.Workflow {
+	wait := func(id, name string) workflow.Node {
+		return workflow.Node{ID: id, Name: name, Type: "core.wait", Params: map[string]any{"mode": "webhook"}}
+	}
+	return &workflow.Workflow{ID: "wf2", Name: "Two stage", OrgID: "acme", Graph: workflow.Graph{
+		Nodes: []workflow.Node{
+			{ID: "t", Name: "Start", Type: "trigger.manual"},
+			{ID: "ask", Name: "Ask", Type: "core.set", Params: map[string]any{"fields": map[string]any{
+				"a": "{{ execution.resumeUrls['Approval A'] }}", "b": "{{ execution.resumeUrls['Approval B'] }}",
+				"single": "{{ execution.resumeUrl ?? 'none' }}"}}},
+			wait("wa", "Approval A"), wait("wb", "Approval B"),
+			{ID: "done", Name: "Done", Type: "core.set", Params: map[string]any{"fields": map[string]any{"ok": true}}},
+		},
+		Edges: []workflow.Edge{
+			{ID: "1", Source: "t", Target: "ask"}, {ID: "2", Source: "ask", Target: "wa"},
+			{ID: "3", Source: "wa", SourceHandle: "main", Target: "wb"},
+			{ID: "4", Source: "wb", SourceHandle: "main", Target: "done"},
+		},
+	}}
+}
+
+func TestResumeBoundToWaitNode(t *testing.T) {
+	st := newWaitStore()
+	e := waitEngine(t, st)
+	ctx := context.Background()
+	exec := startAndPause(t, e, st, twoStageWF())
+
+	links := stepOf(exec, "ask").Output["main"][0]
+	if links["a"] != "https://g2f.test/webhook-resume/"+exec.ID+"/wa/sig" ||
+		links["b"] != "https://g2f.test/webhook-resume/"+exec.ID+"/wb/sig" {
+		t.Fatalf("resumeUrls: %v", links)
+	}
+	if links["single"] != "none" {
+		t.Fatalf("resumeUrl must be unset with two Wait nodes: %v", links["single"])
+	}
+
+	// The execution waits at A: B's link must not resume it, and must not
+	// leave it claimed.
+	if _, err := e.Resume(ctx, exec.ID, "wb", nodes.Item{}); !errors.Is(err, ErrNotWaiting) {
+		t.Fatalf("link of B resumed A: %v", err)
+	}
+	if got := st.get(exec.ID); got.Status != store.StatusWaiting {
+		t.Fatalf("status after mismatch: %s", got.Status)
+	}
+	if _, err := e.Resume(ctx, exec.ID, "wa", nodes.Item{}); err != nil {
+		t.Fatalf("link of A: %v", err)
+	}
+	// Now at B: A's link is spent, B's works.
+	deadline := time.Now().Add(5 * time.Second)
+	for st.get(exec.ID).Status != store.StatusWaiting || stepOf(st.get(exec.ID), "wb").Status != "waiting" {
+		if time.Now().After(deadline) {
+			t.Fatal("execution did not reach Wait B")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if _, err := e.Resume(ctx, exec.ID, "wa", nodes.Item{}); !errors.Is(err, ErrNotWaiting) {
+		t.Fatalf("link of A resumed B: %v", err)
+	}
+	if _, err := e.Resume(ctx, exec.ID, "wb", nodes.Item{}); err != nil {
+		t.Fatalf("link of B: %v", err)
+	}
+	if done := st.awaitDone(t, exec.ID); done.Status != store.StatusSuccess {
+		t.Fatalf("status %s: %s", done.Status, done.Error)
 	}
 }

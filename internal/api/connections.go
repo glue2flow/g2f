@@ -6,10 +6,12 @@ import (
 	"html/template"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
 	"github.com/glue2flow/g2f/internal/auth"
+	"github.com/glue2flow/g2f/internal/oauth"
 	"github.com/glue2flow/g2f/internal/store"
 )
 
@@ -47,12 +49,21 @@ func (s *Server) authorizeConnection(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
-	url, err := s.oauth.AuthorizeURL(r.Context(), auth.FromContext(r.Context()), in.Module, in.Name)
+	url, nonce, err := s.oauth.AuthorizeURL(r.Context(), auth.FromContext(r.Context()), in.Module, in.Name)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	s.setOAuthCookie(w, nonce, int(oauth.StateTTL/time.Second))
 	writeJSON(w, http.StatusOK, map[string]string{"url": url})
+}
+
+// setOAuthCookie binds the OAuth flow to this browser; maxAge < 0 clears it.
+func (s *Server) setOAuthCookie(w http.ResponseWriter, value string, maxAge int) {
+	http.SetCookie(w, &http.Cookie{
+		Name: oauth.CookieName, Value: value, Path: "/oauth/callback", MaxAge: maxAge,
+		HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: strings.HasPrefix(s.cfg.PublicURL, "https://"),
+	})
 }
 
 func (s *Server) loadManagedConnection(w http.ResponseWriter, r *http.Request) (*store.Connection, bool) {
@@ -145,8 +156,14 @@ var callbackPage = template.Must(template.New("cb").Parse(`<!doctype html>
 </script></body></html>`))
 
 // oauthCallback receives the provider redirect. It is not behind the API auth:
-// the encrypted state binds the flow to the user who started it.
+// the encrypted state binds the flow to the user who started it, and the
+// nonce cookie to the browser that started it.
 func (s *Server) oauthCallback(w http.ResponseWriter, r *http.Request) {
+	var nonce string
+	if ck, err := r.Cookie(oauth.CookieName); err == nil {
+		nonce = ck.Value
+	}
+	s.setOAuthCookie(w, "", -1)
 	q := r.URL.Query()
 	data := map[string]any{"OK": false, "ID": "", "Name": "", "Account": "", "Error": "", "Origin": s.cfg.PublicURL}
 	var err error
@@ -156,7 +173,7 @@ func (s *Server) oauthCallback(w http.ResponseWriter, r *http.Request) {
 		err = errors.New("missing code or state")
 	} else {
 		var c *store.Connection
-		if c, err = s.oauth.Callback(r.Context(), q.Get("code"), q.Get("state")); err == nil {
+		if c, err = s.oauth.Callback(r.Context(), q.Get("code"), q.Get("state"), nonce); err == nil {
 			data["OK"], data["ID"], data["Name"], data["Account"] = true, c.ID, c.Name, c.Account
 		}
 	}
