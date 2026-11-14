@@ -85,7 +85,6 @@ development without Docker: **[Getting started](docs/getting-started.md)**.
 - Cancelling running executions from the editor (waiting ones can be cancelled today)
 - Webhook rate limiting and a "test URL" that works while a workflow is inactive
 - Workflow version history and import/export
-- SSRF protection for HTTP nodes (block private networks by default)
 
 ## Documentation
 

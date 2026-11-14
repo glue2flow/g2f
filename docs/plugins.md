@@ -41,7 +41,10 @@ from organization admins.
 ## WebAssembly plugins
 
 WASM plugins run in a fresh instance per node execution with no file system access and a
-memory and time limit. They can make HTTP calls only to the manifest's `allowedHosts`.
+memory and time limit. They can make HTTP calls only to the manifest's `allowedHosts`, and
+every redirect hop must stay within them. Plugin requests are also subject to the
+[network access](nodes.md#network-access) rules: hosts in `allowedHosts` that resolve to
+private addresses are blocked unless the administrator allows them.
 
 See **[examples/plugins/telegram](../examples/plugins/telegram)** for a complete WASM plugin in
 Go and JavaScript, the JSON calling convention and build instructions, and

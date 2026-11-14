@@ -17,6 +17,7 @@ import (
 	"github.com/glue2flow/g2f/internal/config"
 	"github.com/glue2flow/g2f/internal/engine"
 	"github.com/glue2flow/g2f/internal/expression"
+	"github.com/glue2flow/g2f/internal/netguard"
 	"github.com/glue2flow/g2f/internal/nodes"
 	"github.com/glue2flow/g2f/internal/oauth"
 	"github.com/glue2flow/g2f/internal/plugin"
@@ -50,6 +51,10 @@ func run(log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	// Workflow HTTP requests and WASM plugins must not reach private networks
+	// unless configured; installed before any plugin is loaded.
+	netguard.SetPolicy(netguard.Policy{AllowPrivate: cfg.HTTPAllowPrivate, Allow: cfg.HTTPAllowed})
+	netguard.InstallDefaults()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 

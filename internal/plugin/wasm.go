@@ -11,6 +11,7 @@ import (
 
 	extism "github.com/extism/go-sdk"
 
+	"github.com/glue2flow/g2f/internal/netguard"
 	"github.com/glue2flow/g2f/internal/nodes"
 )
 
@@ -69,6 +70,7 @@ const (
 type wasmModule struct {
 	compiled *extism.CompiledPlugin
 	timeout  time.Duration
+	hosts    []string // allowedHosts, re-checked on every redirect
 	log      *slog.Logger
 }
 
@@ -105,7 +107,7 @@ func compileWasm(ctx context.Context, m *nodes.Manifest, wasm []byte, log *slog.
 		compiled.Close(ctx)
 		return nil, fmt.Errorf("wasm module does not export an `execute` function")
 	}
-	return &wasmModule{compiled: compiled, timeout: timeout, log: log.With("module", m.Module)}, nil
+	return &wasmModule{compiled: compiled, timeout: timeout, hosts: m.AllowedHosts, log: log.With("module", m.Module)}, nil
 }
 
 func (w *wasmModule) close() { _ = w.compiled.Close(context.Background()) }
@@ -157,6 +159,7 @@ func (n *wasmNode) Execute(ctx context.Context, ec *nodes.ExecContext) (nodes.Ou
 		return nil, err
 	}
 
+	ctx = netguard.WithAllowedHosts(ctx, n.mod.hosts)
 	ctx, cancel := context.WithTimeout(ctx, n.mod.timeout)
 	defer cancel()
 	inst, err := n.mod.compiled.Instance(ctx, extism.PluginInstanceConfig{})

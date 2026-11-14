@@ -27,6 +27,7 @@ import (
 
 	"github.com/glue2flow/g2f/internal/auth"
 	"github.com/glue2flow/g2f/internal/expression"
+	"github.com/glue2flow/g2f/internal/netguard"
 	"github.com/glue2flow/g2f/internal/nodes"
 	"github.com/glue2flow/g2f/internal/secrets"
 	"github.com/glue2flow/g2f/internal/store"
@@ -73,7 +74,7 @@ func NewManager(st Store, box *secrets.Box, reg *nodes.Registry, settings Settin
 	return &Manager{
 		store: st, box: box, reg: reg, settings: settings,
 		publicURL: strings.TrimRight(publicURL, "/"),
-		client:    &http.Client{Timeout: 30 * time.Second},
+		client:    &http.Client{Timeout: 30 * time.Second, Transport: netguard.Unguarded()},
 		now:       time.Now,
 	}
 }

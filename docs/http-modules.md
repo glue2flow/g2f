@@ -39,6 +39,13 @@ plugin-only settings. For example:
 emitted item(s); it defaults to `{{ response.body }}`. The node fails on HTTP status ≥ 400
 unless `failOnError: false` is set.
 
+Requests use the same [network access](nodes.md#network-access) rules as the HTTP Request
+node. Credentials of a module (headers, query, OAuth token) are never forwarded to another
+host: a redirect that changes scheme, host or port fails with
+`redirect from … refused: module credentials are only sent to the configured API host`;
+redirects within the same host are followed. The OAuth token is sent only over `https` to the
+default port of a host in `apiHosts`; an entry can name another port (`api.example.com:8443`).
+
 The full list of manifest keys, parameter types and `outputSchema` options is in the
 [manifest reference](plugins.md#manifest-reference). For logic that does not fit a single HTTP
 request, write a [WebAssembly plugin](plugins.md#webassembly-plugins) or a

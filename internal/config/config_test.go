@@ -91,3 +91,21 @@ func TestExpressionMaxSteps(t *testing.T) {
 		t.Fatalf("got %d", c.ExpressionMaxSteps)
 	}
 }
+
+func TestHTTPNetworkPolicy(t *testing.T) {
+	t.Setenv("G2F_SECRET_KEY", "dGVzdC1rZXktdGVzdC1rZXktdGVzdC1rZXktdGVzdC0=")
+	t.Setenv("G2F_AUTH_MODE", "none")
+	c, err := Load()
+	if err != nil || c.HTTPAllowPrivate {
+		t.Fatalf("defaults: %v allowPrivate=%v", err, c.HTTPAllowPrivate)
+	}
+	t.Setenv("G2F_HTTP_ALLOW_PRIVATE", "true")
+	t.Setenv("G2F_HTTP_ALLOWED_HOSTS", "10.0.0.0/8, 192.168.1.5, intranet.example, *.corp.internal")
+	if c, err = Load(); err != nil || !c.HTTPAllowPrivate {
+		t.Fatalf("%v", err)
+	}
+	t.Setenv("G2F_HTTP_ALLOWED_HOSTS", "10.0.0.0/8, http://nope")
+	if _, err = Load(); err == nil || !strings.Contains(err.Error(), "G2F_HTTP_ALLOWED_HOSTS") || !strings.Contains(err.Error(), "http://nope") {
+		t.Fatalf("want error naming the entry, got %v", err)
+	}
+}

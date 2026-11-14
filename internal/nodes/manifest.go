@@ -310,7 +310,7 @@ func (m *Manifest) validateOAuth2() error {
 		if err != nil || u.Hostname() == "" {
 			return fmt.Errorf("apiHosts is required when the module has no baseUrl")
 		}
-		o.APIHosts = []string{u.Hostname()}
+		o.APIHosts = []string{u.Host}
 	}
 	for _, p := range append(append([]Param{}, m.Params...), m.Config...) {
 		if p.Name == ConnectionParam {

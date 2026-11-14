@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/glue2flow/g2f/internal/netguard"
 )
 
 // demoSecretKeys are published in this repository (docker-compose.yml and the
@@ -54,6 +56,12 @@ type Config struct {
 	// ExpressionMaxSteps is the number of predicate iterations (all, filter,
 	// map, ...) one expression evaluation may run.
 	ExpressionMaxSteps int
+	// HTTPAllowPrivate lets workflow HTTP requests reach private and local
+	// addresses (SSRF protection off).
+	HTTPAllowPrivate bool
+	// HTTPAllowed are exceptions to the private network block: IPs, CIDRs and
+	// host names.
+	HTTPAllowed netguard.AllowList
 
 	// InstanceTimeout: how long an instance may miss heartbeats before other
 	// instances take over its running executions.
@@ -162,6 +170,10 @@ func Load() (*Config, error) {
 	}
 	if c.ExpressionMaxSteps <= 0 {
 		return nil, fmt.Errorf("G2F_EXPRESSION_MAX_STEPS must be greater than 0")
+	}
+	c.HTTPAllowPrivate = env("G2F_HTTP_ALLOW_PRIVATE", "false") == "true"
+	if c.HTTPAllowed, err = netguard.ParseAllowList(splitList(env("G2F_HTTP_ALLOWED_HOSTS", ""))); err != nil {
+		return nil, fmt.Errorf("G2F_HTTP_ALLOWED_HOSTS: %w", err)
 	}
 	if c.InstanceTimeout, err = time.ParseDuration(env("G2F_INSTANCE_TIMEOUT", "30s")); err != nil {
 		return nil, fmt.Errorf("G2F_INSTANCE_TIMEOUT: %w", err)

@@ -3,8 +3,8 @@ package nodes
 import (
 	"context"
 	"fmt"
+	"net"
 	neturl "net/url"
-	"slices"
 	"strings"
 	"time"
 
@@ -102,7 +102,8 @@ func (d *declarativeNode) requests(ctx context.Context, ec *ExecContext, items [
 		if err != nil {
 			return nil, err
 		}
-		// The OAuth token only goes to the module's API hosts, so a URL built
+		// The OAuth token only goes to the module's API hosts (https, default port
+		// unless the entry names one), so a URL built
 		// from node parameters can never send it elsewhere.
 		sendToken := false
 		if ec.OAuth != nil {
@@ -135,7 +136,7 @@ func (d *declarativeNode) requests(ctx context.Context, ec *ExecContext, items [
 
 		res, err := doHTTP(ctx, httpRequest{
 			Method: req.Method, URL: expression.Stringify(urlV), Headers: headers,
-			Query: query, Body: bodyV, Timeout: d.timeout,
+			Query: query, Body: bodyV, Timeout: d.timeout, SameHostOnly: true,
 		})
 		if err != nil {
 			return nil, err
@@ -169,8 +170,24 @@ func (d *declarativeNode) tokenHostAllowed(raw string) bool {
 	if err != nil {
 		return false
 	}
-	return slices.Contains(d.module.OAuth2.APIHosts, u.Hostname())
+	port := portOf(u)
+	for _, h := range d.module.OAuth2.APIHosts {
+		host, hp, err := net.SplitHostPort(h)
+		if err != nil {
+			host, hp = strings.Trim(h, "[]"), "443"
+		}
+		if !strings.EqualFold(host, u.Hostname()) {
+			continue
+		}
+		if allowInsecureAPIHosts || u.Scheme == "https" && hp == port {
+			return true
+		}
+	}
+	return false
 }
+
+// allowInsecureAPIHosts lets tests send tokens to plain http servers.
+var allowInsecureAPIHosts bool
 
 func hostOf(raw string) string {
 	if u, err := neturl.Parse(raw); err == nil && u.Host != "" {
