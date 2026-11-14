@@ -1,0 +1,246 @@
+# SharePoint (Microsoft 365 sites, lists and document libraries) via Microsoft Graph and
+# OAuth2. Users connect their own work or school account.
+#
+# Setup (once per organization, by an admin):
+#   1. Microsoft Entra admin center -> App registrations -> New registration
+#      (or reuse the Outlook / Teams module's app). Supported account types: "Accounts in
+#      any organizational directory". SharePoint needs a work or school account.
+#      Redirect URI (Web): <G2F_PUBLIC_URL>/oauth/callback
+#      Single-tenant apps: replace "common" in authorizeUrl/tokenUrl below with your
+#      tenant ID.
+#   2. API permissions -> Microsoft Graph (delegated): offline_access, User.Read,
+#      Sites.ReadWrite.All. Sites.ReadWrite.All needs ADMIN CONSENT: click "Grant admin
+#      consent for <tenant>", or users get an "approval required" screen when connecting.
+#   3. Certificates & secrets -> New client secret.
+#   4. glue2flow -> Plugins -> SharePoint -> Settings: enter the application (client) ID
+#      and the secret value.
+# The connected user only reaches the sites and lists they have access to in SharePoint.
+module: sharepoint
+name: SharePoint
+version: 1.0.0
+description: Work with SharePoint sites, lists, list items and document libraries
+color: "#038387"
+baseUrl: https://graph.microsoft.com/v1.0
+
+config:
+  - name: clientId
+    label: Application (client) ID
+    description: From the app registration in Microsoft Entra.
+  - name: clientSecret
+    label: Client secret
+    type: secret
+
+vars:
+  - { name: defaultSiteId, label: Default site ID, description: "Used by all nodes unless they set a site. Find it with Search Sites, or use contoso.sharepoint.com:/sites/team." }
+
+oauth2:
+  authorizeUrl: https://login.microsoftonline.com/common/oauth2/v2.0/authorize
+  tokenUrl: https://login.microsoftonline.com/common/oauth2/v2.0/token
+  scopes: [offline_access, User.Read, Sites.ReadWrite.All]
+  pkce: true
+  userInfo:
+    url: https://graph.microsoft.com/v1.0/me
+    field: userPrincipalName
+  apiHosts: [graph.microsoft.com]
+
+nodes:
+  - type: searchSites
+    name: Search Sites
+    description: Find sites by keyword (one item per site).
+    params:
+      - { name: query, label: Search, required: true, default: "*", description: "Keyword in the site name or URL; * lists the sites you can reach." }
+    request:
+      method: GET
+      path: /sites
+      query:
+        search: "{{ params.query }}"
+    output: &sites "{{ map(response.body.value ?? [], ({id: .id, name: .name, displayName: .displayName, description: .description, webUrl: .webUrl, createdDateTime: .createdDateTime})) }}"
+    outputSchema:
+      fields: &siteFields
+        - { path: id, type: string, description: "Site ID (hostname,siteCollectionId,siteId)" }
+        - { path: name, type: string }
+        - { path: displayName, type: string }
+        - { path: description, type: string }
+        - { path: webUrl, type: string }
+        - { path: createdDateTime, type: string }
+
+  - type: getSite
+    name: Get Site
+    description: Fetch a site by ID, by "hostname:/sites/name" path, or the root site.
+    params:
+      - &siteId { name: siteId, label: Site ID, required: true, default: "{{ vars.defaultSiteId }}", description: "Site ID, contoso.sharepoint.com:/sites/team or root." }
+    request:
+      method: GET
+      path: /sites/{{ params.siteId }}
+    output: "{{ let s = response.body; {id: s.id, name: s.name, displayName: s.displayName, description: s.description, webUrl: s.webUrl, createdDateTime: s.createdDateTime} }}"
+    outputSchema:
+      fields: *siteFields
+
+  - type: listLists
+    name: List Lists
+    description: List the lists and document libraries of a site (one item per list).
+    params:
+      - *siteId
+      - { name: includeHidden, label: Include system lists, type: boolean, default: false }
+    request:
+      method: GET
+      path: /sites/{{ params.siteId }}/lists
+      query:
+        $select: id,name,displayName,description,webUrl,createdDateTime,lastModifiedDateTime,list
+    output: "{{ map(filter(response.body.value ?? [], params.includeHidden || !(.list.hidden ?? false)), ({id: .id, name: .name, displayName: .displayName, description: .description, webUrl: .webUrl, template: .list.template, hidden: .list.hidden ?? false, lastModifiedDateTime: .lastModifiedDateTime})) }}"
+    outputSchema:
+      fields:
+        - { path: id, type: string, description: List ID }
+        - { path: name, type: string }
+        - { path: displayName, type: string }
+        - { path: description, type: string }
+        - { path: webUrl, type: string }
+        - { path: template, type: string, description: "genericList, documentLibrary, ..." }
+        - { path: hidden, type: boolean }
+        - { path: lastModifiedDateTime, type: string }
+
+  - type: listItems
+    name: List Items
+    description: List the items of a list (one item per list item; custom columns are in the fields object).
+    params:
+      - *siteId
+      - &listId { name: listId, label: List ID or name, required: true, description: "From List Lists, e.g. a GUID or the display name." }
+      - { name: filter, label: OData filter, placeholder: "fields/Status eq 'Open'", description: "Filtering on columns that are not indexed may fail; index the column in the list settings." }
+      - { name: orderBy, label: Order by, placeholder: "fields/Created desc" }
+      - { name: top, label: Max items, type: number, default: 50, description: "At most 999." }
+    request:
+      method: GET
+      path: /sites/{{ params.siteId }}/lists/{{ params.listId }}/items
+      headers:
+        Prefer: "{{ (params.filter ?? '') != '' ? 'HonorNonIndexedQueriesWarningMayFailRandomly' : '' }}"
+      query:
+        $expand: fields
+        $top: "{{ params.top }}"
+        $filter: "{{ params.filter }}"
+        $orderby: "{{ params.orderBy }}"
+    output: &items "{{ map(response.body.value ?? [], ({id: .id, webUrl: .webUrl, createdDateTime: .createdDateTime, lastModifiedDateTime: .lastModifiedDateTime, createdBy: .createdBy.user.email, lastModifiedBy: .lastModifiedBy.user.email, fields: .fields})) }}"
+    outputSchema:
+      fields: &itemFields
+        - { path: id, type: string, description: List item ID }
+        - { path: webUrl, type: string }
+        - { path: createdDateTime, type: string }
+        - { path: lastModifiedDateTime, type: string }
+        - { path: createdBy, type: string }
+        - { path: lastModifiedBy, type: string }
+        - { path: fields, type: object, description: "Column values by internal column name" }
+        - { path: fields.Title, type: string }
+
+  - type: getItem
+    name: Get Item
+    description: Fetch one list item.
+    params:
+      - *siteId
+      - *listId
+      - &itemId { name: itemId, label: Item ID, required: true, default: "{{ json.id }}" }
+    request:
+      method: GET
+      path: /sites/{{ params.siteId }}/lists/{{ params.listId }}/items/{{ params.itemId }}
+      query:
+        $expand: fields
+    output: &item "{{ let i = response.body; {id: i.id, webUrl: i.webUrl, createdDateTime: i.createdDateTime, lastModifiedDateTime: i.lastModifiedDateTime, createdBy: i.createdBy.user.email, lastModifiedBy: i.lastModifiedBy.user.email, fields: i.fields} }}"
+    outputSchema:
+      fields: *itemFields
+
+  - type: createItem
+    name: Create Item
+    description: Add an item to a list.
+    params:
+      - *siteId
+      - *listId
+      - &fields
+        name: fields
+        label: Fields
+        type: json
+        required: true
+        default: { Title: "{{ json.title }}" }
+        description: Internal column names and values. Lookup and person columns take "<Column>LookupId".
+    request:
+      method: POST
+      path: /sites/{{ params.siteId }}/lists/{{ params.listId }}/items
+      body:
+        fields: "{{ params.fields }}"
+    output: *item
+    outputSchema:
+      fields: *itemFields
+
+  - type: updateItem
+    name: Update Item
+    description: Change columns of a list item. Only the given columns are changed.
+    params:
+      - *siteId
+      - *listId
+      - *itemId
+      - *fields
+    request:
+      method: PATCH
+      path: /sites/{{ params.siteId }}/lists/{{ params.listId }}/items/{{ params.itemId }}/fields
+      body: "{{ params.fields }}"
+    output: "{{ {id: params.itemId, fields: response.body} }}"
+    outputSchema:
+      fields:
+        - { path: id, type: string, description: List item ID }
+        - { path: fields, type: object, description: All column values after the update }
+
+  - type: deleteItem
+    name: Delete Item
+    description: Delete a list item.
+    params:
+      - *siteId
+      - *listId
+      - *itemId
+    request:
+      method: DELETE
+      path: /sites/{{ params.siteId }}/lists/{{ params.listId }}/items/{{ params.itemId }}
+    output: "{{ {id: params.itemId, deleted: response.status == 204} }}"
+    outputSchema:
+      fields:
+        - { path: id, type: string }
+        - { path: deleted, type: boolean }
+
+  - type: listDrives
+    name: List Document Libraries
+    description: List the document libraries (drives) of a site, to find drive IDs.
+    params:
+      - *siteId
+    request:
+      method: GET
+      path: /sites/{{ params.siteId }}/drives
+    output: "{{ map(response.body.value ?? [], ({id: .id, name: .name, driveType: .driveType, webUrl: .webUrl})) }}"
+    outputSchema:
+      fields:
+        - { path: id, type: string, description: Drive ID }
+        - { path: name, type: string }
+        - { path: driveType, type: string }
+        - { path: webUrl, type: string }
+
+  - type: listDriveItems
+    name: List Files and Folders
+    description: List the files and folders in a folder of a site's document library (one item per entry).
+    params:
+      - { name: siteId, label: Site ID, default: "{{ vars.defaultSiteId }}", description: Used for the default document library when no drive ID is set. }
+      - { name: driveId, label: Library (drive) ID, description: From List Document Libraries. Empty uses the site's default library "Documents". }
+      - { name: folderId, label: Folder ID, description: Empty lists the root of the library. }
+      - { name: top, label: Max entries, type: number, default: 100 }
+    request:
+      method: GET
+      path: "/{{ (params.driveId ?? '') != '' ? 'drives/' + params.driveId : 'sites/' + params.siteId + '/drive' }}/{{ (params.folderId ?? '') != '' ? 'items/' + params.folderId : 'root' }}/children"
+      query:
+        $top: "{{ params.top }}"
+    output: "{{ map(response.body.value ?? [], ({id: .id, name: .name, webUrl: .webUrl, isFolder: .folder != nil, size: .size, mimeType: .file.mimeType, createdDateTime: .createdDateTime, lastModifiedDateTime: .lastModifiedDateTime, lastModifiedBy: .lastModifiedBy.user.displayName, driveId: .parentReference.driveId})) }}"
+    outputSchema:
+      fields:
+        - { path: id, type: string, description: Drive item ID }
+        - { path: name, type: string }
+        - { path: webUrl, type: string }
+        - { path: isFolder, type: boolean }
+        - { path: size, type: number }
+        - { path: mimeType, type: string }
+        - { path: createdDateTime, type: string }
+        - { path: lastModifiedDateTime, type: string }
+        - { path: lastModifiedBy, type: string }
+        - { path: driveId, type: string }

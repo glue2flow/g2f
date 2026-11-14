@@ -1,0 +1,248 @@
+# Google Calendar via OAuth2. Users connect their own Google account; glue2flow stores
+# and refreshes the tokens and adds them to requests to www.googleapis.com.
+#
+# Setup (once per organization, by an admin):
+#   1. Google Cloud console -> APIs & Services: enable the "Google Calendar API".
+#   2. OAuth consent screen: add the scopes .../auth/calendar.events and
+#      .../auth/calendar.calendarlist.readonly.
+#   3. Credentials -> Create OAuth client ID -> "Web application".
+#      Authorized redirect URI: <G2F_PUBLIC_URL>/oauth/callback
+#   4. glue2flow -> Plugins -> Google Calendar -> Settings: enter client ID and secret.
+# The other Google modules can use the same OAuth client.
+module: google-calendar
+name: Google Calendar
+version: 1.0.0
+description: List, create, change and delete calendar events with your Google account
+color: "#4285f4"
+baseUrl: https://www.googleapis.com/calendar/v3
+
+config:
+  - name: clientId
+    label: OAuth client ID
+    description: From Google Cloud console (Web application client).
+  - name: clientSecret
+    label: OAuth client secret
+    type: secret
+
+oauth2:
+  authorizeUrl: https://accounts.google.com/o/oauth2/v2/auth
+  tokenUrl: https://oauth2.googleapis.com/token
+  scopes:
+    - https://www.googleapis.com/auth/calendar.events # events of all calendars the user can edit
+    - https://www.googleapis.com/auth/calendar.calendarlist.readonly # only for List Calendars
+    - openid
+    - email
+  pkce: true
+  authorizeParams:
+    access_type: offline # returns a refresh token
+    prompt: consent
+  userInfo:
+    url: https://openidconnect.googleapis.com/v1/userinfo
+    field: email
+  apiHosts: [www.googleapis.com]
+
+nodes:
+  - type: listCalendars
+    name: List Calendars
+    description: List the calendars of the connected user (one item per calendar), to find calendar IDs.
+    request:
+      method: GET
+      path: /users/me/calendarList
+      query:
+        maxResults: 250
+    output: "{{ map(response.body.items ?? [], ({id: .id, summary: .summary, description: .description, primary: .primary ?? false, accessRole: .accessRole, timeZone: .timeZone})) }}"
+    outputSchema:
+      fields:
+        - { path: id, type: string, description: "Calendar ID, e.g. an email address" }
+        - { path: summary, type: string, description: Calendar name }
+        - { path: description, type: string }
+        - { path: primary, type: boolean }
+        - { path: accessRole, type: string }
+        - { path: timeZone, type: string }
+
+  - type: listEvents
+    name: List Events
+    description: List events of a calendar in a time range (one item per event). Recurring events are expanded into instances.
+    params:
+      - &calendarId { name: calendarId, label: Calendar ID, required: true, default: primary, description: '"primary" or an ID from List Calendars.' }
+      - { name: timeMin, label: From, default: "{{ now().Format('2006-01-02T15:04:05Z07:00') }}", description: "Start of the range, e.g. 2026-03-01T00:00:00Z. Empty: no lower bound." }
+      - { name: timeMax, label: Until, description: "End of the range (exclusive), RFC 3339." }
+      - { name: query, label: Search, description: "Free-text search in title, description, location and attendees." }
+      - { name: maxResults, label: Max events, type: number, default: 50, description: At most 2500. }
+    request:
+      method: GET
+      path: /calendars/{{ params.calendarId }}/events
+      query:
+        timeMin: "{{ params.timeMin }}"
+        timeMax: "{{ params.timeMax }}"
+        q: "{{ params.query }}"
+        maxResults: "{{ params.maxResults }}"
+        singleEvents: true
+        orderBy: startTime
+    output: &events >-
+      {{ map(response.body.items ?? [], ({
+           id: .id, status: .status, summary: .summary, description: .description, location: .location,
+           start: .start.dateTime ?? .start.date, end: .end.dateTime ?? .end.date,
+           allDay: .start.date != nil, timeZone: .start.timeZone,
+           organizer: .organizer.email, creator: .creator.email,
+           attendees: map(.attendees ?? [], .email),
+           htmlLink: .htmlLink, hangoutLink: .hangoutLink, recurringEventId: .recurringEventId,
+           created: .created, updated: .updated
+         })) }}
+    outputSchema:
+      fields: &eventFields
+        - { path: id, type: string, description: Event ID }
+        - { path: status, type: string, description: "confirmed, tentative or cancelled" }
+        - { path: summary, type: string, description: Title }
+        - { path: description, type: string }
+        - { path: location, type: string }
+        - { path: start, type: string, description: "Start (RFC 3339 date-time, or a date for all-day events)" }
+        - { path: end, type: string }
+        - { path: allDay, type: boolean }
+        - { path: timeZone, type: string }
+        - { path: organizer, type: string }
+        - { path: creator, type: string }
+        - { path: attendees, type: array, description: Email addresses }
+        - { path: htmlLink, type: string, description: Opens the event in Google Calendar }
+        - { path: hangoutLink, type: string, description: Google Meet link }
+        - { path: recurringEventId, type: string }
+        - { path: created, type: string }
+        - { path: updated, type: string }
+
+  - type: getEvent
+    name: Get Event
+    description: Fetch one event.
+    params:
+      - *calendarId
+      - &eventId { name: eventId, label: Event ID, required: true, default: "{{ json.id }}" }
+    request:
+      method: GET
+      path: /calendars/{{ params.calendarId }}/events/{{ params.eventId }}
+    output: &event >-
+      {{ let e = response.body; {
+           id: e.id, status: e.status, summary: e.summary, description: e.description, location: e.location,
+           start: e.start.dateTime ?? e.start.date, end: e.end.dateTime ?? e.end.date,
+           allDay: e.start.date != nil, timeZone: e.start.timeZone,
+           organizer: e.organizer.email, creator: e.creator.email,
+           attendees: map(e.attendees ?? [], .email),
+           htmlLink: e.htmlLink, hangoutLink: e.hangoutLink, recurringEventId: e.recurringEventId,
+           created: e.created, updated: e.updated
+         } }}
+    outputSchema:
+      fields: *eventFields
+
+  - type: createEvent
+    name: Create Event
+    description: Create an event, optionally with attendees and a Google Meet link.
+    params:
+      - *calendarId
+      - { name: summary, label: Title, required: true }
+      - { name: start, label: Start, required: true, placeholder: "2026-03-01T10:00:00+01:00 or 2026-03-01", description: "RFC 3339 date-time, or a date for all-day events." }
+      - { name: end, label: End, required: true, placeholder: "2026-03-01T11:00:00+01:00", description: "For all-day events the day after the last day (exclusive)." }
+      - { name: allDay, label: All-day event, type: boolean, default: false }
+      - { name: timeZone, label: Time zone, placeholder: Europe/Berlin, description: IANA name; only needed when start and end have no UTC offset. }
+      - { name: description, label: Description, type: text }
+      - { name: location, label: Location }
+      - { name: attendees, label: Attendees, placeholder: "a@example.com, b@example.com" }
+      - { name: addMeet, label: Add Google Meet link, type: boolean, default: false }
+      - &sendUpdates
+        name: sendUpdates
+        label: Notify attendees
+        type: select
+        default: none
+        options:
+          - { label: No one, value: none }
+          - { label: Everyone, value: all }
+          - { label: Only guests outside the organization, value: externalOnly }
+    request:
+      method: POST
+      path: /calendars/{{ params.calendarId }}/events
+      query:
+        sendUpdates: "{{ params.sendUpdates }}"
+        conferenceDataVersion: "{{ params.addMeet ? 1 : '' }}"
+      body: &createBody >-
+        {{ let att = map(emailAddresses(params.attendees), ({email: .address}));
+           let when = (params.allDay ? {date: params.start[0:10]} : fromPairs(filter(toPairs({dateTime: params.start, timeZone: params.timeZone}), #[1] != '' && #[1] != nil)));
+           let until = (params.allDay ? {date: params.end[0:10]} : fromPairs(filter(toPairs({dateTime: params.end, timeZone: params.timeZone}), #[1] != '' && #[1] != nil)));
+           fromPairs(filter(toPairs({
+             summary: params.summary, description: params.description, location: params.location,
+             start: when, end: until,
+             attendees: len(att) > 0 ? att : nil,
+             conferenceData: params.addMeet ? {createRequest: {requestId: string(now().UnixNano()), conferenceSolutionKey: {type: 'hangoutsMeet'}}} : nil
+           }), #[1] != '' && #[1] != nil)) }}
+    output: *event
+    outputSchema:
+      fields: *eventFields
+
+  - type: updateEvent
+    name: Update Event
+    description: Change an event. Only the fields you fill in are changed.
+    params:
+      - *calendarId
+      - *eventId
+      - { name: summary, label: Title }
+      - { name: start, label: Start, description: "RFC 3339 date-time, or a date for all-day events. Set both Start and End to move the event." }
+      - { name: end, label: End }
+      - { name: allDay, label: All-day event, type: boolean, default: false }
+      - { name: timeZone, label: Time zone, placeholder: Europe/Berlin }
+      - { name: description, label: Description, type: text }
+      - { name: location, label: Location }
+      - { name: attendees, label: Attendees, description: Replaces the whole guest list when filled in. }
+      - *sendUpdates
+    request:
+      method: PATCH
+      path: /calendars/{{ params.calendarId }}/events/{{ params.eventId }}
+      query:
+        sendUpdates: "{{ params.sendUpdates }}"
+      body: >-
+        {{ let att = map(emailAddresses(params.attendees), ({email: .address}));
+           let hasTime = (params.start ?? '') != '' && (params.end ?? '') != '';
+           let when = hasTime ? (params.allDay ? {date: params.start[0:10]} : fromPairs(filter(toPairs({dateTime: params.start, timeZone: params.timeZone}), #[1] != '' && #[1] != nil))) : nil;
+           let until = hasTime ? (params.allDay ? {date: params.end[0:10]} : fromPairs(filter(toPairs({dateTime: params.end, timeZone: params.timeZone}), #[1] != '' && #[1] != nil))) : nil;
+           fromPairs(filter(toPairs({
+             summary: params.summary, description: params.description, location: params.location,
+             start: when, end: until,
+             attendees: len(att) > 0 ? att : nil
+           }), #[1] != '' && #[1] != nil)) }}
+    output: *event
+    outputSchema:
+      fields: *eventFields
+
+  - type: deleteEvent
+    name: Delete Event
+    description: Delete an event.
+    params:
+      - *calendarId
+      - *eventId
+      - *sendUpdates
+    request:
+      method: DELETE
+      path: /calendars/{{ params.calendarId }}/events/{{ params.eventId }}
+      query:
+        sendUpdates: "{{ params.sendUpdates }}"
+    output: "{{ {id: params.eventId, deleted: response.status == 204} }}"
+    outputSchema:
+      fields:
+        - { path: id, type: string }
+        - { path: deleted, type: boolean }
+
+  - type: newEvent
+    name: New or Changed Event
+    description: Start a run when an event is created or changed (one item per event, oldest change first). Events changed before the workflow was activated are ignored.
+    trigger: poll
+    pollKey: "{{ json.id }}:{{ json.updated }}"
+    params:
+      - *calendarId
+      - { name: query, label: Search, description: Only events matching this text. }
+      - { name: lookbackHours, label: Look back (hours), type: number, default: 24, description: Changes older than this are not looked at. Must be longer than the check interval. }
+    request:
+      method: GET
+      path: /calendars/{{ params.calendarId }}/events
+      query:
+        updatedMin: "{{ (now() - duration(string(params.lookbackHours ?? 24) + 'h')).Format('2006-01-02T15:04:05Z07:00') }}"
+        q: "{{ params.query }}"
+        orderBy: updated
+        maxResults: 250
+    output: *events
+    outputSchema:
+      fields: *eventFields

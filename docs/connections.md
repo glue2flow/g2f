@@ -34,10 +34,45 @@ top of each file.
 | [`google-sheets`](../modules/google-sheets.yaml) | Append Row, Read Rows | Google Cloud OAuth client, Sheets API |
 | [`outlook`](../modules/outlook.yaml) | **New Email** (trigger), Send Email, List Messages (unread, search, OData filter), Get Message, Reply / Reply all, Move Message, Mark as Read, List Folders | Microsoft Entra app (Graph `Mail.ReadWrite`, `Mail.Send`) |
 | [`ms-teams`](../modules/ms-teams.yaml) | Send Channel Message, Reply in Channel Thread, Send Chat Message, List Teams, List Channels, List Chats | Microsoft Entra app (Graph, no admin consent needed) |
+| [`google-calendar`](../modules/google-calendar.yaml) | **New or Changed Event** (trigger), List Events, Get / Create / Update / Delete Event (attendees, Google Meet), List Calendars | Google Cloud OAuth client, Calendar API |
+| [`google-drive`](../modules/google-drive.yaml) | List Files (search), Get File, Create Folder, Copy File, Rename or Move File, Move to Trash, Delete Permanently, Share File, Export Doc as Text (metadata and folders only, no file upload or download) | Google Cloud OAuth client, Drive API (restricted scope `drive`) |
+| [`hubspot`](../modules/hubspot.yaml) | Get / Search / Create / Update Contact, Get / Search / Create / Update Deal, Create Company, List Owners | HubSpot app (CRM scopes) |
+| [`salesforce`](../modules/salesforce.yaml) | SOQL Query, Get / Create / Update / Upsert (external ID) / Delete Record of any sObject | Salesforce Connected App; the org's host is set in the manifest, see below |
+| [`sharepoint`](../modules/sharepoint.yaml) | Search Sites, Get Site, List Lists, List / Get / Create / Update / Delete Items, List Document Libraries, List Files and Folders | Microsoft Entra app (Graph `Sites.ReadWrite.All`, admin consent) |
 
-Google modules can share one OAuth client, as can the two Microsoft modules. The Microsoft
-manifests use the `common` endpoint (multi-tenant apps); for a single-tenant app, put your
-tenant ID in `authorizeUrl` and `tokenUrl`.
+Google modules can share one OAuth client, as can the Microsoft modules (Outlook, Teams,
+SharePoint). The Microsoft manifests use the `common` endpoint (multi-tenant apps); for a
+single-tenant app, put your tenant ID in `authorizeUrl` and `tokenUrl`.
+
+### Setup notes per provider
+
+The redirect URI is always `<G2F_PUBLIC_URL>/oauth/callback`. The full steps are at the top
+of each manifest.
+
+- **Google Calendar / Drive:** in the Google Cloud console enable the *Google Calendar API* /
+  *Google Drive API* and add the scopes on the consent screen: `calendar.events` and
+  `calendar.calendarlist.readonly` (only for List Calendars) for Calendar, `drive` for Drive.
+  `drive` is a *restricted* scope: Google requires an app verification unless the consent
+  screen is *Internal* (your own Workspace organization). `drive.file` would not see existing
+  files. The same OAuth client works for all Google modules.
+- **HubSpot:** create an app in a HubSpot developer account, put the redirect URI on its
+  *Auth* tab and enable the scopes `crm.objects.contacts.read/write`,
+  `crm.objects.companies.read/write`, `crm.objects.deals.read/write` and
+  `crm.objects.owners.read`. Enter the app's client ID and secret in the plugin settings.
+- **Salesforce:** create a *Connected App* (Setup → App Manager) with the callback URL and the
+  OAuth scopes `api`, `refresh_token`, `openid` and `email`, and enter its Consumer Key and
+  Secret. Salesforce APIs live on a per-org host (`https://<MyDomain>.my.salesforce.com`)
+  and the manifest format needs a fixed API host, so **copy `modules/salesforce.yaml`
+  and replace `MYDOMAIN.my.salesforce.com` in `baseUrl` and `oauth2.apiHosts`** with your
+  My Domain host (the access token is only ever sent there). One module copy serves one
+  org; for a sandbox use its host and `test.salesforce.com` (or the My Domain login URL)
+  in the OAuth URLs.
+- **SharePoint:** use a Microsoft Entra app as for Outlook and add the delegated Graph
+  permissions `Sites.ReadWrite.All` and `offline_access`. `Sites.ReadWrite.All` requires
+  **admin consent** (*Grant admin consent* on the API permissions page); without it users see
+  an "approval required" screen. Only work and school accounts have SharePoint. Users see
+  only the sites they can open in SharePoint. The optional plugin variable *Default site ID*
+  (e.g. `contoso.sharepoint.com:/sites/team`) saves entering the site in every node.
 
 ```
 Gmail: New Email ("label:support") ─► Gmail: Get Message

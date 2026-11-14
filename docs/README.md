@@ -12,7 +12,7 @@ Everything about running, using and extending glue2flow. New here? Start with
 | [Triggers](triggers.md) | Manual, Schedule (cron / once), Webhook (auth, responses), Form (public web form), Called by Workflow, Error Trigger, polling triggers (new e-mail) |
 | [Expressions](expressions.md) | `{{ }}` syntax, variables, the ⚡ dynamic content picker |
 | [Sharing & Keycloak](sharing.md) | Scopes, roles, groups, organizations, required token claims |
-| [Connected accounts (OAuth2)](connections.md) | Gmail, Outlook, Teams, Google Sheets: connecting accounts, token storage and refresh |
+| [Connected accounts (OAuth2)](connections.md) | Gmail, Outlook, Teams, Google Sheets, Calendar and Drive, HubSpot, Salesforce, SharePoint: connecting accounts, token storage and refresh |
 | [Email (SMTP/IMAP)](email.md) | Sending and reading mail with any mail server |
 
 ## Operating glue2flow

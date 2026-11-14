@@ -1,0 +1,166 @@
+# Salesforce (REST API) via OAuth2. Users connect their own Salesforce user; glue2flow
+# stores and refreshes the tokens and adds them to requests to your org's host.
+#
+# Salesforce APIs live on a per-org host (https://<MyDomain>.my.salesforce.com), which the
+# OAuth token response calls instance_url. The manifest format needs the API host to be
+# fixed, so the host of the org is written into this file ONCE (two places, both below):
+#   - baseUrl
+#   - oauth2.apiHosts (host only; it is the only host the access token is ever sent to)
+# Copy this file, replace MYDOMAIN.my.salesforce.com with your My Domain host (Setup ->
+# My Domain; sandboxes look like MYDOMAIN--SANDBOX.sandbox.my.salesforce.com) and install it
+# in G2F_MODULES_DIR or import it on the Plugins page.
+#
+# Setup (once per organization, by an admin):
+#   1. Salesforce Setup -> App Manager -> New Connected App (or "External Client App").
+#      Enable OAuth Settings. Callback URL: <G2F_PUBLIC_URL>/oauth/callback
+#      Selected OAuth scopes: "Manage user data via APIs (api)", "Perform requests at any
+#      time (refresh_token, offline_access)", "Access unique user identifiers (openid)",
+#      "Access your basic information (id, profile, email, address, phone)".
+#      PKCE is sent by glue2flow; the "Require Proof Key for Code Exchange" option may be on.
+#   2. Copy the Consumer Key and Consumer Secret.
+#   3. glue2flow -> Plugins -> Salesforce -> Settings: enter them as client ID and secret.
+# Sandbox orgs: use https://test.salesforce.com (or your My Domain login URL) in
+# authorizeUrl, tokenUrl and userInfo.url below.
+module: salesforce
+name: Salesforce
+version: 1.0.0
+description: Query and change Salesforce records with SOQL and the sObject REST API
+color: "#00a1e0"
+baseUrl: https://MYDOMAIN.my.salesforce.com
+
+config:
+  - name: clientId
+    label: Consumer key
+    description: From the Salesforce Connected App.
+  - name: clientSecret
+    label: Consumer secret
+    type: secret
+
+oauth2:
+  authorizeUrl: https://login.salesforce.com/services/oauth2/authorize
+  tokenUrl: https://login.salesforce.com/services/oauth2/token
+  scopes: [api, refresh_token, openid, email]
+  pkce: true
+  userInfo:
+    url: https://login.salesforce.com/services/oauth2/userinfo
+    field: email
+  apiHosts: [MYDOMAIN.my.salesforce.com]
+
+nodes:
+  - type: query
+    name: SOQL Query
+    description: Run a SOQL query (one item per record, first page of up to 2000 records; use LIMIT).
+    params:
+      - name: soql
+        label: SOQL
+        type: text
+        required: true
+        default: SELECT Id, Name, Email FROM Contact WHERE LastModifiedDate = TODAY LIMIT 50
+        description: Quote strings with single quotes, e.g. WHERE Email = 'ada@example.com'.
+      - { name: includeDeleted, label: Include deleted and archived records, type: boolean, default: false }
+    request:
+      method: GET
+      path: "/services/data/v62.0/{{ params.includeDeleted ? 'queryAll' : 'query' }}"
+      query:
+        q: "{{ params.soql }}"
+    output: "{{ map(response.body.records ?? [], fromPairs(filter(toPairs(#), #[0] != 'attributes'))) }}"
+    outputSchema:
+      fields:
+        - { path: Id, type: string, description: "Record ID (when selected in the query)" }
+        - { path: Name, type: string }
+      dynamic: true
+
+  - type: get
+    name: Get Record
+    description: Fetch one record by sObject type and ID.
+    params:
+      - &sobject { name: sobject, label: Object type, required: true, default: Contact, placeholder: "Account, Contact, Lead, Opportunity, Custom__c" }
+      - { name: recordId, label: Record ID, required: true, default: "{{ json.id }}" }
+      - { name: fields, label: Fields, description: "Comma-separated field names; empty returns all fields." }
+    request:
+      method: GET
+      path: /services/data/v62.0/sobjects/{{ params.sobject }}/{{ params.recordId }}
+      query:
+        fields: "{{ params.fields }}"
+    output: "{{ fromPairs(filter(toPairs(response.body), #[0] != 'attributes')) }}"
+    outputSchema:
+      fields:
+        - { path: Id, type: string }
+      dynamic: true
+
+  - type: create
+    name: Create Record
+    description: Create a record of any sObject type.
+    params:
+      - *sobject
+      - &fields
+        name: fields
+        label: Fields
+        type: json
+        required: true
+        default: { LastName: "{{ json.lastname }}", Email: "{{ json.email }}" }
+        description: API names of the fields and their values.
+    request:
+      method: POST
+      path: /services/data/v62.0/sobjects/{{ params.sobject }}
+      body: "{{ params.fields }}"
+    output: "{{ {id: response.body.id, success: response.body.success, sobject: params.sobject} }}"
+    outputSchema:
+      fields: &result
+        - { path: id, type: string, description: ID of the record }
+        - { path: sobject, type: string }
+        - { path: success, type: boolean }
+
+  - type: update
+    name: Update Record
+    description: Change fields of a record. Only the given fields are changed.
+    params:
+      - *sobject
+      - { name: recordId, label: Record ID, required: true, default: "{{ json.id }}" }
+      - &changes
+        name: fields
+        label: Fields
+        type: json
+        required: true
+        default: { Phone: "{{ json.phone }}" }
+        description: API names of the fields to change.
+    request:
+      method: PATCH
+      path: /services/data/v62.0/sobjects/{{ params.sobject }}/{{ params.recordId }}
+      body: "{{ params.fields }}"
+    output: "{{ {id: params.recordId, sobject: params.sobject, success: response.status == 204} }}"
+    outputSchema:
+      fields: *result
+
+  - type: upsert
+    name: Upsert Record
+    description: Create or update a record, matched by an external ID field.
+    params:
+      - *sobject
+      - { name: externalIdField, label: External ID field, required: true, placeholder: External_Id__c, description: API name of a field marked External ID (or Id). }
+      - { name: externalId, label: External ID value, required: true, default: "{{ json.id }}" }
+      - *changes
+    request:
+      method: PATCH
+      path: /services/data/v62.0/sobjects/{{ params.sobject }}/{{ params.externalIdField }}/{{ params.externalId }}
+      body: "{{ params.fields }}"
+    output: "{{ {id: response.status == 201 ? response.body.id : nil, created: response.status == 201, sobject: params.sobject, success: true} }}"
+    outputSchema:
+      fields:
+        - { path: id, type: string, description: ID of the new record (only when created) }
+        - { path: created, type: boolean, description: "true if a record was created, false if one was updated" }
+        - { path: sobject, type: string }
+        - { path: success, type: boolean }
+
+  - type: delete
+    name: Delete Record
+    description: Delete a record (it goes to the Recycle Bin).
+    params:
+      - *sobject
+      - { name: recordId, label: Record ID, required: true, default: "{{ json.id }}" }
+    request:
+      method: DELETE
+      path: /services/data/v62.0/sobjects/{{ params.sobject }}/{{ params.recordId }}
+    output: "{{ {id: params.recordId, sobject: params.sobject, success: response.status == 204} }}"
+    outputSchema:
+      fields: *result
