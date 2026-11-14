@@ -45,7 +45,7 @@ func ResolveParams(ec *ExecContext, item Item, index int) (map[string]any, error
 	params := map[string]any{}
 	for _, p := range ec.Def.Params {
 		if p.Type == ParamConnection {
-			continue // resolved by the engine into ec.OAuth
+			continue // resolved by the engine into ec.OAuth or ec.Credential
 		}
 		v, err := ec.Param(p.Name, item, index)
 		if err != nil {
@@ -124,9 +124,29 @@ func (d *declarativeNode) requests(ctx context.Context, ec *ExecContext, items [
 			}
 			env["oauth"] = map[string]any{"accessToken": ec.OAuth.AccessToken, "tokenType": ec.OAuth.TokenType, "instanceUrl": ec.OAuth.InstanceURL}
 		}
+		// Credential values, like the oauth scope, are for the manifest only.
+		// Without a selected credential (optional) the field defaults apply.
+		if c := d.module.Credentials; c != nil {
+			cred := ec.Credential
+			if cred == nil {
+				cred = c.Defaults()
+			}
+			env["credential"] = cred
+		}
 		reqURL, err := d.requestURL(env)
 		if err != nil {
 			return nil, err
+		}
+		// Requests of credential modules only go to credentials.apiHosts,
+		// whatever node parameters or credential fields say.
+		if c := d.module.Credentials; c != nil {
+			u, err := neturl.Parse(reqURL)
+			if err != nil || u.Host == "" {
+				return nil, fmt.Errorf("%s: invalid request URL", d.module.Name)
+			}
+			if !c.AllowsURL(u) {
+				return nil, fmt.Errorf("refusing to send a %s request to %s (not in credentials.apiHosts)", d.module.Name, u.Host)
+			}
 		}
 		// The OAuth token only goes to the module's API hosts (https, default port
 		// unless the entry names one), so a URL built

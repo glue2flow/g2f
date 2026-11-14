@@ -17,6 +17,7 @@ import (
 
 	"github.com/glue2flow/g2f/internal/auth"
 	"github.com/glue2flow/g2f/internal/config"
+	"github.com/glue2flow/g2f/internal/credentials"
 	"github.com/glue2flow/g2f/internal/engine"
 	"github.com/glue2flow/g2f/internal/nodes"
 	"github.com/glue2flow/g2f/internal/oauth"
@@ -47,6 +48,7 @@ type Server struct {
 	secrets  *secrets.Service
 	plugins  *plugin.Manager
 	oauth    *oauth.Manager
+	creds    *credentials.Service
 }
 
 type Deps struct {
@@ -67,6 +69,8 @@ type Deps struct {
 	Secrets *secrets.Service
 	Plugins *plugin.Manager
 	OAuth   *oauth.Manager
+	// Credentials manages API-key credentials.
+	Credentials *credentials.Service
 }
 
 func New(d Deps) *Server {
@@ -74,6 +78,7 @@ func New(d Deps) *Server {
 		cfg: d.Config, store: d.Store, reg: d.Registry, engine: d.Engine,
 		auth: d.Auth, log: d.Logger, listener: d.Listener, webhooks: d.Webhooks, forms: d.Forms,
 		secrets: d.Secrets, plugins: d.Plugins, resume: d.Resume, oauth: d.OAuth,
+		creds: d.Credentials,
 	}
 }
 
@@ -108,6 +113,7 @@ func (s *Server) Handler() http.Handler {
 			r.Post("/executions/{id}/cancel", s.cancelExecution)
 
 			r.Get("/connections", s.listConnections)
+			r.Post("/connections", s.createCredential)
 			r.Post("/connections/authorize", s.authorizeConnection)
 			r.Patch("/connections/{id}", s.updateConnection)
 			r.Delete("/connections/{id}", s.deleteConnection)

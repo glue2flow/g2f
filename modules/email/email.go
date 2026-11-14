@@ -67,27 +67,15 @@ func isLocal(host string) bool {
 }
 
 // settings reads the server of a protocol ("smtp" or "imap") from the module
-// config. A Username/Password on the node replaces the organization's account
-// (the host stays the one configured by the admin).
+// config. The node's credential, if one is selected, replaces the
+// organization's account (the host stays the one configured by the admin).
 func settings(ec *nodes.ExecContext, proto string, defPort int, defSecurity string) (server, error) {
 	s, err := serverConfig(ec.Config, proto, defPort, defSecurity)
 	if err != nil {
 		return s, err
 	}
-	var first nodes.Item
-	if len(ec.Items) > 0 {
-		first = ec.Items[0]
-	}
-	user, err := ec.String("username", first, 0)
-	if err != nil {
-		return s, err
-	}
-	if user = strings.TrimSpace(user); user != "" {
-		pass, err := ec.String("password", first, 0)
-		if err != nil {
-			return s, err
-		}
-		s.username, s.password = user, pass
+	if user := strings.TrimSpace(expression.Stringify(ec.Credential["username"])); user != "" {
+		s.username, s.password = user, expression.Stringify(ec.Credential["password"])
 	}
 	return s, s.checkCredentials()
 }

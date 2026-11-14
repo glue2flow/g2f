@@ -33,3 +33,33 @@ func TestConnectionInstanceURL(t *testing.T) {
 		t.Fatalf("not persisted: %+v", got)
 	}
 }
+
+func TestCredentialFieldsRoundTrip(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	c := &Connection{OrgID: "o-cred", Module: "m", Kind: KindCredential, Name: "key", OwnerSub: "u", Scope: "private",
+		Fields: map[string]string{"apiUrl": "https://api.example.com"}, SecretFields: map[string]string{"token": "sealed"}}
+	acct := &Connection{OrgID: "o-cred", Module: "m", Name: "acct", OwnerSub: "u", Scope: "private"}
+	for _, x := range []*Connection{c, acct} {
+		if err := s.CreateConnection(ctx, x); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = s.DeleteConnection(ctx, x.ID) })
+	}
+	got, err := s.GetConnection(ctx, c.ID)
+	if err != nil || got.Kind != KindCredential || got.Fields["apiUrl"] != "https://api.example.com" || got.SecretFields["token"] != "sealed" {
+		t.Fatalf("%+v %v", got, err)
+	}
+	got.SecretFields = map[string]string{}
+	got.Fields = nil
+	if err := s.UpdateConnectionFields(ctx, got); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ = s.GetConnection(ctx, c.ID); len(got.Fields)+len(got.SecretFields) != 0 {
+		t.Fatalf("not cleared: %+v", got)
+	}
+	// OAuth2 accounts have no fields to update.
+	if got, _ := s.GetConnection(ctx, acct.ID); got.Kind != KindOAuth2 || s.UpdateConnectionFields(ctx, got) != ErrNotFound {
+		t.Fatalf("oauth account: %+v", got)
+	}
+}

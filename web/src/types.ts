@@ -72,7 +72,10 @@ export type ParamType =
   | "workflow"
   | "workflows"
   | "connection"
-  | "formFields";
+  | "formFields"
+  /** Credential fields only: a URL on one of the module's apiHosts. */
+  | "url"
+  | "secretUrl";
 
 /** One question of a Form Trigger (see internal/nodes/form.go). */
 export interface FormFieldDef {
@@ -229,9 +232,19 @@ export interface ModuleInfo {
   vars: ParamDef[];
   allowedHosts?: string[];
   oauth2?: { authorizeUrl: string; tokenUrl: string; scopes: string[]; apiHosts?: string[] };
+  /** Set for modules whose nodes use API-key credentials (see internal/nodes/credentials.go). */
+  credentials?: CredentialsSpec;
   nodes: string[];
   installedBy?: string;
   installedAt?: string;
+}
+
+export interface CredentialsSpec {
+  /** Types: string, url (readable), secret, secretUrl (write-only). */
+  fields: ParamDef[];
+  apiHosts?: string[];
+  /** Nodes may run without a credential. */
+  optional?: boolean;
 }
 
 export interface ConfigValue extends ParamDef {
@@ -270,6 +283,8 @@ export function outputsFor(def: NodeDef | undefined, params: Record<string, unkn
 export interface Connection {
   id: string;
   module: string;
+  /** oauth2: connected account; credential: API-key credential. */
+  kind: "oauth2" | "credential";
   name: string;
   account: string;
   instanceUrl?: string;
@@ -281,4 +296,8 @@ export interface Connection {
   expiresAt?: string;
   createdAt: string;
   canManage: boolean;
+  /** Credentials: non-secret field values. */
+  fields?: Record<string, string>;
+  /** Credentials: which secret fields hold a value (never the value). */
+  secrets?: Record<string, boolean>;
 }

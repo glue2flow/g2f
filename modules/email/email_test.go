@@ -173,6 +173,36 @@ func TestSend(t *testing.T) {
 	}
 }
 
+// A selected credential replaces the organization's account and sends as
+// itself; the server stays the configured one.
+func TestSendWithCredential(t *testing.T) {
+	f, port := startSMTP(t)
+	n := loadNodes(t)["email.send"]
+	def := n.Definition()
+	if p := def.Param(nodes.ConnectionParam); p == nil || p.Type != nodes.ParamConnection || p.Required {
+		t.Fatalf("optional credential picker missing: %+v", p)
+	}
+	cfg := map[string]any{
+		"smtpHost": "127.0.0.1", "smtpPort": float64(port), "smtpSecurity": "none",
+		"smtpUsername": "bot@example.com", "smtpPassword": "pw", "fromAddress": "Bot <bot@example.com>",
+	}
+	_, err := n.Execute(context.Background(), &nodes.ExecContext{
+		Node: &workflow.Node{Name: def.Name, Params: map[string]any{"to": "a@example.com", "subject": "x", "text": "y"}},
+		Def:  &def, Items: []nodes.Item{{}}, Config: cfg,
+		Credential: map[string]any{"username": "jane@example.com", "password": "janes-pw"},
+		Env:        expression.Env{}, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	wantAuth := "AUTH PLAIN " + base64.StdEncoding.EncodeToString([]byte("\x00jane@example.com\x00janes-pw"))
+	if f.auth != wantAuth || f.from != "MAIL FROM:<jane@example.com>" {
+		t.Fatalf("auth=%q from=%q", f.auth, f.from)
+	}
+}
+
 func TestSendRefusesCleartextCredentials(t *testing.T) {
 	n := loadNodes(t)["email.send"]
 	_, err := run(t, n, map[string]any{"smtpHost": "mail.example.com", "smtpSecurity": "none", "smtpUsername": "u", "smtpPassword": "p"},

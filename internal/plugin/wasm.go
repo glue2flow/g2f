@@ -25,6 +25,7 @@ import (
 //	  "config": {...},                         // plugin-only settings of the organization
 //	  "vars":   {...},                         // organization variables
 //	  "oauth":  {"accessToken": "...", "tokenType": "Bearer", "instanceUrl": "..."}, // OAuth2 plugins (instanceUrl if the provider has one)
+//	  "credential": {"apiKey": "...", ...},   // credential plugins: fields of the node's credential (absent if none selected)
 //	  "workflow":  {"id": "...", "name": "..."},
 //	  "execution": {"id": "..."}
 //	}
@@ -41,9 +42,12 @@ type wasmRequest struct {
 	Config map[string]any `json:"config"`
 	Vars   map[string]any `json:"vars"`
 	// OAuth is the connected account's access token (OAuth2 plugins only).
-	OAuth     *nodes.OAuthToken `json:"oauth,omitempty"`
-	Workflow  any               `json:"workflow,omitempty"`
-	Execution any               `json:"execution,omitempty"`
+	OAuth *nodes.OAuthToken `json:"oauth,omitempty"`
+	// Credential holds the field values of the node's credential (credential
+	// plugins only, decrypted, defaults applied).
+	Credential map[string]any `json:"credential,omitempty"`
+	Workflow   any            `json:"workflow,omitempty"`
+	Execution  any            `json:"execution,omitempty"`
 }
 
 type wasmItem struct {
@@ -132,6 +136,7 @@ func (n *wasmNode) Execute(ctx context.Context, ec *nodes.ExecContext) (nodes.Ou
 	req := wasmRequest{Node: n.nodeType, Config: ec.Config, Workflow: ec.Env["workflow"], Execution: ec.Env["execution"]}
 	req.Vars = ec.Vars
 	req.OAuth = ec.OAuth
+	req.Credential = ec.Credential
 	if req.Config == nil {
 		req.Config = map[string]any{}
 	}

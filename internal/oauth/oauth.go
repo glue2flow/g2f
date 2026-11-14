@@ -206,7 +206,7 @@ func (m *Manager) Callback(ctx context.Context, code, state, nonce string) (*sto
 	}
 
 	c := &store.Connection{
-		OrgID: st.Org, Module: st.Module, Name: st.Name, OwnerSub: st.Sub, OwnerName: st.Owner,
+		OrgID: st.Org, Module: st.Module, Kind: store.KindOAuth2, Name: st.Name, OwnerSub: st.Sub, OwnerName: st.Owner,
 		Scope: "private", Groups: []string{},
 	}
 	c.ID = newID()
@@ -229,7 +229,7 @@ func (m *Manager) Callback(ctx context.Context, code, state, nonce string) (*sto
 // expires soon. org and module must match the connection.
 func (m *Manager) Token(ctx context.Context, org, module, id string) (*nodes.OAuthToken, error) {
 	c, err := m.store.GetConnection(ctx, id)
-	if errors.Is(err, store.ErrNotFound) || (err == nil && (c.OrgID != org || c.Module != module)) {
+	if errors.Is(err, store.ErrNotFound) || (err == nil && (c.OrgID != org || c.Module != module || c.Kind == store.KindCredential)) {
 		return nil, ErrNotFound
 	}
 	if err != nil {

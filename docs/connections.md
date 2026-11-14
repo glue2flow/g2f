@@ -1,10 +1,20 @@
-[Docs](README.md) › Connected accounts (OAuth2)
+[Docs](README.md) › Connections
 
-# Connected accounts (OAuth2)
+# Connections
 
-Plugins can let users connect their own accounts at a provider, such as Google, Microsoft or
-HubSpot. The host runs the whole OAuth2 flow and stores the tokens, and plugins only receive a
-valid access token while a node runs.
+The *Connections* page holds two kinds of reusable sign-ins that nodes select instead of
+carrying secrets themselves:
+
+- **Connected accounts (OAuth2)**: users connect their own accounts at a provider, such as
+  Google, Microsoft or HubSpot. The host runs the whole OAuth2 flow and stores the tokens, and
+  plugins only receive a valid access token while a node runs.
+- **[API-key credentials](#api-key-credentials)**: for services without OAuth2, a named set of
+  values (a personal access token, a webhook URL, a username and password) that a user enters
+  once and picks in any node of that plugin.
+
+Both are shared the same way and selected in the node's **Account** / **Credential** field.
+
+## Connected accounts (OAuth2)
 
 1. **Admin, once per organization:** register an OAuth app at the provider with the redirect
    URI `<G2F_PUBLIC_URL>/oauth/callback` (shown in the plugin's *Settings* dialog), then enter
@@ -23,7 +33,7 @@ valid access token while a node runs.
 | Sharing | A connection belongs to whoever connected it and is *Only me*, shared with *Groups*, or the *Organization*. Selecting an account in a node requires access to it. Co-editors can still save workflows using someone else's account if they do not change that selection. Only the owner or an org admin can rename, share or remove it. |
 | Errors | Known token values are scrubbed from error messages. |
 
-## Included OAuth2 plugins
+### Included OAuth2 plugins
 
 Each stays inactive until an admin enters the client ID and secret; the setup steps are at the
 top of each file.
@@ -44,7 +54,7 @@ Google modules can share one OAuth client, as can the Microsoft modules (Outlook
 SharePoint). The Microsoft manifests use the `common` endpoint (multi-tenant apps); for a
 single-tenant app, put your tenant ID in `authorizeUrl` and `tokenUrl`.
 
-### Setup notes per provider
+#### Setup notes per provider
 
 The redirect URI is always `<G2F_PUBLIC_URL>/oauth/callback`. The full steps are at the top
 of each manifest.
@@ -80,7 +90,7 @@ Gmail: New Email ("label:support") ─► Gmail: Get Message
    ─► Teams: Send Channel Message "New ticket: {{ json.subject }}" ─► Gmail: Change Labels (remove UNREAD)
 ```
 
-## Manifest
+### Manifest
 
 [`modules/google-sheets.yaml`](../modules/google-sheets.yaml) (Append Row, Read Rows) is a
 complete example. It stays inactive until an admin enters the Google OAuth client ID and secret.
@@ -101,3 +111,36 @@ oauth2:
   # tokenAuth: basic                  # client auth at the token endpoint (default: body)
   # clientIdConfig / clientSecretConfig: names of the config entries (default clientId / clientSecret)
 ```
+
+## API-key credentials
+
+A credential belongs to the user who created it (*Connections → 🔑 Add credential*, or *＋ Add*
+next to a node's **Credential** field) and holds the fields the plugin declares, e.g. "GitHub –
+deploy bot" with a personal access token. It is shared like an account (*Only me*, *Groups*,
+*Organization*), and every node of that plugin can select it, so a token is no longer entered
+in every node or shared with the whole organization through the plugin settings.
+
+| Topic | Behaviour |
+| --- | --- |
+| Storage | A row of the connections table (`kind: credential`). Secret fields (`secret`, `secretUrl`) are encrypted (AES-256-GCM) and bound to the credential and field, so a ciphertext copied elsewhere does not decrypt. Other fields (`string`, `url`) are stored readable and shown on the *Connections* page. |
+| API | `POST /api/connections` `{"module", "name", "fields"}` creates one, `PATCH /api/connections/{id}` changes `fields` (and, as for accounts, `name`, `scope`, `groups`), `DELETE` removes it. Secret values are never returned: the API lists `fields` (non-secret values) and `secrets` (which secret fields are set). On update an omitted field or `{"$secret": "stored"}` keeps the value and `""` clears it. Unknown fields, missing required fields and URLs on other hosts are rejected. |
+| Delivery | Only to the plugin while the node runs: HTTP manifests as `{{ credential.<field> }}` in request templates, WASM plugins as `input.credential`, Go modules as `ExecContext.Credential`. Node fields cannot read them (saving a field that uses `credential.*` fails). |
+| Hosts | Every request of an HTTP module with credentials must go to one of its `credentials.apiHosts` (https, same rules as `oauth2.apiHosts`), or the node fails before anything is sent; redirects to another host are refused. `url` and `secretUrl` fields must point to an allowed host, checked when the credential is saved and on every run. Hosts come from the manifest, which only a plugin admin installs: a credential can choose among them (e.g. a GitHub Enterprise Cloud host) but never add one. |
+| Sharing | As for accounts: selecting a credential in a node requires access to it, co-editors can keep someone else's selection, only the owner or an org admin can edit, share or remove it. At run time the credential must belong to the workflow's organization and the node's plugin. |
+| Errors | Secret values are scrubbed from error messages and execution logs. |
+
+Plugins that use credentials:
+
+| Module | Fields | Allowed hosts |
+| --- | --- | --- |
+| [`github`](../modules/github.yaml) | Personal access token; API URL (default `https://api.github.com`, or `https://api.<subdomain>.ghe.com`). Optional: without a credential, nodes read public data. | `api.github.com`, `*.ghe.com` |
+| [`slack`](../modules/slack.yaml) | Incoming webhook URL (`secretUrl`: the URL is the secret) | `hooks.slack.com` |
+| [`email`](../modules/email) | Username and password of a personal mailbox on the organization's mail server. Optional: without one, the organization's account is used. | the servers in the plugin settings |
+| [`mistral`](../examples/plugins/mistral) (example) | API key. Optional: without one, the organization's default key is used. | `allowedHosts` |
+
+GitHub Enterprise Server (self-hosted) is not covered by the bundled module, since its host
+cannot be a user's choice: install a copy of `modules/github.yaml` under another module name
+with your host in `baseUrl` / `credentials.apiHosts`.
+
+The manifest syntax is in [HTTP modules](http-modules.md#credentials); where credentials sit
+next to node secrets and plugin settings is in [Secrets & plugin settings](secrets.md).

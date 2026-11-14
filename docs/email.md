@@ -11,8 +11,9 @@ are usually the better choice.
 
 An organization admin enters the servers in *Plugins → Email (SMTP/IMAP) → Settings*: host,
 port, security (`tls`, `starttls` or `none`), username, password and the default sender.
-Nodes can set their own **Username/Password** to use a personal mailbox on the same server.
-Node fields cannot change the host.
+Nodes can select an Email [credential](connections.md#api-key-credentials) (username and
+password, stored once on the *Connections* page and shareable) to use a personal mailbox on
+the same server. Neither node fields nor credentials can change the host.
 
 Passwords are only sent over TLS/STARTTLS, or to `localhost`.
 

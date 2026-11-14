@@ -6,18 +6,31 @@ name: GitHub
 description: GitHub REST API
 color: "#24292f"
 icon: icons/github.svg # GitHub mark, from github.com/primer/octicons
-baseUrl: https://api.github.com
+# The API URL comes from the node's credential (default api.github.com); it
+# can only name one of credentials.apiHosts.
+baseUrl: "{{ credential.apiUrl }}"
 
-params:
-  - name: token
-    label: Access token
-    type: secret
-    description: Personal access token. Optional for public data.
+# Personal access tokens are stored once as a credential (Connections page)
+# and picked in nodes. Without a credential, nodes read public data.
+credentials:
+  optional: true
+  fields:
+    - name: token
+      label: Personal access token
+      type: secret
+      required: true
+      description: Fine-grained or classic token with access to the repositories the workflows use.
+    - name: apiUrl
+      label: API URL
+      type: url
+      default: https://api.github.com
+      description: "GitHub Enterprise Cloud with data residency: https://api.<subdomain>.ghe.com"
+  apiHosts: [api.github.com, "*.ghe.com"]
 
 headers:
   Accept: application/vnd.github+json
   X-GitHub-Api-Version: "2022-11-28"
-  Authorization: "{{ params.token != nil && params.token != '' ? 'Bearer ' + params.token : '' }}"
+  Authorization: "{{ (credential.token ?? '') != '' ? 'Bearer ' + credential.token : '' }}"
 
 nodes:
   - type: repo.get

@@ -60,6 +60,11 @@ type Manifest struct {
 	// token to the plugin; workflow editors never see it.
 	OAuth2 *OAuth2Spec `yaml:"oauth2"`
 
+	// Credentials lets users store API keys (or other account settings) once
+	// as a named, shareable credential and pick it in nodes, for services
+	// without OAuth2. A module uses either oauth2 or credentials.
+	Credentials *CredentialsSpec `yaml:"credentials"`
+
 	// wasm runtime
 	Wasm         string   `yaml:"wasm"`         // file name inside the bundle (default plugin.wasm)
 	AllowedHosts []string `yaml:"allowedHosts"` // hosts the plugin may call over HTTP
@@ -102,8 +107,8 @@ type OAuth2UserInfo struct {
 	Field string `yaml:"field"` // top-level field of the JSON response, e.g. email
 }
 
-// ConnectionParam is the name of the parameter that OAuth2 modules add to
-// every node; it holds the id of the connected account to use.
+// ConnectionParam is the name of the parameter that OAuth2 and credential
+// modules add to every node; it holds the id of the connection to use.
 const ConnectionParam = "connection"
 
 type ManifestNode struct {
@@ -194,9 +199,17 @@ func (m *Manifest) validate() error {
 	if len(m.Nodes) == 0 {
 		return fmt.Errorf("at least one node is required")
 	}
+	if m.OAuth2 != nil && m.Credentials != nil {
+		return fmt.Errorf("a module uses either oauth2 or credentials, not both")
+	}
 	if m.OAuth2 != nil {
 		if err := m.validateOAuth2(); err != nil {
 			return fmt.Errorf("oauth2: %w", err)
+		}
+	}
+	if m.Credentials != nil {
+		if err := m.validateCredentials(); err != nil {
+			return fmt.Errorf("credentials: %w", err)
 		}
 	}
 	if err := normalizeParams(m.Config, "config"); err != nil {
@@ -330,6 +343,11 @@ func (m *Manifest) validateOAuth2() error {
 	if o.InstanceURLField != "" && !nameRe.MatchString(o.InstanceURLField) {
 		return fmt.Errorf("instanceUrlField %q is not a field name", o.InstanceURLField)
 	}
+	return m.checkConnectionName()
+}
+
+// checkConnectionName keeps the name of the automatic picker parameter free.
+func (m *Manifest) checkConnectionName() error {
 	for _, p := range append(append([]Param{}, m.Params...), m.Config...) {
 		if p.Name == ConnectionParam {
 			return fmt.Errorf("parameter name %q is reserved for the account picker", ConnectionParam)
@@ -390,11 +408,14 @@ func hostMatches(pattern, host string) bool {
 // AllowsURL reports whether the access token may be sent to u: https (plain
 // http only in tests) and a host and port matching an apiHosts entry.
 func (o *OAuth2Spec) AllowsURL(u *url.URL) bool {
-	if o == nil {
-		return false
-	}
+	return o != nil && hostsAllow(o.APIHosts, u)
+}
+
+// hostsAllow reports whether u is https (plain http only in tests) and its
+// host and port match one of the apiHosts entries.
+func hostsAllow(hosts []string, u *url.URL) bool {
 	port := portOf(u)
-	for _, h := range o.APIHosts {
+	for _, h := range hosts {
 		host, hp := splitAPIHost(h)
 		if hostMatches(host, u.Hostname()) && (allowInsecureAPIHosts || u.Scheme == "https" && hp == port) {
 			return true
@@ -446,7 +467,7 @@ func (m *Manifest) Info(source string) ModuleInfo {
 	return ModuleInfo{
 		Module: m.Module, Name: m.Name, Version: m.Version, Description: m.Description,
 		Color: m.Color, Icon: m.IconURI, Runtime: m.Runtime, Source: source, Config: m.Config, Vars: m.Vars, AllowedHosts: m.AllowedHosts,
-		OAuth2: m.OAuth2,
+		OAuth2: m.OAuth2, Credentials: m.Credentials,
 	}
 }
 
@@ -457,6 +478,16 @@ func (m *Manifest) NodeDefinition(n ManifestNode, source string) Definition {
 		params = append(params, Param{
 			Name: ConnectionParam, Label: "Account", Type: ParamConnection, Required: true, NoExpression: true,
 			Description: "Connected " + m.Name + " account used by this node.",
+		})
+	}
+	if c := m.Credentials; c != nil {
+		desc := m.Name + " credential used by this node (Connections page)."
+		if c.Optional {
+			desc = "Optional " + desc
+		}
+		params = append(params, Param{
+			Name: ConnectionParam, Label: "Credential", Type: ParamConnection, Required: !c.Optional, NoExpression: true,
+			Description: desc,
 		})
 	}
 	params = append(append(params, m.Params...), n.Params...)

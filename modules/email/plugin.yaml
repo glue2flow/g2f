@@ -44,14 +44,15 @@ config:
   - { name: imapUsername, label: IMAP username }
   - { name: imapPassword, label: IMAP password, type: secret }
 
-params:
-  - name: username
-    label: Username
-    description: Your own mailbox on the organization's mail server. Leave empty to use the organization's account.
-  - name: password
-    label: Password
-    type: secret
-    description: Password or app password for Username.
+# A user's own mailbox on the organization's mail server, stored once as a
+# credential (Connections page) and shareable like an account. Nodes without
+# a credential use the organization's account from the settings above. The
+# servers always stay the ones the admin configured.
+credentials:
+  optional: true
+  fields:
+    - { name: username, label: Username, required: true, placeholder: jane@example.com }
+    - { name: password, label: Password, type: secret, required: true, description: Password or app password. }
 
 nodes:
   - type: send

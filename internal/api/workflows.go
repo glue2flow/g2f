@@ -257,8 +257,11 @@ func checkFieldExpressions(n *workflow.Node, def nodes.Definition) error {
 			return fmt.Errorf("node %q, field %q: %w", n.Name, name, err)
 		}
 		for _, id := range ids {
-			if id == "config" {
+			switch id {
+			case "config":
 				return fmt.Errorf("node %q, field %q: config.* is only available to the plugin itself; use vars.* for values meant for node fields", n.Name, name)
+			case "credential":
+				return fmt.Errorf("node %q, field %q: credential.* is only available to the plugin itself", n.Name, name)
 			}
 		}
 	}
@@ -300,16 +303,24 @@ func (s *Server) checkWorkflowRefs(ctx context.Context, u *auth.User, selfID str
 	return nil
 }
 
-// checkConnectionRefs makes sure every newly selected account is usable by the
-// saving user and belongs to the node's plugin. Unchanged selections are not
-// re-checked, so co-editors can save a workflow that uses someone else's
-// shared account without having access to it themselves.
+// checkConnectionRefs makes sure every newly selected account or credential
+// is usable by the saving user and belongs to the node's plugin. Unchanged
+// selections are not re-checked, so co-editors can save a workflow that uses
+// someone else's shared account without having access to it themselves.
 func (s *Server) checkConnectionRefs(ctx context.Context, u *auth.User, old, g *workflow.Graph) error {
+	return checkConnectionRefs(ctx, s.store.GetConnection, s.reg, u, old, g)
+}
+
+func checkConnectionRefs(ctx context.Context, get func(ctx context.Context, id string) (*store.Connection, error),
+	reg *nodes.Registry, u *auth.User, old, g *workflow.Graph) error {
 	for _, n := range g.Nodes {
 		id, _ := n.Params[nodes.ConnectionParam].(string)
-		impl, _ := s.reg.Get(n.Type)
+		impl, ok := reg.Get(n.Type)
+		if !ok || id == "" {
+			continue
+		}
 		def := impl.Definition()
-		if id == "" || def.Param(nodes.ConnectionParam) == nil {
+		if def.Param(nodes.ConnectionParam) == nil {
 			continue
 		}
 		if prev := old.Node(n.ID); prev != nil && prev.Type == n.Type {
@@ -317,7 +328,7 @@ func (s *Server) checkConnectionRefs(ctx context.Context, u *auth.User, old, g *
 				continue
 			}
 		}
-		c, err := s.store.GetConnection(ctx, id)
+		c, err := get(ctx, id)
 		if err != nil || !c.UsableBy(u) || c.Module != def.Module {
 			return fmt.Errorf("node %q: account not found or not shared with you", n.Name)
 		}

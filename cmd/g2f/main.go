@@ -15,6 +15,7 @@ import (
 	"github.com/glue2flow/g2f/internal/api"
 	"github.com/glue2flow/g2f/internal/auth"
 	"github.com/glue2flow/g2f/internal/config"
+	"github.com/glue2flow/g2f/internal/credentials"
 	"github.com/glue2flow/g2f/internal/engine"
 	"github.com/glue2flow/g2f/internal/expression"
 	"github.com/glue2flow/g2f/internal/netguard"
@@ -95,19 +96,21 @@ func run(log *slog.Logger) error {
 	}
 
 	oauthMgr := oauth.NewManager(st, box, reg, sec, cfg.PublicURL)
+	creds := credentials.NewService(st, box, reg)
 	nodes.CodeNodeEnabled = !cfg.DisableCodeNode
 	nodes.CodeMemoryLimit = int64(cfg.CodeMemoryMB) << 20
 	expression.MaxSteps = int64(cfg.ExpressionMaxSteps)
 	signer := trigger.NewResumeSigner(cfg.SecretKey, cfg.PublicURL)
 	errDispatch := trigger.NewErrorDispatcher(st, nil, reg, log, cfg.PublicURL)
 	eng := engine.New(reg, st, log, engine.Options{
-		Secrets:   sec,
-		Tokens:    oauthMgr,
-		State:     st,
-		Workflows: st,
-		ResumeURL: signer.URL,
-		OnFailure: errDispatch.WorkflowFailed,
-		Workers:   cfg.Workers, Timeout: cfg.ExecutionTimeout, MaxStoredItems: cfg.MaxStoredItems,
+		Secrets:     sec,
+		Tokens:      oauthMgr,
+		Credentials: creds,
+		State:       st,
+		Workflows:   st,
+		ResumeURL:   signer.URL,
+		OnFailure:   errDispatch.WorkflowFailed,
+		Workers:     cfg.Workers, Timeout: cfg.ExecutionTimeout, MaxStoredItems: cfg.MaxStoredItems,
 	})
 
 	errDispatch.SetEngine(eng)
@@ -135,10 +138,11 @@ func run(log *slog.Logger) error {
 			SecretKey: cfg.SecretKey, PublicURL: cfg.PublicURL,
 			State: st, Auth: authn, Mailer: email.OrgMailer{Settings: sec.ModuleSettings},
 		}),
-		Resume:  trigger.NewResumeHandler(signer, eng, log),
-		Secrets: sec,
-		Plugins: plugins,
-		OAuth:   oauthMgr,
+		Resume:      trigger.NewResumeHandler(signer, eng, log),
+		Secrets:     sec,
+		Plugins:     plugins,
+		OAuth:       oauthMgr,
+		Credentials: creds,
 	})
 	go plugins.Run(schedCtx, cfg.PluginSync)
 	go eng.RunResumer(schedCtx, 2*time.Second)

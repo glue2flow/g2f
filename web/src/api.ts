@@ -68,8 +68,13 @@ export const api = {
     request<Connection[]>("GET", "/api/connections" + (module ? `?module=${encodeURIComponent(module)}` : "")),
   authorizeConnection: (module: string, name?: string) =>
     request<{ url: string }>("POST", "/api/connections/authorize", { module, name }),
-  updateConnection: (id: string, patch: { name?: string; scope?: Scope; groups?: string[] }) =>
-    request<Connection>("PATCH", `/api/connections/${id}`, patch),
+  /** Field values: a string sets, "" or null clears, SECRET_REF or omitting keeps. */
+  createCredential: (module: string, name: string, fields: Record<string, unknown>) =>
+    request<Connection>("POST", "/api/connections", { module, name, fields }),
+  updateConnection: (
+    id: string,
+    patch: { name?: string; scope?: Scope; groups?: string[]; fields?: Record<string, unknown> },
+  ) => request<Connection>("PATCH", `/api/connections/${id}`, patch),
   deleteConnection: (id: string) => request<void>("DELETE", `/api/connections/${id}`),
   plugins: () => request<ModuleInfo[]>("GET", "/api/plugins"),
   importPlugin: (file: File) => {

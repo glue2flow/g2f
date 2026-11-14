@@ -1,9 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { useContext, useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { connectAccount } from "../lib/connect";
 import { insertExpression, type ContentGroup } from "../lib/dynamicContent";
 import { DynamicContent } from "./DynamicContent";
 import { FormBuilder } from "./FormBuilder";
+import { CredentialDialog } from "./CredentialDialog";
+import { ModulesContext } from "./NodeIcon";
 import { isSecretRef, parseList, type Connection, type NodeDef, type ParamDef, type Workflow } from "../types";
 import type { FlowNodeData } from "./FlowNode";
 
@@ -454,7 +456,11 @@ function WorkflowPicker({
   );
 }
 
-/** Selects a connected account of the node's plugin, or connects a new one. */
+/**
+ * Selects a connection of the node's plugin: a connected OAuth2 account (＋
+ * Connect opens the provider popup) or an API-key credential (＋ Add opens
+ * the credential form).
+ */
 function ConnectionPicker({
   module,
   value,
@@ -466,9 +472,12 @@ function ConnectionPicker({
   readOnly: boolean;
   onChange: (v: unknown) => void;
 }) {
+  const info = useContext(ModulesContext).get(module);
+  const credentials = info?.credentials;
   const [list, setList] = useState<Connection[]>();
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
+  const [adding, setAdding] = useState(false);
   const load = () =>
     api
       .connections(module)
@@ -493,11 +502,17 @@ function ConnectionPicker({
       setBusy(false);
     }
   }
+  const what = credentials ? "credential" : "account";
+  const empty = credentials?.optional
+    ? "None (no credential)"
+    : list && list.length === 0
+      ? `No ${what} yet`
+      : `Select a${credentials ? "" : "n"} ${what}…`;
   return (
     <div className="connection-picker">
       <div className="row">
         <select disabled={readOnly || !list} value={selected} onChange={(e) => onChange(e.target.value)}>
-          <option value="">{list && list.length === 0 ? "No connected account yet" : "Select an account…"}</option>
+          <option value="">{empty}</option>
           {list?.map((c) => (
             <option key={c.id} value={c.id}>
               {c.name}
@@ -505,15 +520,31 @@ function ConnectionPicker({
               {c.canManage ? "" : ` (shared by ${c.ownerName})`}
             </option>
           ))}
-          {!known && <option value={selected}>Account of another user</option>}
+          {!known && <option value={selected}>{credentials ? "Credential" : "Account"} of another user</option>}
         </select>
-        {!readOnly && (
-          <button type="button" className="btn small" disabled={busy} onClick={connect}>
-            {busy ? "Waiting…" : "＋ Connect"}
-          </button>
-        )}
+        {!readOnly &&
+          (credentials ? (
+            <button type="button" className="btn small" onClick={() => setAdding(true)}>
+              ＋ Add
+            </button>
+          ) : (
+            <button type="button" className="btn small" disabled={busy} onClick={connect}>
+              {busy ? "Waiting…" : "＋ Connect"}
+            </button>
+          ))}
       </div>
       {error && <span className="field-desc error-text">{error}</span>}
+      {adding && info && (
+        <CredentialDialog
+          modules={[info]}
+          onClose={() => setAdding(false)}
+          onSaved={async (c) => {
+            setAdding(false);
+            await load();
+            onChange(c.id);
+          }}
+        />
+      )}
     </div>
   );
 }

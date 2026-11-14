@@ -62,7 +62,7 @@ replicas when you need them: if one stops, another continues its runs where they
 | **Memory** | Remove Duplicates (within a run or across runs) · Data Store (values, counters between runs) |
 | **Long-running** | Wait for a time, a date, or an approval link, for days if needed, surviving restarts |
 | **Integrations** | Gmail · Outlook · Microsoft Teams · Google Sheets · Google Calendar · Google Drive · HubSpot · Salesforce · SharePoint (OAuth2) · Email (SMTP/IMAP) · GitHub · Slack · Telegram · Mistral AI |
-| **Accounts** | Users connect their own OAuth2 accounts and share them with groups |
+| **Accounts** | Users connect their own OAuth2 accounts or store API-key credentials (tokens, webhook URLs) once, and share them with groups |
 
 ## Try it in one minute
 
@@ -76,7 +76,6 @@ development without Docker: **[Getting started](docs/getting-started.md)**.
 
 ## Roadmap
 
-- Reusable API-key credentials (like connections, for non-OAuth services)
 - Plugin signing and a plugin catalog
 - Push instead of polling for mail (IMAP IDLE, Gmail push notifications, Graph subscriptions)
 - XML / HTML parsing, file (binary) data between nodes
@@ -89,7 +88,7 @@ development without Docker: **[Getting started](docs/getting-started.md)**.
 
 | | |
 | --- | --- |
-| **Use it** | [Getting started](docs/getting-started.md) · [Nodes](docs/nodes.md) · [Triggers](docs/triggers.md) · [Expressions & ⚡](docs/expressions.md) · [Sharing](docs/sharing.md) · [Connected accounts](docs/connections.md) · [Email](docs/email.md) |
+| **Use it** | [Getting started](docs/getting-started.md) · [Nodes](docs/nodes.md) · [Triggers](docs/triggers.md) · [Expressions & ⚡](docs/expressions.md) · [Sharing](docs/sharing.md) · [Connections](docs/connections.md) · [Email](docs/email.md) |
 | **Run it** | [Configuration](docs/configuration.md) · [Secrets](docs/secrets.md) · [Architecture](docs/architecture.md) |
 | **Extend it** | [Plugins](docs/plugins.md) · [HTTP modules](docs/http-modules.md) · [Telegram sample](examples/plugins/telegram) · [Mistral AI sample](examples/plugins/mistral) |
 

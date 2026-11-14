@@ -14,8 +14,8 @@ A plugin (module) is a set of nodes described by a manifest. There are three run
 
 | Plugin | Runtime | Nodes | Where |
 | --- | --- | --- | --- |
-| GitHub | http | Get Repository, List Issues, Create Issue | [`modules/github.yaml`](../modules/github.yaml) |
-| Slack | http | Post Message (incoming webhook) | [`modules/slack.yaml`](../modules/slack.yaml) |
+| GitHub | http + credential | Get Repository, List Issues, Create Issue | [`modules/github.yaml`](../modules/github.yaml) |
+| Slack | http + credential | Post Message (incoming webhook) | [`modules/slack.yaml`](../modules/slack.yaml) |
 | Google Sheets | http + OAuth2 | Append Row, Read Rows | [`modules/google-sheets.yaml`](../modules/google-sheets.yaml) |
 | Gmail | http + OAuth2 | New Email (trigger), Send Email, Search Messages, Get Message, Get Attachment, Change Labels, Move to Trash, List Labels | [`modules/gmail.yaml`](../modules/gmail.yaml) |
 | Outlook | http + OAuth2 | New Email (trigger), Send Email, List Messages, Get Message, Reply, Move Message, Mark as Read, List Folders | [`modules/outlook.yaml`](../modules/outlook.yaml) |
@@ -25,9 +25,9 @@ A plugin (module) is a set of nodes described by a manifest. There are three run
 | HubSpot | http + OAuth2 | Get / Search / Create / Update Contact, Get / Search / Create / Update Deal, Create Company, List Owners | [`modules/hubspot.yaml`](../modules/hubspot.yaml) |
 | Salesforce | http + OAuth2 | SOQL Query, Get / Create / Update / Upsert / Delete Record of any sObject | [`modules/salesforce.yaml`](../modules/salesforce.yaml) |
 | SharePoint | http + OAuth2 | Search Sites, Get Site, List Lists, List / Get / Create / Update / Delete Items, List Document Libraries, List Files and Folders | [`modules/sharepoint.yaml`](../modules/sharepoint.yaml) |
-| Email (SMTP/IMAP) | go | Email Received (trigger), Send Email, Read Emails, Move Email, Set Email Flags ([docs](email.md)) | [`modules/email`](../modules/email) |
+| Email (SMTP/IMAP) | go + credential | Email Received (trigger), Send Email, Read Emails, Move Email, Set Email Flags ([docs](email.md)) | [`modules/email`](../modules/email) |
 | Telegram | wasm (Go and JS) | Send Message, Get Bot Info | [`examples/plugins/telegram`](../examples/plugins/telegram) |
-| Mistral AI | wasm (Go) | Chat (prompt → answer) | [`examples/plugins/mistral`](../examples/plugins/mistral) |
+| Mistral AI | wasm (Go) + credential | Chat (prompt → answer) | [`examples/plugins/mistral`](../examples/plugins/mistral) |
 
 The `examples/plugins` are built and imported separately (`make plugin-sample`, `make plugin-mistral`).
 
@@ -53,7 +53,21 @@ private addresses are blocked unless the administrator allows them.
 
 See **[examples/plugins/telegram](../examples/plugins/telegram)** for a complete WASM plugin in
 Go and JavaScript, the JSON calling convention and build instructions, and
-**[examples/plugins/mistral](../examples/plugins/mistral)** for a compact Go plugin that calls an LLM.
+**[examples/plugins/mistral](../examples/plugins/mistral)** for a compact Go plugin that calls an LLM
+with a user's API key from a [credential](connections.md#api-key-credentials).
+
+The input of `execute` carries, besides `items` (with resolved `params`):
+
+| Key | Content |
+| --- | --- |
+| `config` | the organization's plugin-only settings |
+| `vars` | the organization's variables |
+| `oauth` | `{accessToken, tokenType, instanceUrl}` of the node's connected account (`oauth2` plugins) |
+| `credential` | the field values of the node's credential, decrypted, defaults applied (`credentials` plugins; absent when an optional credential is not selected) |
+| `workflow`, `execution` | ids and name |
+
+For WASM plugins, `credentials.apiHosts` defaults to `allowedHosts`, which bound where the
+plugin can send anything.
 
 ## Native Go modules
 
@@ -61,8 +75,8 @@ WASM plugins can only make HTTP calls. For other protocols a module is written i
 compiled into glue2flow, e.g. [`modules/email`](../modules/email):
 
 - `modules/<name>/plugin.yaml` is a normal manifest with `runtime: go`. It declares the
-  nodes, parameters, `config`, `vars` and output schemas, so settings, secrets and the editor
-  work exactly as for other plugins.
+  nodes, parameters, `config`, `vars`, `credentials` and output schemas, so settings,
+  secrets, credentials (`ExecContext.Credential`) and the editor work exactly as for other plugins.
 - The Go package in the same folder calls
   `nodes.RegisterNative("<module>", map[string]nodes.ExecFunc{...})` in `init()`, with one
   function per node type. `cmd/g2f/main.go` imports it.
@@ -90,6 +104,9 @@ vars:                         # per-organization values usable in node fields as
   - { name: defaultChatId, label: Default chat ID }
 params:                       # parameters shared by all nodes of the module
   - { name: botToken, label: Bot token, type: secret }   # per-node secret
+# credentials:                # or: named, shareable credentials users pick in nodes
+#   fields: [{ name: apiKey, label: API key, type: secret, required: true }]
+#   optional: true            # apiHosts: see docs/http-modules.md#credentials
 nodes:
   - type: sendMessage
     name: Send Message
@@ -104,7 +121,8 @@ nodes:
 ```
 
 Config, vars and secret parameters are explained in [Secrets & plugin settings](secrets.md),
-OAuth2 (`oauth2:`) in [Connected accounts](connections.md).
+OAuth2 (`oauth2:`) and credentials (`credentials:`) in [Connections](connections.md) and
+[HTTP modules](http-modules.md#credentials). A module uses either `oauth2` or `credentials`.
 
 ### Icons
 
@@ -151,7 +169,8 @@ cursor in `ExecContext.State`.
 ### Parameters
 
 Types: `string`, `text`, `number`, `boolean`, `select` (with `options`), `json`, `secret`,
-`datetime`, `code`. `showIf: {auth: [token, hmac]}` shows a field only for certain values of
+`datetime`, `code`. Credential fields have their own types (`string`, `url`, `secret`,
+`secretUrl`, see [Credentials](http-modules.md#credentials)). `showIf: {auth: [token, hmac]}` shows a field only for certain values of
 another parameter. Further keys: `label`, `description`, `placeholder`, `default`, `required`.
 
 ### Output schema

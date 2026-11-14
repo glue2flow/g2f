@@ -26,6 +26,8 @@ type request struct {
 	Node   string         `json:"node"`
 	Items  []item         `json:"items"`
 	Config map[string]any `json:"config"`
+	// Credential is the user's credential selected in the node, if any.
+	Credential map[string]any `json:"credential"`
 }
 
 type item struct {
@@ -73,12 +75,12 @@ func handle(req request, it item) (map[string]any, error) {
 
 // chat sends the prompt to the chat completions endpoint and returns the answer.
 func chat(req request, it item) (map[string]any, error) {
-	key := str(it.Params["apiKey"])
+	key := str(req.Credential["apiKey"])
 	if key == "" {
 		key = str(req.Config["apiKey"])
 	}
 	if key == "" {
-		return nil, errors.New("no API key: set one on the node or a default on the Plugins page")
+		return nil, errors.New("no API key: select a credential on the node or set a default on the Plugins page")
 	}
 	model := strings.TrimSpace(str(it.Params["model"]))
 	if model == "" {

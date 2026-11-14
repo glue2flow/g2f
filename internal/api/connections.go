@@ -11,13 +11,21 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/glue2flow/g2f/internal/auth"
+	"github.com/glue2flow/g2f/internal/credentials"
 	"github.com/glue2flow/g2f/internal/oauth"
 	"github.com/glue2flow/g2f/internal/store"
 )
 
+// connectionView is a connection as the API shows it. For credentials,
+// Secrets says which secret fields are set; their values are never returned.
 type connectionView struct {
 	*store.Connection
-	CanManage bool `json:"canManage"`
+	CanManage bool            `json:"canManage"`
+	Secrets   map[string]bool `json:"secrets,omitempty"`
+}
+
+func viewOf(c *store.Connection, canManage bool) connectionView {
+	return connectionView{c, canManage, credentials.SecretsSet(c)}
 }
 
 // listConnections returns the connected accounts the caller may use,
@@ -33,7 +41,7 @@ func (s *Server) listConnections(w http.ResponseWriter, r *http.Request) {
 	out := []connectionView{}
 	for _, c := range all {
 		if (module == "" || c.Module == module) && c.UsableBy(u) {
-			out = append(out, connectionView{c, c.ManageableBy(u)})
+			out = append(out, viewOf(c, c.ManageableBy(u)))
 		}
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -58,6 +66,34 @@ func (s *Server) authorizeConnection(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"url": url})
 }
 
+// createCredential stores an API-key credential:
+// {"module": "...", "name": "...", "fields": {"token": "..."}}.
+func (s *Server) createCredential(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Module string         `json:"module"`
+		Name   string         `json:"name"`
+		Fields map[string]any `json:"fields"`
+	}
+	if err := decode(r, &in); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	c, err := s.creds.Create(r.Context(), auth.FromContext(r.Context()), in.Module, in.Name, in.Fields)
+	if err != nil {
+		s.credentialError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, viewOf(c, true))
+}
+
+func (s *Server) credentialError(w http.ResponseWriter, err error) {
+	if errors.Is(err, credentials.ErrInvalid) {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	s.storeError(w, err)
+}
+
 // setOAuthCookie binds the OAuth flow to this browser; maxAge < 0 clears it.
 func (s *Server) setOAuthCookie(w http.ResponseWriter, value string, maxAge int) {
 	http.SetCookie(w, &http.Cookie{
@@ -80,20 +116,29 @@ func (s *Server) loadManagedConnection(w http.ResponseWriter, r *http.Request) (
 	return c, true
 }
 
-// updateConnection renames or re-shares: {"name", "scope", "groups"}.
+// updateConnection renames or re-shares: {"name", "scope", "groups"}, and
+// changes credential fields: {"fields": {...}} (omitted fields and
+// {"$secret": "stored"} keep their value, "" clears one).
 func (s *Server) updateConnection(w http.ResponseWriter, r *http.Request) {
 	c, ok := s.loadManagedConnection(w, r)
 	if !ok {
 		return
 	}
 	var in struct {
-		Name   *string  `json:"name"`
-		Scope  *string  `json:"scope"`
-		Groups []string `json:"groups"`
+		Name   *string        `json:"name"`
+		Scope  *string        `json:"scope"`
+		Groups []string       `json:"groups"`
+		Fields map[string]any `json:"fields"`
 	}
 	if err := decode(r, &in); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON")
 		return
+	}
+	if in.Fields != nil {
+		if err := s.creds.Update(r.Context(), c, in.Fields); err != nil {
+			s.credentialError(w, err)
+			return
+		}
 	}
 	if in.Name != nil && strings.TrimSpace(*in.Name) != "" {
 		c.Name = strings.TrimSpace(*in.Name)
@@ -119,7 +164,7 @@ func (s *Server) updateConnection(w http.ResponseWriter, r *http.Request) {
 		s.storeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, connectionView{c, true})
+	writeJSON(w, http.StatusOK, viewOf(c, true))
 }
 
 func (s *Server) deleteConnection(w http.ResponseWriter, r *http.Request) {

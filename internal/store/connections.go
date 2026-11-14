@@ -12,12 +12,20 @@ import (
 	"github.com/glue2flow/g2f/internal/auth"
 )
 
-// Connection is a connected OAuth2 account. AccessToken and RefreshToken hold
-// sealed values and are never serialized.
+// Connection kinds.
+const (
+	KindOAuth2     = "oauth2"
+	KindCredential = "credential"
+)
+
+// Connection is a connected OAuth2 account or an API-key credential.
+// AccessToken, RefreshToken and SecretFields hold sealed values and are never
+// serialized.
 type Connection struct {
 	ID           string     `json:"id"`
 	OrgID        string     `json:"orgId"`
 	Module       string     `json:"module"`
+	Kind         string     `json:"kind"` // oauth2 | credential
 	Name         string     `json:"name"`
 	Account      string     `json:"account"`
 	OwnerSub     string     `json:"ownerSub"`
@@ -30,8 +38,12 @@ type Connection struct {
 	Scopes       string     `json:"scopes"`
 	InstanceURL  string     `json:"instanceUrl,omitempty"` // API base URL of the account, if the provider has one
 	ExpiresAt    *time.Time `json:"expiresAt,omitempty"`
-	CreatedAt    time.Time  `json:"createdAt"`
-	UpdatedAt    time.Time  `json:"updatedAt"`
+	// Fields are the non-secret fields of a credential; SecretFields its
+	// secret fields, sealed with secrets.CredentialAAD.
+	Fields       map[string]string `json:"fields,omitempty"`
+	SecretFields map[string]string `json:"-"`
+	CreatedAt    time.Time         `json:"createdAt"`
+	UpdatedAt    time.Time         `json:"updatedAt"`
 }
 
 // UsableBy reports whether u may select the connection in workflows.
@@ -58,15 +70,17 @@ func (c *Connection) ManageableBy(u *auth.User) bool {
 }
 
 const connCols = `id, org_id, module, name, account, owner_sub, owner_name, scope, groups,
-	access_token, refresh_token, token_type, scopes, expires_at, created_at, updated_at, instance_url`
+	access_token, refresh_token, token_type, scopes, expires_at, created_at, updated_at, instance_url,
+	kind, fields, secret_fields`
 
 func scanConnection(row pgx.Row) (*Connection, error) {
 	var c Connection
 	var id uuid.UUID
-	var groups []byte
+	var groups, fields, secretFields []byte
 	var instanceURL *string
 	err := row.Scan(&id, &c.OrgID, &c.Module, &c.Name, &c.Account, &c.OwnerSub, &c.OwnerName, &c.Scope, &groups,
-		&c.AccessToken, &c.RefreshToken, &c.TokenType, &c.Scopes, &c.ExpiresAt, &c.CreatedAt, &c.UpdatedAt, &instanceURL)
+		&c.AccessToken, &c.RefreshToken, &c.TokenType, &c.Scopes, &c.ExpiresAt, &c.CreatedAt, &c.UpdatedAt, &instanceURL,
+		&c.Kind, &fields, &secretFields)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -80,7 +94,22 @@ func scanConnection(row pgx.Row) (*Connection, error) {
 	if err := json.Unmarshal(groups, &c.Groups); err != nil {
 		return nil, err
 	}
+	if err := json.Unmarshal(fields, &c.Fields); err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(secretFields, &c.SecretFields); err != nil {
+		return nil, err
+	}
 	return &c, nil
+}
+
+// fieldsJSON encodes credential field maps; nil becomes {}.
+func fieldsJSON(m map[string]string) []byte {
+	if m == nil {
+		return []byte("{}")
+	}
+	b, _ := json.Marshal(m)
+	return b
 }
 
 func (s *Store) CreateConnection(ctx context.Context, c *Connection) error {
@@ -90,12 +119,16 @@ func (s *Store) CreateConnection(ctx context.Context, c *Connection) error {
 	if c.Groups == nil {
 		c.Groups = []string{}
 	}
+	if c.Kind == "" {
+		c.Kind = KindOAuth2
+	}
 	groups, _ := json.Marshal(c.Groups)
 	return s.pool.QueryRow(ctx, `INSERT INTO connections (id, org_id, module, name, account, owner_sub, owner_name,
-		scope, groups, access_token, refresh_token, token_type, scopes, expires_at, instance_url)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,NULLIF($15,'')) RETURNING created_at, updated_at`,
+		scope, groups, access_token, refresh_token, token_type, scopes, expires_at, instance_url, kind, fields, secret_fields)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,NULLIF($15,''),$16,$17,$18) RETURNING created_at, updated_at`,
 		c.ID, c.OrgID, c.Module, c.Name, c.Account, c.OwnerSub, c.OwnerName, c.Scope, groups,
 		c.AccessToken, c.RefreshToken, c.TokenType, c.Scopes, c.ExpiresAt, c.InstanceURL,
+		c.Kind, fieldsJSON(c.Fields), fieldsJSON(c.SecretFields),
 	).Scan(&c.CreatedAt, &c.UpdatedAt)
 }
 
@@ -137,6 +170,17 @@ func (s *Store) UpdateConnectionMeta(ctx context.Context, c *Connection) error {
 		return ErrNotFound
 	}
 	return nil
+}
+
+// UpdateConnectionFields replaces the fields of a credential.
+func (s *Store) UpdateConnectionFields(ctx context.Context, c *Connection) error {
+	err := s.pool.QueryRow(ctx, `UPDATE connections SET fields=$2, secret_fields=$3, updated_at=now()
+		WHERE id=$1 AND kind='credential' RETURNING updated_at`,
+		c.ID, fieldsJSON(c.Fields), fieldsJSON(c.SecretFields)).Scan(&c.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	}
+	return err
 }
 
 func (s *Store) DeleteConnection(ctx context.Context, id string) error {

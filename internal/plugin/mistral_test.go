@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -29,6 +30,21 @@ func (m mistralSecrets) ModuleSettings(_ context.Context, _, module string) (map
 		return m.config, m.vars, nil
 	}
 	return map[string]any{}, map[string]any{}, nil
+}
+
+// fakeCredentials resolves credential ids to field values (any org, module).
+type fakeCredentials map[string]map[string]any
+
+func (f fakeCredentials) Credential(_ context.Context, _, _, id string) (map[string]any, []string, error) {
+	c, ok := f[id]
+	if !ok {
+		return nil, nil, errors.New("credential not found")
+	}
+	var secrets []string
+	for _, v := range c {
+		secrets = append(secrets, v.(string))
+	}
+	return c, secrets, nil
 }
 
 func mistralZip(t *testing.T, host string) []byte {
@@ -106,7 +122,7 @@ func TestMistralWasmPlugin(t *testing.T) {
 	}
 
 	run := func(sec mistralSecrets, params map[string]any) *engine.Result {
-		eng := engine.New(reg, newMemStore(), discard, engine.Options{Secrets: sec})
+		eng := engine.New(reg, newMemStore(), discard, engine.Options{Secrets: sec, Credentials: fakeCredentials{"cred-1": {"apiKey": "own"}}})
 		wf := &workflow.Workflow{ID: "wf", Name: "Ask", OrgID: "acme", Graph: workflow.Graph{
 			Nodes: []workflow.Node{
 				{ID: "t", Name: "Start", Type: "trigger.manual", Params: map[string]any{"payload": map[string]any{"text": "hello"}}},
@@ -137,9 +153,12 @@ func TestMistralWasmPlugin(t *testing.T) {
 		t.Fatalf("unexpected request %v", last)
 	}
 
-	// Per-node key overrides the org default.
-	res = run(mistralSecrets{fakeSecrets{config: cfg, node: map[string]map[string]string{"m": {"apiKey": "own"}}}},
-		map[string]any{"model": "m", "prompt": "x"})
+	// The node's credential overrides the org default.
+	if def := info.Credentials; def == nil || !def.Optional || def.APIHosts[0] != "127.0.0.1" {
+		t.Fatalf("credentials spec: %+v", def)
+	}
+	res = run(mistralSecrets{fakeSecrets{config: cfg}},
+		map[string]any{"model": "m", "prompt": "x", nodes.ConnectionParam: "cred-1"})
 	if res.Execution.Status != store.StatusSuccess {
 		t.Fatalf("run failed: %s", res.Execution.Error)
 	}

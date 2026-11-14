@@ -43,7 +43,9 @@ Output item:
 ## Keys
 
 - **Config** `apiKey` (secret, Plugins → Settings): organization-wide default key.
-- **Node secret** `apiKey`: a user's own key; overrides the default.
+- **Credential** `apiKey`: a user's own key, stored once on the *Connections* page (shareable)
+  and selected in the node's *Credential* field; overrides the default. The plugin receives it
+  as `input.credential.apiKey`.
 - **Config** `apiBaseUrl`: defaults to `https://api.mistral.ai`. If changed, add the host to `allowedHosts`.
 - **Var** `defaultModel`: usable in node fields as `{{ vars.defaultModel }}`.
 
