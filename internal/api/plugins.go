@@ -9,19 +9,23 @@ import (
 
 	"github.com/glue2flow/g2f/internal/auth"
 	"github.com/glue2flow/g2f/internal/plugin"
+	"github.com/glue2flow/g2f/internal/plugin/signing"
 	"github.com/glue2flow/g2f/internal/store"
 )
 
 const maxUpload = 50 << 20
 
-// listPlugins lists installed modules (built-in, file-based and imported).
+// listPlugins lists installed modules (built-in, file-based and imported),
+// including imported plugins that are blocked by the signature policy.
 func (s *Server) listPlugins(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, s.reg.Modules())
+	writeJSON(w, http.StatusOK, s.plugins.Modules())
 }
 
-// importPlugin installs a plugin from a multipart upload (field "file"):
-// a .yaml manifest or a .zip bundle with plugin.yaml and a .wasm module.
-// Plugins are installation-wide, so this requires the plugin admin role.
+// importPlugin installs a plugin from a multipart upload: field "file" is a
+// .yaml manifest or a .zip bundle, "signature" the optional detached
+// signature (file or text), and "replace=true" confirms replacing an imported
+// plugin of the same module. Plugins are installation-wide, so this requires
+// the plugin admin role.
 func (s *Server) importPlugin(w http.ResponseWriter, r *http.Request) {
 	u := auth.FromContext(r.Context())
 	if !u.PluginAdmin {
@@ -44,13 +48,81 @@ func (s *Server) importPlugin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	info, err := s.plugins.Import(r.Context(), hdr.Filename, data, u.Name)
-	if err != nil {
-		status := http.StatusBadRequest
-		if errors.Is(err, plugin.ErrConflict) {
-			status = http.StatusConflict
+	opt := plugin.ImportOptions{Replace: r.FormValue("replace") == "true"}
+	if sf, _, err := r.FormFile("signature"); err == nil {
+		defer sf.Close()
+		opt.Signature, err = io.ReadAll(io.LimitReader(sf, signing.MaxSignatureSize+1))
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
 		}
-		writeError(w, status, err.Error())
+	} else {
+		opt.Signature = []byte(r.FormValue("signature"))
+	}
+	info, err := s.plugins.Import(r.Context(), hdr.Filename, data, u.Name, opt)
+	if err != nil {
+		s.importError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, info)
+}
+
+// importError reports a refused import. Replacing needs confirmation: the
+// 409 response carries the installed and the uploaded version.
+func (s *Server) importError(w http.ResponseWriter, err error) {
+	var exists *plugin.ExistsError
+	switch {
+	case errors.As(err, &exists):
+		writeJSON(w, http.StatusConflict, map[string]any{"error": err.Error(), "conflict": exists})
+	case errors.Is(err, plugin.ErrConflict):
+		writeError(w, http.StatusConflict, err.Error())
+	default:
+		writeError(w, http.StatusBadRequest, err.Error())
+	}
+}
+
+// catalogResponse lists the configured catalogs.
+type catalogResponse struct {
+	RequireSigned bool                 `json:"requireSigned"`
+	Catalogs      []plugin.CatalogView `json:"catalogs"`
+}
+
+func (s *Server) listCatalog(w http.ResponseWriter, r *http.Request) {
+	if !auth.FromContext(r.Context()).PluginAdmin {
+		writeError(w, http.StatusForbidden, "requires the plugin admin role")
+		return
+	}
+	writeJSON(w, http.StatusOK, catalogResponse{RequireSigned: s.plugins.RequireSigned(), Catalogs: s.catalogs.List(r.Context())})
+}
+
+func (s *Server) refreshCatalog(w http.ResponseWriter, r *http.Request) {
+	if !auth.FromContext(r.Context()).PluginAdmin {
+		writeError(w, http.StatusForbidden, "requires the plugin admin role")
+		return
+	}
+	writeJSON(w, http.StatusOK, catalogResponse{RequireSigned: s.plugins.RequireSigned(), Catalogs: s.catalogs.Refresh(r.Context())})
+}
+
+// installFromCatalog installs or updates a plugin from a catalog:
+// {"catalog": "<index url>", "module": "telegram", "replace": false}.
+func (s *Server) installFromCatalog(w http.ResponseWriter, r *http.Request) {
+	u := auth.FromContext(r.Context())
+	if !u.PluginAdmin {
+		writeError(w, http.StatusForbidden, "requires the plugin admin role")
+		return
+	}
+	var in struct {
+		Catalog string `json:"catalog"`
+		Module  string `json:"module"`
+		Replace bool   `json:"replace"`
+	}
+	if err := decode(r, &in); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	info, err := s.catalogs.Install(r.Context(), in.Catalog, in.Module, u.Name, in.Replace)
+	if err != nil {
+		s.importError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, info)

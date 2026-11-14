@@ -201,6 +201,10 @@ export interface ClientConfig {
   clientId?: string;
   publicUrl: string;
   oauthRedirectUrl: string;
+  /** Plugin catalogs are configured (G2F_PLUGIN_CATALOGS). */
+  pluginCatalog?: boolean;
+  /** Only plugins signed by a trusted key can be imported (G2F_PLUGIN_REQUIRE_SIGNED). */
+  pluginRequireSigned?: boolean;
 }
 
 export const roleRank: Record<Role, number> = { viewer: 1, runner: 2, editor: 3, owner: 4 };
@@ -237,6 +241,55 @@ export interface ModuleInfo {
   nodes: string[];
   installedBy?: string;
   installedAt?: string;
+  /** Trusted key that signed an imported plugin; absent = unsigned. */
+  signer?: string;
+  /** Why a stored plugin is not loaded (it has no nodes then). */
+  blocked?: string;
+}
+
+/** One version of a plugin, as shown when an import would replace another. */
+export interface PluginSummary {
+  module: string;
+  name: string;
+  version?: string;
+  signer?: string;
+  blocked?: string;
+}
+
+/** Body of a 409 response to an import that needs confirmation. */
+export interface PluginConflict {
+  current: PluginSummary;
+  incoming: PluginSummary;
+}
+
+export interface CatalogPlugin {
+  module: string;
+  name: string;
+  version: string;
+  description?: string;
+  runtime?: string;
+  homepage?: string;
+  /** Key named by the entry's signature; verified on install. */
+  keyId?: string;
+  verification: "trusted" | "unknown-key" | "unsigned";
+  state: "available" | "installed" | "update" | "older" | "blocked" | "bundled";
+  installedVersion?: string;
+  installedSigner?: string;
+  installable: boolean;
+  reason?: string;
+}
+
+export interface CatalogView {
+  url: string;
+  name: string;
+  error?: string;
+  fetchedAt?: string;
+  plugins: CatalogPlugin[];
+}
+
+export interface CatalogResponse {
+  requireSigned: boolean;
+  catalogs: CatalogView[];
 }
 
 export interface CredentialsSpec {

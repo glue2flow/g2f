@@ -16,6 +16,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/glue2flow/g2f/internal/engine"
 	"github.com/glue2flow/g2f/internal/netguard"
@@ -77,6 +78,7 @@ type memStore struct {
 	plugins map[string]*store.PluginRecord
 	execs   map[string]store.Execution
 	n       int
+	saveErr error // returned by SavePlugin when set
 }
 
 func newMemStore() *memStore {
@@ -103,10 +105,19 @@ func (m *memStore) PluginDigests(context.Context) (map[string]string, error) {
 	return out, nil
 }
 
-func (m *memStore) SavePlugin(_ context.Context, p *store.PluginRecord) error {
+func (m *memStore) SavePlugin(_ context.Context, p *store.PluginRecord, replace bool) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.plugins[p.Module] = p
+	if m.saveErr != nil {
+		return m.saveErr
+	}
+	if _, ok := m.plugins[p.Module]; ok && !replace {
+		return store.ErrPluginExists
+	}
+	c := *p
+	c.InstalledAt = time.Now().UTC()
+	p.InstalledAt = c.InstalledAt
+	m.plugins[p.Module] = &c
 	return nil
 }
 
@@ -205,7 +216,7 @@ func TestTelegramWasmPlugin(t *testing.T) {
 	st := newMemStore()
 	mgr := NewManager(reg, st, discard)
 
-	info, err := mgr.Import(context.Background(), "telegram.zip", sampleZip(t, "127.0.0.1"), "alice")
+	info, err := mgr.Import(context.Background(), "telegram.zip", sampleZip(t, "127.0.0.1"), "alice", ImportOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -288,7 +299,7 @@ func TestWasmSandboxBlocksOtherHosts(t *testing.T) {
 	_ = nodes.RegisterBuiltins(reg)
 	mgr := NewManager(reg, newMemStore(), discard)
 	// Only api.telegram.org is allowed; the fake server on 127.0.0.1 is not.
-	if _, err := mgr.Import(context.Background(), "telegram.zip", sampleZip(t, "api.telegram.org"), "alice"); err != nil {
+	if _, err := mgr.Import(context.Background(), "telegram.zip", sampleZip(t, "api.telegram.org"), "alice", ImportOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	res := runTelegram(t, reg, fakeSecrets{config: map[string]any{"botToken": "s3cr3t-token", "apiBaseUrl": srv.URL}}, "42")
@@ -336,7 +347,7 @@ func TestWasmRedirectLeavesAllowedHosts(t *testing.T) {
 	reg := nodes.NewRegistry()
 	_ = nodes.RegisterBuiltins(reg)
 	mgr := NewManager(reg, newMemStore(), discard)
-	if _, err := mgr.Import(context.Background(), "telegram.zip", sampleZip(t, "127.0.0.1"), "alice"); err != nil {
+	if _, err := mgr.Import(context.Background(), "telegram.zip", sampleZip(t, "127.0.0.1"), "alice", ImportOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	res := runTelegram(t, reg, fakeSecrets{config: map[string]any{"botToken": "tok", "apiBaseUrl": redirector.URL}}, "42")
@@ -358,7 +369,7 @@ func TestWasmHTTPBlocksPrivateAddresses(t *testing.T) {
 	reg := nodes.NewRegistry()
 	_ = nodes.RegisterBuiltins(reg)
 	mgr := NewManager(reg, newMemStore(), discard)
-	if _, err := mgr.Import(context.Background(), "telegram.zip", sampleZip(t, "127.0.0.1"), "alice"); err != nil {
+	if _, err := mgr.Import(context.Background(), "telegram.zip", sampleZip(t, "127.0.0.1"), "alice", ImportOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	res := runTelegram(t, reg, fakeSecrets{config: map[string]any{"botToken": "tok", "apiBaseUrl": srv.URL}}, "42")

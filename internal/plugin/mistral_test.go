@@ -113,7 +113,7 @@ func TestMistralWasmPlugin(t *testing.T) {
 		t.Fatal(err)
 	}
 	mgr := NewManager(reg, newMemStore(), discard)
-	info, err := mgr.Import(context.Background(), "mistral.zip", mistralZip(t, "127.0.0.1"), "alice")
+	info, err := mgr.Import(context.Background(), "mistral.zip", mistralZip(t, "127.0.0.1"), "alice", ImportOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

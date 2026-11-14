@@ -39,6 +39,10 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "healthcheck" {
 		os.Exit(healthcheck())
 	}
+	// `g2f plugin keygen|sign|verify|catalog` are tools for plugin publishers.
+	if len(os.Args) > 1 && os.Args[1] == "plugin" {
+		os.Exit(pluginCommand(os.Args[2:], os.Stdout, os.Stderr))
+	}
 
 	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	if err := run(log); err != nil {
@@ -77,6 +81,9 @@ func run(log *slog.Logger) error {
 		return err
 	}
 	plugins := plugin.NewManager(reg, st, log)
+	plugins.SetTrust(plugin.Trust{Keys: cfg.PluginTrustedKeys, RequireSigned: cfg.PluginRequireSigned})
+	log.Info("plugin signatures", "trustedKeys", len(cfg.PluginTrustedKeys), "requireSigned", cfg.PluginRequireSigned,
+		"catalogs", len(cfg.PluginCatalogs))
 	count, err := plugins.LoadDir(ctx, cfg.ModulesDir)
 	if err != nil {
 		return fmt.Errorf("load modules: %w", err)
@@ -141,6 +148,7 @@ func run(log *slog.Logger) error {
 		Resume:      trigger.NewResumeHandler(signer, eng, log),
 		Secrets:     sec,
 		Plugins:     plugins,
+		Catalogs:    plugin.NewCatalogs(cfg.PluginCatalogs, plugins, version),
 		OAuth:       oauthMgr,
 		Credentials: creds,
 	})

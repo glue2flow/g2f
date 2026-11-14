@@ -109,3 +109,38 @@ func TestHTTPNetworkPolicy(t *testing.T) {
 		t.Fatalf("want error naming the entry, got %v", err)
 	}
 }
+
+func TestPluginSigningConfig(t *testing.T) {
+	t.Setenv("G2F_SECRET_KEY", "dGVzdC1rZXktdGVzdC1rZXktdGVzdC1rZXktdGVzdC0=")
+	t.Setenv("G2F_AUTH_MODE", "none")
+	const key = "acme=MCowBQYDK2VwAyEAuAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" // 44 chars, not 32 bytes
+	const good = "acme=11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo="
+	c, err := Load()
+	if err != nil || c.PluginRequireSigned || len(c.PluginTrustedKeys) != 0 || c.PluginCatalogs != nil {
+		t.Fatalf("defaults: %v %+v", err, c)
+	}
+	for _, tt := range []struct{ keys, require, catalogs, want string }{
+		{key, "", "", "G2F_PLUGIN_TRUSTED_KEYS"},
+		{"acme", "", "", "G2F_PLUGIN_TRUSTED_KEYS"},
+		{good + "," + good, "", "", "used twice"},
+		{"bad name!=11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=", "", "", "G2F_PLUGIN_TRUSTED_KEYS"},
+		{"", "true", "", "needs at least one key"},
+		{good, "yes please", "", "G2F_PLUGIN_REQUIRE_SIGNED"},
+		{"", "", "http://plugins.example.com/index.json", "must use https"},
+		{"", "", "ftp://x/index.json", "G2F_PLUGIN_CATALOGS"},
+	} {
+		t.Setenv("G2F_PLUGIN_TRUSTED_KEYS", tt.keys)
+		t.Setenv("G2F_PLUGIN_REQUIRE_SIGNED", tt.require)
+		t.Setenv("G2F_PLUGIN_CATALOGS", tt.catalogs)
+		if _, err := Load(); err == nil || !strings.Contains(err.Error(), tt.want) {
+			t.Errorf("%+v: got %v", tt, err)
+		}
+	}
+	t.Setenv("G2F_PLUGIN_TRUSTED_KEYS", good+", other=11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=")
+	t.Setenv("G2F_PLUGIN_REQUIRE_SIGNED", "true")
+	t.Setenv("G2F_PLUGIN_CATALOGS", "https://plugins.example.com/index.json, http://localhost:9000/index.json")
+	c, err = Load()
+	if err != nil || !c.PluginRequireSigned || len(c.PluginTrustedKeys) != 2 || len(c.PluginCatalogs) != 2 {
+		t.Fatalf("%v %+v", err, c)
+	}
+}

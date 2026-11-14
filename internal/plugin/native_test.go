@@ -33,7 +33,7 @@ func TestLoadShippedModules(t *testing.T) {
 
 func TestNativeModulesCannotBeImported(t *testing.T) {
 	mgr := NewManager(nodes.NewRegistry(), newMemStore(), discard)
-	_, err := mgr.Import(context.Background(), "x.yaml", []byte("module: email\nruntime: go\nnodes: [{type: send, name: Send}]\n"), "alice")
+	_, err := mgr.Import(context.Background(), "x.yaml", []byte("module: email\nruntime: go\nnodes: [{type: send, name: Send}]\n"), "alice", ImportOptions{})
 	if err == nil || !strings.Contains(err.Error(), "cannot be imported") {
 		t.Fatalf("expected refusal, got %v", err)
 	}

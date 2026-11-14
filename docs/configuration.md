@@ -33,6 +33,9 @@ glue2flow is configured with environment variables.
 | `G2F_STATIC_DIR` | `./web/dist` | built editor |
 | `G2F_MODULES_DIR` | `./modules` | plugins loaded at startup |
 | `G2F_PLUGIN_SYNC` | `30s` | how often imported plugins are reloaded from the database |
+| `G2F_PLUGIN_TRUSTED_KEYS` | – | publishers whose plugin signatures are accepted, comma separated `name=<base64 Ed25519 public key>` (from `g2f plugin keygen`); names must be unique ([signing](plugins.md#signing-plugins)) |
+| `G2F_PLUGIN_REQUIRE_SIGNED` | `false` | `true`: imported plugins must carry a valid signature by a trusted key; unsigned ones already imported stop loading and are shown as blocked. Needs at least one trusted key |
+| `G2F_PLUGIN_CATALOGS` | – | comma separated index URLs of [plugin catalogs](plugins.md#plugin-catalog) (https; http only for localhost). Empty: no catalog tab |
 | `G2F_DISABLE_CODE_NODE` | `false` | turn off the JavaScript Code node |
 | `G2F_CODE_MEMORY_MB` | `128` | memory limit of Code node scripts; `0` runs them in the server process without a limit ([Code](nodes.md#code)) |
 | `G2F_HTTP_ALLOW_PRIVATE` | `false` | `true` lets workflows and plugins send HTTP requests to private and local addresses (loopback, `10/8`, `172.16/12`, `192.168/16`, link-local incl. the cloud metadata address, CGNAT, unique local IPv6, …). Off by default ([network access](nodes.md#network-access)) |

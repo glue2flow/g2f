@@ -360,6 +360,10 @@ type ModuleInfo struct {
 	Nodes       []string         `json:"nodes"`
 	InstalledBy string           `json:"installedBy,omitempty"`
 	InstalledAt *time.Time       `json:"installedAt,omitempty"`
+	// Signer is the trusted key that signed an imported plugin ("" = unsigned).
+	Signer string `json:"signer,omitempty"`
+	// Blocked says why a stored plugin is not loaded (its nodes are absent).
+	Blocked string `json:"blocked,omitempty"`
 }
 
 // BuiltinModule is the module name of nodes implemented in Go.

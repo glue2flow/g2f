@@ -154,8 +154,17 @@ var (
 	nameRe   = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_.-]{0,63}$`)
 )
 
+// ValidModuleName reports whether name can be a plugin's module name.
+func ValidModuleName(name string) bool { return moduleRe.MatchString(name) && !reservedModules[name] }
+
 // reservedModules cannot be used by plugins because built-in node types use them.
 var reservedModules = map[string]bool{BuiltinModule: true, "core": true, "trigger": true, "logic": true, "flow": true, "data": true}
+
+// Limits of WASM plugins per node run.
+const (
+	MaxWasmTimeout  = 5 * time.Minute
+	MaxWasmMemoryMB = 1024
+)
 
 // ParseManifest decodes and validates a manifest.
 func ParseManifest(raw []byte) (*Manifest, error) {
@@ -192,9 +201,18 @@ func (m *Manifest) validate() error {
 		m.Wasm = "plugin.wasm"
 	}
 	if m.Timeout != "" {
-		if _, err := time.ParseDuration(m.Timeout); err != nil {
+		d, err := time.ParseDuration(m.Timeout)
+		if err != nil {
 			return fmt.Errorf("timeout: %w", err)
 		}
+		if d <= 0 || d > MaxWasmTimeout {
+			return fmt.Errorf("timeout must be positive and at most %s", MaxWasmTimeout)
+		}
+	}
+	// One node run of an imported plugin must not be able to claim the
+	// server's memory or a worker for an unbounded time.
+	if m.MemoryMB < 0 || m.MemoryMB > MaxWasmMemoryMB {
+		return fmt.Errorf("memoryMB must be between 1 and %d", MaxWasmMemoryMB)
 	}
 	if len(m.Nodes) == 0 {
 		return fmt.Errorf("at least one node is required")

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/glue2flow/g2f/internal/netguard"
+	"github.com/glue2flow/g2f/internal/plugin/signing"
 )
 
 // demoSecretKeys are published in this repository (docker-compose.yml and the
@@ -45,6 +46,12 @@ type Config struct {
 	SecretKeysOld []string
 	// PluginSync is how often imported plugins are re-read from the database.
 	PluginSync time.Duration
+	// PluginTrustedKeys are the publishers whose plugin signatures are accepted.
+	PluginTrustedKeys signing.Keys
+	// PluginRequireSigned refuses plugins without a valid trusted signature.
+	PluginRequireSigned bool
+	// PluginCatalogs are the index URLs of plugin catalogs.
+	PluginCatalogs []string
 	// TrustedProxies are the reverse proxies whose X-Forwarded-For header is
 	// believed when determining client addresses (rate limits, logs).
 	TrustedProxies []netip.Prefix
@@ -158,6 +165,18 @@ func Load() (*Config, error) {
 	if c.PluginSync, err = time.ParseDuration(env("G2F_PLUGIN_SYNC", "30s")); err != nil {
 		return nil, fmt.Errorf("G2F_PLUGIN_SYNC: %w", err)
 	}
+	if c.PluginTrustedKeys, err = signing.ParseKeys(env("G2F_PLUGIN_TRUSTED_KEYS", "")); err != nil {
+		return nil, fmt.Errorf("G2F_PLUGIN_TRUSTED_KEYS: %w", err)
+	}
+	if c.PluginRequireSigned, err = strconv.ParseBool(env("G2F_PLUGIN_REQUIRE_SIGNED", "false")); err != nil {
+		return nil, fmt.Errorf("G2F_PLUGIN_REQUIRE_SIGNED must be true or false")
+	}
+	if c.PluginRequireSigned && len(c.PluginTrustedKeys) == 0 {
+		return nil, fmt.Errorf("G2F_PLUGIN_REQUIRE_SIGNED=true needs at least one key in G2F_PLUGIN_TRUSTED_KEYS")
+	}
+	if c.PluginCatalogs, err = parseCatalogs(env("G2F_PLUGIN_CATALOGS", "")); err != nil {
+		return nil, fmt.Errorf("G2F_PLUGIN_CATALOGS: %w", err)
+	}
 	c.DisableCodeNode = env("G2F_DISABLE_CODE_NODE", "false") == "true"
 	if c.CodeMemoryMB, err = envInt("G2F_CODE_MEMORY_MB", 128); err != nil {
 		return nil, err
@@ -266,6 +285,26 @@ func splitList(s string) []string {
 		}
 	}
 	return out
+}
+
+// parseCatalogs parses catalog index URLs. They must be https; plain http is
+// accepted for localhost, where nobody in between can change the index.
+func parseCatalogs(s string) ([]string, error) {
+	var out []string
+	for _, raw := range splitList(s) {
+		u, err := url.Parse(raw)
+		if err != nil || u.Host == "" || (u.Scheme != "https" && u.Scheme != "http") {
+			return nil, fmt.Errorf("%q is not an http(s) URL", raw)
+		}
+		if u.Scheme == "http" && !isLocalURL(raw) {
+			return nil, fmt.Errorf("%q must use https", raw)
+		}
+		if u.User != nil {
+			return nil, fmt.Errorf("%q must not contain credentials", raw)
+		}
+		out = append(out, raw)
+	}
+	return out, nil
 }
 
 // parseProxies parses a comma separated list of CIDRs and single IPs.

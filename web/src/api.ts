@@ -1,10 +1,15 @@
 import Keycloak from "keycloak-js";
-import type { ClientConfig, ConfigValue, Connection, Execution, ModuleInfo, NodeDef, Scope, TriggerInfo, User, Workflow } from "./types";
+import type { CatalogResponse, ClientConfig, ConfigValue, Connection, Execution, ModuleInfo, NodeDef, Scope, TriggerInfo, User, Workflow } from "./types";
 
 let keycloak: Keycloak | null = null;
 
 export class ApiError extends Error {
-  constructor(public status: number, message: string) {
+  constructor(
+    public status: number,
+    message: string,
+    /** The parsed error response, e.g. the conflict of a plugin import. */
+    public data?: Record<string, unknown>,
+  ) {
     super(message);
   }
 }
@@ -43,7 +48,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   const res = await fetch(path, { method, headers, body: payload });
   if (res.status === 204) return undefined as T;
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new ApiError(res.status, data.error ?? res.statusText);
+  if (!res.ok) throw new ApiError(res.status, data.error ?? res.statusText, data);
   return data as T;
 }
 
@@ -77,11 +82,17 @@ export const api = {
   ) => request<Connection>("PATCH", `/api/connections/${id}`, patch),
   deleteConnection: (id: string) => request<void>("DELETE", `/api/connections/${id}`),
   plugins: () => request<ModuleInfo[]>("GET", "/api/plugins"),
-  importPlugin: (file: File) => {
+  importPlugin: (file: File, signature?: File, replace = false) => {
     const fd = new FormData();
     fd.append("file", file);
+    if (signature) fd.append("signature", signature);
+    if (replace) fd.append("replace", "true");
     return request<ModuleInfo>("POST", "/api/plugins", fd);
   },
+  catalog: () => request<CatalogResponse>("GET", "/api/plugins/catalog"),
+  refreshCatalog: () => request<CatalogResponse>("POST", "/api/plugins/catalog/refresh"),
+  installFromCatalog: (catalog: string, module: string, replace = false) =>
+    request<ModuleInfo>("POST", "/api/plugins/catalog/install", { catalog, module, replace }),
   deletePlugin: (module: string) => request<void>("DELETE", `/api/plugins/${module}`),
   pluginConfig: (module: string) => request<ConfigValue[]>("GET", `/api/plugins/${module}/config`),
   setPluginConfig: (module: string, values: Record<string, unknown>) =>

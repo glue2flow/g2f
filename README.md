@@ -46,8 +46,9 @@ publish them to the whole organization. Roles from *viewer* to *owner*.
 Plugins get them; workflow fields don't.
 
 🔌 **Extend it in any language.** Wrap a REST API in a few lines of YAML, or write a
-sandboxed WebAssembly plugin in Go, JavaScript or Rust, and import it at runtime. Native Go
-modules cover protocols like SMTP and IMAP.
+sandboxed WebAssembly plugin in Go, JavaScript or Rust, and import it at runtime or install it
+from a plugin catalog, optionally requiring Ed25519 signatures by publishers you trust. Native
+Go modules cover protocols like SMTP and IMAP.
 
 🪶 **Small and simple to run.** One Go binary (~25 MB image) plus PostgreSQL. Add
 replicas when you need them: if one stops, another continues its runs where they left off.
@@ -63,6 +64,7 @@ replicas when you need them: if one stops, another continues its runs where they
 | **Long-running** | Wait for a time, a date, or an approval link, for days if needed, surviving restarts |
 | **Integrations** | Gmail · Outlook · Microsoft Teams · Google Sheets · Google Calendar · Google Drive · HubSpot · Salesforce · SharePoint (OAuth2) · Email (SMTP/IMAP) · GitHub · Slack · Telegram · Mistral AI |
 | **Accounts** | Users connect their own OAuth2 accounts or store API-key credentials (tokens, webhook URLs) once, and share them with groups |
+| **Plugins** | HTTP (YAML), WebAssembly and native Go modules · import at runtime or install and update from plugin catalogs · Ed25519 signatures by publishers you trust, optionally required |
 
 ## Try it in one minute
 
@@ -76,7 +78,6 @@ development without Docker: **[Getting started](docs/getting-started.md)**.
 
 ## Roadmap
 
-- Plugin signing and a plugin catalog
 - Push instead of polling for mail (IMAP IDLE, Gmail push notifications, Graph subscriptions)
 - XML / HTML parsing, file (binary) data between nodes
 - More native protocol modules: Postgres/MySQL, SFTP

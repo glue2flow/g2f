@@ -374,3 +374,12 @@ textarea.code { font-size: 12px; line-height: 1.5; tab-size: 2; white-space: pre
 .fb-more summary { cursor: pointer; }
 .fb-more[open] { display: flex; flex-direction: column; gap: 6px; }
 .chip.trig-form { background: color-mix(in srgb, #0ea5e9 20%, transparent); }
+.tabs { display: flex; gap: 4px; }
+.tab { border: 1px solid var(--border); background: var(--surface); padding: 4px 12px; border-radius: 6px; cursor: pointer; color: inherit; }
+.tab.active { border-color: var(--primary); background: color-mix(in srgb, var(--primary) 12%, transparent); }
+.card.blocked { border-color: color-mix(in srgb, var(--danger) 50%, var(--border)); }
+.card .alert { margin: 0; padding: 6px 8px; }
+.catalog { margin-bottom: 20px; }
+.catalog-title { font-size: 16px; margin: 12px 0 8px; }
+.catalog-table td:last-child { white-space: nowrap; text-align: right; }
+.catalog-reason { white-space: normal; max-width: 260px; margin-left: auto; }

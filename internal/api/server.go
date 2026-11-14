@@ -47,6 +47,7 @@ type Server struct {
 	resume   http.Handler
 	secrets  *secrets.Service
 	plugins  *plugin.Manager
+	catalogs *plugin.Catalogs
 	oauth    *oauth.Manager
 	creds    *credentials.Service
 }
@@ -68,7 +69,9 @@ type Deps struct {
 	Resume  http.Handler
 	Secrets *secrets.Service
 	Plugins *plugin.Manager
-	OAuth   *oauth.Manager
+	// Catalogs serves plugin catalogs; optional.
+	Catalogs *plugin.Catalogs
+	OAuth    *oauth.Manager
 	// Credentials manages API-key credentials.
 	Credentials *credentials.Service
 }
@@ -77,7 +80,7 @@ func New(d Deps) *Server {
 	return &Server{
 		cfg: d.Config, store: d.Store, reg: d.Registry, engine: d.Engine,
 		auth: d.Auth, log: d.Logger, listener: d.Listener, webhooks: d.Webhooks, forms: d.Forms,
-		secrets: d.Secrets, plugins: d.Plugins, resume: d.Resume, oauth: d.OAuth,
+		secrets: d.Secrets, plugins: d.Plugins, catalogs: d.Catalogs, resume: d.Resume, oauth: d.OAuth,
 		creds: d.Credentials,
 	}
 }
@@ -121,6 +124,11 @@ func (s *Server) Handler() http.Handler {
 			r.Get("/plugins", s.listPlugins)
 			r.Post("/plugins", s.importPlugin)
 			r.Delete("/plugins/{module}", s.deletePlugin)
+			if s.catalogs.Enabled() {
+				r.Get("/plugins/catalog", s.listCatalog)
+				r.Post("/plugins/catalog/refresh", s.refreshCatalog)
+				r.Post("/plugins/catalog/install", s.installFromCatalog)
+			}
 			r.Get("/plugins/{module}/config", s.getPluginConfig)
 			r.Put("/plugins/{module}/config", s.putPluginConfig)
 		})
@@ -191,10 +199,17 @@ type clientConfig struct {
 	PublicURL   string          `json:"publicUrl"`
 	// OAuthRedirectURL must be registered at OAuth2 providers.
 	OAuthRedirectURL string `json:"oauthRedirectUrl"`
+	// PluginCatalog is true when plugin catalogs are configured.
+	PluginCatalog bool `json:"pluginCatalog"`
+	// PluginRequireSigned: only signed plugins can be imported.
+	PluginRequireSigned bool `json:"pluginRequireSigned"`
 }
 
 func (s *Server) getConfig(w http.ResponseWriter, _ *http.Request) {
-	c := clientConfig{AuthMode: s.cfg.Auth.Mode, PublicURL: s.cfg.PublicURL, OAuthRedirectURL: s.cfg.PublicURL + "/oauth/callback"}
+	c := clientConfig{
+		AuthMode: s.cfg.Auth.Mode, PublicURL: s.cfg.PublicURL, OAuthRedirectURL: s.cfg.PublicURL + "/oauth/callback",
+		PluginCatalog: s.catalogs.Enabled(), PluginRequireSigned: s.cfg.PluginRequireSigned,
+	}
 	if s.cfg.Auth.Mode == config.AuthOIDC {
 		// Keycloak issuers look like https://host/realms/<realm>.
 		if base, realm, ok := strings.Cut(s.cfg.Auth.Issuer, "/realms/"); ok {
