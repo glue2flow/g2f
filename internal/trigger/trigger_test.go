@@ -24,7 +24,9 @@ import (
 
 // fakeStore implements Store and engine.ExecStore in memory.
 type fakeStore struct {
+	memChecks
 	mu      sync.Mutex
+	failGet int // GetWorkflow calls that fail
 	wfs     map[string]*workflow.Workflow
 	firings map[string]bool
 	execs   map[string]store.Execution
@@ -54,6 +56,10 @@ func (s *fakeStore) ListActiveWorkflows(context.Context) ([]*workflow.Workflow, 
 func (s *fakeStore) GetWorkflow(_ context.Context, id string) (*workflow.Workflow, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.failGet > 0 {
+		s.failGet--
+		return nil, fmt.Errorf("database unavailable")
+	}
 	if w, ok := s.wfs[id]; ok {
 		return w, nil
 	}

@@ -33,10 +33,121 @@ Some sources cannot call a webhook, so glue2flow checks them every few minutes (
 - ▶ Run in the editor shows the current items without remembering them.
 - A failing check (e.g. a rejected login) is recorded as a failed execution, once while the
   same error repeats, so it shows up in the editor and notifies [error workflows](#error-trigger).
-- Checks happen at times aligned to the interval (every full 5 minutes) and are claimed in
-  PostgreSQL, so with several replicas each check runs once.
+- Checks happen at times aligned to the interval plus a fixed offset per trigger (derived from
+  workflow and node id, the same on every replica), so triggers are spread over the interval
+  instead of all checking at the same second. Each scheduled check is requested once in
+  PostgreSQL, so with several replicas it runs once.
+- Checks of one trigger never overlap, on any replica: whoever asks for a check (the clock or a
+  [push notification](#push-delivery-for-mail-triggers)), a claim per trigger in PostgreSQL
+  (`poll_checks`) lets one check run at a time. Requests that arrive during a check cause exactly
+  one more check afterwards; a burst of requests becomes one or two checks. A request is only
+  cleared by a check that started after it, so a replica that fails or stops before running
+  the check leaves it to another one (picked up within seconds).
+- Checks run on at most `G2F_POLL_WORKERS` (default 8) workers per replica.
+- The mail triggers can be woken up by their mail server instead of waiting for the next check,
+  see [Push delivery](#push-delivery-for-mail-triggers).
 
 YAML plugins can declare their own polling triggers, see [Plugins](plugins.md#polling-triggers).
+
+## Push delivery for mail triggers
+
+The three mail triggers learn about new mail within seconds when their source can tell
+glue2flow. A notification never carries the mail: it only runs the trigger's normal check
+right away. The check stays the single source of truth (cursor, first-check baseline, "every
+message once"), so a lost, duplicated or spurious notification costs at most one extra check.
+
+| Trigger | Push source | Needs |
+| --- | --- | --- |
+| **Email Received** (IMAP) | IMAP IDLE: a connection that waits on the mailbox and reports new messages (`EXISTS`/`RECENT`) | a server with the `IDLE` capability (almost all) |
+| Gmail **New Email** | Gmail watch → Google Cloud Pub/Sub topic → push subscription → `POST /push/gmail/<token>` | public https `G2F_PUBLIC_URL`, a Pub/Sub topic (setup below) |
+| Outlook **New Email** | Microsoft Graph change notifications (subscription on the trigger's folder) → `POST /push/graph` | public https `G2F_PUBLIC_URL` |
+
+The trigger's info box shows what is happening: *push · IMAP IDLE* (connected since …),
+*push · Gmail* / *push · Microsoft Graph* (subscription renews …), or *polling every N min*
+with the reason push is not active (turned off, `G2F_PUBLIC_URL` not public https, not set up,
+server without IDLE, last error, …).
+
+**Safety net.** While push works, the trigger is still checked at least every 15 minutes
+(its *Check every* interval if that is longer), because notifications can get lost. When
+push stops working (connection lost, subscription failed or expired), the configured interval
+applies again automatically, at the latest 30 seconds later.
+
+**Per trigger:** *Delivery* = *Automatic* (default) or *Polling only*. **Per server:**
+`G2F_MAIL_PUSH=false` turns push off everywhere.
+
+### IMAP IDLE
+
+For each active Email Received trigger exactly one replica keeps an IDLE connection to the
+mailbox (a lease in PostgreSQL, renewed every 10 s; if the replica stops, another one takes
+over within about 40 s). The connection uses the same server and login as the check (the
+organization's settings or the node's credential) and opens the mailbox read-only.
+
+- After every (re)connect the trigger is checked once, for mail that arrived meanwhile.
+- IDLE is renewed every 25 minutes (servers may drop idle clients after 30). A connection that
+  does not answer the renewal is replaced.
+- Lost connections are re-established with exponential backoff (1 s doubling up to 5 min,
+  with jitter).
+- A server without `IDLE`: the trigger polls and tries again after an hour.
+- Each replica keeps at most `G2F_IMAP_IDLE_MAX` (default 50) IDLE connections; triggers
+  beyond that on every replica poll. Mail servers also limit connections per account (Gmail:
+  15), so many triggers on one mailbox may need *Polling only* on some of them.
+- Changing the trigger or the Email settings reconnects; deactivating the workflow closes the
+  connection.
+
+### Gmail
+
+Gmail sends notifications through Google Cloud Pub/Sub. One-time setup by a Google Cloud
+project owner and an organization admin:
+
+1. In the Google Cloud project of the OAuth client: enable the **Cloud Pub/Sub API**.
+2. Create a topic, e.g. `projects/my-project/topics/gmail-push`.
+3. Grant `gmail-api-push@system.gserviceaccount.com` the **Pub/Sub Publisher** role on the
+   topic (this lets Gmail publish to it).
+4. In glue2flow, *Plugins → Gmail → Settings*: set **Pub/Sub topic for push** to the full
+   topic name.
+5. Open any Gmail New Email trigger as an organization admin: its info box shows the
+   **Gmail push endpoint** of your organization, `<G2F_PUBLIC_URL>/push/gmail/<token>`.
+6. Create a **push** subscription on the topic with that endpoint URL. Optional but
+   recommended: enable authentication on it with a service account of your project, and enter
+   that service account's e-mail as **Push service account** in the Gmail settings.
+
+glue2flow then calls `users.watch` for every connected account that has an active Gmail
+trigger (one watch per account, shared by its triggers), renews it daily (watches expire
+after 7 days) and calls `users.stop` when the account's last trigger goes away. A
+notification names only the mailbox address: glue2flow finds the accounts with that address
+(the account name shown on the *Connections* page) and checks their active triggers. The watch
+covers the whole mailbox (Gmail search queries cannot be expressed as watch labels), so any
+change may cause a check; the check decides what is new.
+
+Authentication of the endpoint: the unguessable token in the path identifies the organization
+(unknown tokens get 404). It is a secret: anyone who knows it can make glue2flow *check* the
+organization's Gmail triggers (nothing else, and checks are coalesced). With a push service
+account configured, every request must also carry a Google-signed OIDC token of that account
+for exactly this endpoint URL (401 otherwise); this needs outbound access to Google's public
+keys. Well-formed authenticated messages are always answered 204, whether or not the address
+belongs to a trigger.
+
+### Outlook (Microsoft Graph)
+
+Nothing to set up beyond a public https `G2F_PUBLIC_URL`: the delegated `Mail.ReadWrite`
+permission the Outlook module already requests covers mail subscriptions. For each active
+trigger glue2flow creates a subscription on the trigger's folder
+(`me/mailFolders('<folder>')/messages`, change type `created`) with a random `clientState`
+(stored encrypted), answering Graph's validation handshake on `POST /push/graph`. It renews
+the subscription daily and always well before it expires (mail subscriptions last at most
+about 3 days), deletes it when the trigger goes away and replaces it when the folder changes.
+Notifications whose `clientState` does not match are dropped. Lifecycle notifications are
+handled: *reauthorizationRequired* renews, *subscriptionRemoved* checks and subscribes again,
+*missed* checks.
+
+### Replicas
+
+Any replica can receive notifications. Subscriptions at Google and Microsoft are created,
+renewed and removed by one replica at a time (the *push reconciler*, a lease in PostgreSQL),
+which compares the active triggers with the stored subscriptions (`push_subscriptions`) every
+30 seconds and right after a workflow is saved on its replica. Failed calls are retried per
+subscription with backoff (1 minute doubling up to 1 hour), so a broken account does not
+hammer the provider.
 
 ## Schedule
 

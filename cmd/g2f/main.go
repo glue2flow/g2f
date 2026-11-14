@@ -22,6 +22,7 @@ import (
 	"github.com/glue2flow/g2f/internal/nodes"
 	"github.com/glue2flow/g2f/internal/oauth"
 	"github.com/glue2flow/g2f/internal/plugin"
+	"github.com/glue2flow/g2f/internal/push"
 	"github.com/glue2flow/g2f/internal/secrets"
 	"github.com/glue2flow/g2f/internal/store"
 	"github.com/glue2flow/g2f/internal/trigger"
@@ -131,15 +132,26 @@ func run(log *slog.Logger) error {
 	defer stopRecovery()
 	go eng.RunRecovery(recoveryCtx, cfg.InstanceTimeout)
 
-	sched := trigger.NewScheduler(st, eng, reg, log, trigger.SchedulerOptions{CatchUp: cfg.ScheduleCatchUp, ExecutionRetention: cfg.ExecutionRetention})
+	sched := trigger.NewScheduler(st, eng, reg, log, trigger.SchedulerOptions{
+		CatchUp: cfg.ScheduleCatchUp, ExecutionRetention: cfg.ExecutionRetention,
+		Instance: eng.InstanceID(), CheckWorkers: cfg.PollWorkers, Health: st,
+	})
+	// Push wakes polling mail triggers (IMAP IDLE, Gmail, Microsoft Graph).
+	pushSvc := push.New(push.Options{
+		Store: st, Registry: reg, Box: box, Waker: sched.Checks(), Contexts: eng, Tokens: oauthMgr, Settings: sec, Log: log,
+		Instance: eng.InstanceID(), PublicURL: cfg.PublicURL, Enabled: cfg.MailPush, IdleMax: cfg.IMAPIdleMax,
+	})
+	log.Info("mail push", "enabled", cfg.MailPush, "imapIdleMax", cfg.IMAPIdleMax, "pollWorkers", cfg.PollWorkers)
 	schedCtx, stopSched := context.WithCancel(context.Background())
 	defer stopSched()
 	schedDone := make(chan struct{})
 	go func() { defer close(schedDone); sched.Run(schedCtx) }()
+	pushDone := make(chan struct{})
+	go func() { defer close(pushDone); pushSvc.Run(schedCtx) }()
 
 	srv := api.New(api.Deps{
 		Config: cfg, Store: st, Registry: reg, Engine: eng, Auth: authn, Logger: log,
-		Listener: sched,
+		Listener: api.Listeners{sched, pushSvc},
 		Webhooks: trigger.NewWebhookHandler(st, eng, reg, sec, log, cfg.WebhookMaxWait),
 		Forms: trigger.NewFormHandler(st, eng, reg, log, trigger.FormOptions{
 			SecretKey: cfg.SecretKey, PublicURL: cfg.PublicURL,
@@ -151,6 +163,8 @@ func run(log *slog.Logger) error {
 		Catalogs:    plugin.NewCatalogs(cfg.PluginCatalogs, plugins, version),
 		OAuth:       oauthMgr,
 		Credentials: creds,
+		Push:        pushSvc.Handler(),
+		Delivery:    pushSvc,
 	})
 	go plugins.Run(schedCtx, cfg.PluginSync)
 	go eng.RunResumer(schedCtx, 2*time.Second)
@@ -177,6 +191,7 @@ func run(log *slog.Logger) error {
 	log.Info("shutting down")
 	stopSched()
 	<-schedDone
+	<-pushDone
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	_ = httpSrv.Shutdown(shutdownCtx)

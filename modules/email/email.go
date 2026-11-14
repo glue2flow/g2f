@@ -27,6 +27,7 @@ func init() {
 		"setFlags": setFlags,
 		"received": received,
 	})
+	nodes.RegisterListener("email.received", listen)
 }
 
 const (

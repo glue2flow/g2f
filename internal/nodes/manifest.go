@@ -129,6 +129,9 @@ type ManifestNode struct {
 	// PollKey (http runtime) identifies items, e.g. {{ json.id }}: items whose
 	// key was emitted before are not new. Go modules track new items themselves.
 	PollKey string `yaml:"pollKey"`
+	// Push lets the trigger's source wake it up instead of waiting for the
+	// next check (see PushSpec).
+	Push *PushSpec `yaml:"push"`
 
 	// http runtime
 	Request ManifestRequest `yaml:"request"`
@@ -294,6 +297,19 @@ func (m *Manifest) validate() error {
 			}
 		default:
 			return fmt.Errorf("node %s: unknown trigger %q (supported: poll)", n.Type, n.Trigger)
+		}
+		if n.Push != nil {
+			if n.Trigger != string(TriggerPoll) {
+				return fmt.Errorf("node %s: push requires trigger: poll", n.Type)
+			}
+			if err := n.Push.validate(m); err != nil {
+				return fmt.Errorf("node %s: push: %w", n.Type, err)
+			}
+			for _, p := range n.Params {
+				if p.Name == DeliveryParam {
+					return fmt.Errorf("node %s: parameter %q is reserved", n.Type, DeliveryParam)
+				}
+			}
 		}
 		if len(n.Inputs) == 0 && n.Trigger == "" {
 			n.Inputs = []string{"main"}
@@ -514,10 +530,15 @@ func (m *Manifest) NodeDefinition(n ManifestNode, source string) Definition {
 		trigger = TriggerKind(n.Trigger)
 		params = append(params, pollIntervalParam())
 	}
+	push := ""
+	if n.Push != nil {
+		push = n.Push.Endpoint
+		params = append(params, deliveryParam())
+	}
 	category := m.Name
 	return Definition{
 		Type: m.Module + "." + n.Type, Name: n.Name, Category: category, Description: n.Description,
 		Color: m.Color, Icon: n.IconURI, Trigger: trigger, Inputs: n.Inputs, Outputs: n.Outputs, Params: params,
-		OutputSchema: n.OutputSchema, Module: m.Module, Source: source,
+		OutputSchema: n.OutputSchema, Module: m.Module, Source: source, Push: push,
 	}
 }

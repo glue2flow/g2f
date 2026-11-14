@@ -544,57 +544,9 @@ func (e *Engine) runNode(ctx context.Context, st *runState, n *workflow.Node, by
 		return nil, fmt.Errorf("unknown node type %q", n.Type)
 	}
 	def := impl.Definition()
-	var ms moduleSettings
-	if mod := def.Module; mod != "" && mod != nodes.BuiltinModule && e.opts.Secrets != nil {
-		if ms, ok = rc.settings[mod]; !ok {
-			if ms.config, ms.vars, err = e.opts.Secrets.ModuleSettings(ctx, st.Workflow.OrgID, mod); err != nil {
-				return nil, fmt.Errorf("load %s settings: %w", mod, err)
-			}
-			rc.settings[mod] = ms
-			if info, ok := e.reg.Module(mod); ok {
-				for _, p := range info.Config {
-					if s, isStr := ms.config[p.Name].(string); isStr && p.Type == nodes.ParamSecret {
-						rc.scrub.add(s)
-					}
-				}
-			}
-		}
-	}
-	var token *nodes.OAuthToken
-	var credential map[string]any
-	if p := def.Param(nodes.ConnectionParam); p != nil {
-		id, _ := n.Params[nodes.ConnectionParam].(string)
-		info, _ := e.reg.Module(def.Module)
-		switch {
-		case info != nil && info.Credentials != nil:
-			if id == "" && p.Required {
-				return nil, errors.New("no credential selected")
-			}
-			if id == "" {
-				break // optional: the module runs without one
-			}
-			if e.opts.Credentials == nil {
-				return nil, errors.New("credentials are not available")
-			}
-			var secretValues []string
-			if credential, secretValues, err = e.opts.Credentials.Credential(ctx, st.Workflow.OrgID, def.Module, id); err != nil {
-				return nil, fmt.Errorf("credential: %w", err)
-			}
-			for _, v := range secretValues {
-				rc.scrub.add(v)
-			}
-		default:
-			if id == "" {
-				return nil, errors.New("no account selected")
-			}
-			if e.opts.Tokens == nil {
-				return nil, errors.New("connected accounts are not available")
-			}
-			if token, err = e.opts.Tokens.Token(ctx, st.Workflow.OrgID, def.Module, id); err != nil {
-				return nil, fmt.Errorf("account: %w", err)
-			}
-			rc.scrub.add(token.AccessToken)
-		}
+	ms, token, credential, err := e.resolveNode(ctx, st.Workflow.OrgID, n, &def, rc)
+	if err != nil {
+		return nil, err
 	}
 	defer func() {
 		if r := recover(); r != nil {
@@ -613,6 +565,63 @@ func (e *Engine) runNode(ctx context.Context, st *runState, n *workflow.Node, by
 		Env: expression.WithContext(env, ctx), Logger: rc.log, Runtime: rc.rt, LogSink: rc.logSink(logs),
 		State: rc.state, TriggerType: rc.triggerType,
 	})
+}
+
+// resolveNode loads what a node of a plugin module gets besides its params:
+// the organization's module settings and the selected connection (OAuth2
+// token or credential). Secret values are added to rc's scrubber.
+func (e *Engine) resolveNode(ctx context.Context, org string, n *workflow.Node, def *nodes.Definition, rc *runCtx) (ms moduleSettings, token *nodes.OAuthToken, credential map[string]any, err error) {
+	var ok bool
+	if mod := def.Module; mod != "" && mod != nodes.BuiltinModule && e.opts.Secrets != nil {
+		if ms, ok = rc.settings[mod]; !ok {
+			if ms.config, ms.vars, err = e.opts.Secrets.ModuleSettings(ctx, org, mod); err != nil {
+				return ms, nil, nil, fmt.Errorf("load %s settings: %w", mod, err)
+			}
+			rc.settings[mod] = ms
+			if info, ok := e.reg.Module(mod); ok {
+				for _, p := range info.Config {
+					if s, isStr := ms.config[p.Name].(string); isStr && p.Type == nodes.ParamSecret {
+						rc.scrub.add(s)
+					}
+				}
+			}
+		}
+	}
+	if p := def.Param(nodes.ConnectionParam); p != nil {
+		id, _ := n.Params[nodes.ConnectionParam].(string)
+		info, _ := e.reg.Module(def.Module)
+		switch {
+		case info != nil && info.Credentials != nil:
+			if id == "" && p.Required {
+				return ms, nil, nil, errors.New("no credential selected")
+			}
+			if id == "" {
+				break // optional: the module runs without one
+			}
+			if e.opts.Credentials == nil {
+				return ms, nil, nil, errors.New("credentials are not available")
+			}
+			var secretValues []string
+			if credential, secretValues, err = e.opts.Credentials.Credential(ctx, org, def.Module, id); err != nil {
+				return ms, nil, nil, fmt.Errorf("credential: %w", err)
+			}
+			for _, v := range secretValues {
+				rc.scrub.add(v)
+			}
+		default:
+			if id == "" {
+				return ms, nil, nil, errors.New("no account selected")
+			}
+			if e.opts.Tokens == nil {
+				return ms, nil, nil, errors.New("connected accounts are not available")
+			}
+			if token, err = e.opts.Tokens.Token(ctx, org, def.Module, id); err != nil {
+				return ms, nil, nil, fmt.Errorf("account: %w", err)
+			}
+			rc.scrub.add(token.AccessToken)
+		}
+	}
+	return ms, token, credential, nil
 }
 
 func (e *Engine) finish(exec *store.Execution, st *runState, last []nodes.Item, err error) *Result {

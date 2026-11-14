@@ -149,6 +149,8 @@ nodes:
     name: Email Received
     description: Start a run for each check that finds new mail in a mailbox (one item per message, oldest first).
     trigger: poll
+    # IMAP IDLE: the server reports new mail and the check runs right away.
+    push: { endpoint: listen }
     params:
       - { name: mailbox, label: Mailbox, default: INBOX, noExpression: true }
       - { name: unseenOnly, label: Only unread, type: boolean, default: false, noExpression: true }

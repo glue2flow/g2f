@@ -58,10 +58,25 @@ Run as many replicas as you like against the same PostgreSQL database.
 | Schedules | Every replica runs the scheduler; each firing is claimed once in PostgreSQL (`trigger_firings`). |
 | Webhooks, form submissions, manual runs | Any replica can receive them; the execution runs on that replica. |
 | Wait nodes | Every replica polls for due waits; each resume is claimed atomically. |
-| Polling triggers | Checks happen at interval-aligned times; each is claimed once in `trigger_firings`. Trigger cursors and the last check error live in `workflow_state`. |
+| Polling triggers | Each scheduled check is requested once (`poll_checks.last_slot`); checks of one trigger never overlap across replicas (a claim per trigger in `poll_checks`, renewed while the check runs, taken over when it expires). Trigger cursors and the last check error live in `workflow_state`. |
+| Mail push | Any replica receives Gmail/Graph notifications and wakes the trigger's check. One replica per trigger keeps its IMAP IDLE connection, and one replica at a time reconciles Gmail watches and Graph subscriptions, both through leases (see below). |
 | Data Store, Remove Duplicates | Values live in PostgreSQL (`workflow_state`); increments and "seen" checks are single atomic statements. |
 | Running executions | Survive the replica that runs them, see below. |
 | Imported plugins | Stored in PostgreSQL and reloaded by every replica (`G2F_PLUGIN_SYNC`). |
+
+### Leases
+
+Jobs that exactly one replica should do hold a row in `leases` (name, holder instance,
+expiry), taken with a single conditional upsert and renewed by the holder; when the holder stops
+renewing (crash, partition), the lease expires and another replica takes it.
+
+| Lease | Held by | Renewed | Taken over after |
+| --- | --- | --- | --- |
+| `listen:<workflow>/<node>` | the replica with the trigger's IMAP IDLE connection (at most `G2F_IMAP_IDLE_MAX` per replica); the row also records *connecting / connected / error / unsupported* for the editor | every 10 s | 30–40 s |
+| `push-reconciler` | the replica that creates, renews and removes Gmail watches and Graph subscriptions (`push_subscriptions`); it renews the lease before every provider call, so a slow pass never overlaps with another replica's | every pass (30 s) | 90 s |
+
+Graceful shutdown releases leases right away. Polling check claims (`poll_checks`) work the
+same way with a 1-minute lease renewed every 5 s.
 
 ### Executions survive restarts and crashes
 

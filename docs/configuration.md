@@ -8,7 +8,7 @@ glue2flow is configured with environment variables.
 | --- | --- | --- |
 | `G2F_LISTEN` | `:8080` | listen address |
 | `G2F_DATABASE_URL` | `postgres://g2f:g2f@localhost:5432/g2f?sslmode=disable` | PostgreSQL URL |
-| `G2F_PUBLIC_URL` | `http://localhost:8080` | external URL (used for webhook, resume and OAuth callback URLs) |
+| `G2F_PUBLIC_URL` | `http://localhost:8080` | external URL (used for webhook, resume and OAuth callback URLs, and as the address Gmail and Microsoft Graph send push notifications to: these need a public https URL) |
 | `G2F_SECRET_KEY` | – (required) | base64 32-byte key encrypting secrets ([Secrets](secrets.md#encryption)). The published demo keys are refused unless `G2F_PUBLIC_URL` is on localhost |
 | `G2F_SECRET_KEYS_OLD` | – | previous keys (comma separated), for rotation |
 | `G2F_TRUSTED_PROXIES` | – | reverse proxies (comma separated IPs or CIDRs, e.g. `10.0.0.0/8, 127.0.0.1`) whose `X-Forwarded-For` header is trusted to find the client IP. Set it to your proxy's address when running behind one, otherwise all visitors share the proxy's IP for rate limits. Forwarding headers from other peers are ignored |
@@ -42,6 +42,9 @@ glue2flow is configured with environment variables.
 | `G2F_HTTP_ALLOWED_HOSTS` | – | exceptions to that block, comma separated: IPs, CIDRs, host names (`intranet.example`) or `*.example.internal` wildcards. A host name entry matches the name the request is made to, an IP/CIDR entry the resolved address |
 | `G2F_EXPRESSION_MAX_STEPS` | `2000000` | predicate iterations (`all`, `filter`, `map`, …) one expression may run before it fails ([limits](expressions.md#limits)); must be greater than 0 |
 | `G2F_INSTANCE_TIMEOUT` | `30s` | how long an instance may miss heartbeats before others take over its executions ([replicas](architecture.md#scaling-and-replicas)) |
+| `G2F_MAIL_PUSH` | `true` | mail triggers are also woken by their source: IMAP IDLE, Gmail push, Microsoft Graph notifications ([push delivery](triggers.md#push-delivery-for-mail-triggers)). `false`: they only poll. Gmail and Graph additionally need a public https `G2F_PUBLIC_URL` |
+| `G2F_IMAP_IDLE_MAX` | `50` | IMAP IDLE connections one replica keeps open at most; further Email Received triggers poll (or are taken by another replica). `0` disables IDLE |
+| `G2F_POLL_WORKERS` | `8` | polling checks that run at once per replica ([polling triggers](triggers.md#polling-triggers)); more requests wait |
 | `G2F_SHUTDOWN_GRACE` | `15s` | on shutdown, how long running executions may finish before they are handed to another instance |
 
 ## Health check

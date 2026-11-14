@@ -107,3 +107,43 @@ func (e *Engine) RecordFailure(ctx context.Context, wf *workflow.Workflow, nodeI
 	})
 	e.finish(exec, st, nil, fmt.Errorf("node %q: %s", start.Name, cause))
 }
+
+// TriggerContext builds the context a check of a polling trigger gets
+// (params with secrets, module settings, the selected account or
+// credential), for work on the trigger outside a check: push listeners and
+// push subscriptions resolve credentials exactly like the check does.
+func (e *Engine) TriggerContext(ctx context.Context, wf *workflow.Workflow, nodeID string) (*nodes.ExecContext, error) {
+	n := wf.Graph.Node(nodeID)
+	if n == nil {
+		return nil, fmt.Errorf("node %s not found", nodeID)
+	}
+	impl, ok := e.reg.Get(n.Type)
+	if !ok {
+		return nil, fmt.Errorf("unknown node type %q", n.Type)
+	}
+	def := impl.Definition()
+	var secrets map[string]map[string]string
+	if e.opts.Secrets != nil {
+		var err error
+		if secrets, err = e.opts.Secrets.NodeSecrets(ctx, wf.ID); err != nil {
+			return nil, fmt.Errorf("load secrets: %w", err)
+		}
+	}
+	log := e.log.With("workflow", wf.ID, "node", n.Name)
+	rc := &runCtx{settings: map[string]moduleSettings{}, scrub: newScrubber(secrets), log: log, state: e.stateFor(wf.ID)}
+	n = withSecrets(n, secrets[n.ID])
+	ms, token, credential, err := e.resolveNode(ctx, wf.OrgID, n, &def, rc)
+	if err != nil {
+		return nil, errors.New(rc.scrub.clean(err.Error()))
+	}
+	env := expression.Env{
+		"workflow":  map[string]any{"id": wf.ID, "name": wf.Name},
+		"execution": map[string]any{"triggerType": string(nodes.TriggerPoll)},
+		"nodes":     map[string]any{},
+		"trigger":   nodes.Item{},
+	}
+	return &nodes.ExecContext{
+		Node: n, Def: &def, Items: []nodes.Item{}, Config: ms.config, Vars: ms.vars, OAuth: token, Credential: credential,
+		Env: expression.WithContext(env, ctx), Logger: log, State: rc.state, TriggerType: string(nodes.TriggerPoll),
+	}, nil
+}

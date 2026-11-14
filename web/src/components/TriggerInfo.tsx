@@ -163,17 +163,58 @@ export function TriggerInfo({ workflow, nodeId, data, dirty }: Props) {
 
   if (info.poll) {
     const p = info.poll;
+    const d = p.delivery;
+    const time = (t?: string) => (t ? new Date(t).toLocaleString() : "");
+    const pushing = info.listening && d?.push;
     return (
       <div className="info-box">
         <div className="row">
           {status}
-          <span className="chip">every {p.intervalMinutes} min</span>
+          {pushing ? (
+            <span className="chip on">push · {d.via}</span>
+          ) : (
+            <span className="chip">polling every {p.intervalMinutes} min</span>
+          )}
+          {pushing && <span className="chip">safety check every {p.intervalMinutes} min</span>}
         </div>
+        {d && info.listening && (
+          <p className="small" style={{ margin: "6px 0 0" }}>
+            {d.push ? (
+              <>
+                New mail is reported by {d.via}
+                {d.via === "IMAP IDLE" && d.since && <> (connected since {time(d.since)})</>}
+                {d.renews && <> (subscription renews {time(d.renews)})</>} and checked right away.
+              </>
+            ) : (
+              <>
+                Push via {d.via} is not active: {d.reason}. Checking every {p.intervalMinutes} min until it is.
+              </>
+            )}
+          </p>
+        )}
+        {d && !info.listening && d.reason && d.reason !== "the workflow is not active" && (
+          <p className="small muted" style={{ margin: "6px 0 0" }}>Push via {d.via}: {d.reason}.</p>
+        )}
+        {d?.endpoint && !d.push && (
+          <details style={{ marginTop: 6 }}>
+            <summary className="small">Gmail push endpoint (admins)</summary>
+            <p className="small" style={{ margin: "4px 0" }}>
+              Create a Pub/Sub push subscription on the topic set in Plugins → Gmail → Settings with this endpoint URL.
+              Keep it secret: it identifies your organization.
+            </p>
+            <div className="row">
+              <code className="url">{d.endpoint}</code>
+              <button className="btn small" onClick={() => navigator.clipboard?.writeText(d.endpoint ?? "")}>
+                Copy
+              </button>
+            </div>
+          </details>
+        )}
         <p className="small" style={{ margin: "6px 0 0" }}>
           While the workflow is active, glue2flow checks for new items
-          {info.listening && <> (next check {new Date(p.next).toLocaleTimeString()})</>} and starts a run only when there
-          are some. The first check remembers what is already there. ▶ Run shows the current items without remembering
-          them. Failed checks appear as failed executions.
+          {info.listening && <> (next scheduled check {new Date(p.next).toLocaleTimeString()})</>} and starts a run
+          only when there are some. The first check remembers what is already there. ▶ Run shows the current items
+          without remembering them. Failed checks appear as failed executions.
         </p>
       </div>
     );

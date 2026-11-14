@@ -98,9 +98,12 @@ type Definition struct {
 	// (ModuleInfo.Icon); usually empty.
 	Icon    string      `json:"icon,omitempty"`
 	Trigger TriggerKind `json:"trigger,omitempty"`
-	Inputs  []string    `json:"inputs"`
-	Outputs []string    `json:"outputs"`
-	Params  []Param     `json:"params"`
+	// Push names how a polling trigger can be woken up (PushListen,
+	// PushGmail, PushGraph); empty if it only polls.
+	Push    string   `json:"push,omitempty"`
+	Inputs  []string `json:"inputs"`
+	Outputs []string `json:"outputs"`
+	Params  []Param  `json:"params"`
 	// DynamicOutputs makes the outputs depend on a parameter (e.g. Switch cases).
 	DynamicOutputs *DynamicOutputs `json:"dynamicOutputs,omitempty"`
 	// OutputSchema describes the emitted items (for the editor's field picker).

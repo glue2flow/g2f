@@ -356,6 +356,40 @@ In a Go module, the node's function is the check: it runs with `TriggerType` `po
 `manual` for test runs, see `ExecContext.IsTestRun`) and returns the new items, keeping its own
 cursor in `ExecContext.State`.
 
+#### Push
+
+A polling trigger can declare how its source wakes it up (`push`), so the check runs right
+away instead of at the next interval ([push delivery](triggers.md#push-delivery-for-mail-triggers)).
+glue2flow adds the *Delivery* parameter (automatic / polling only).
+
+- `endpoint: listen` (Go modules): the module keeps a connection open, see
+  `nodes.RegisterListener` and the IMAP IDLE listener in [`modules/email`](../modules/email/idle.go).
+- `endpoint: gmail` or `endpoint: graph` (http modules with `oauth2`): glue2flow subscribes at
+  the provider with the requests below and receives the notifications on its own endpoint of
+  that kind. The two endpoint kinds (Pub/Sub push of Gmail watches, Microsoft Graph change
+  notifications) are implemented in Go because authenticating and decoding notifications is
+  protocol code, not a request template; the subscription calls are templates.
+
+```yaml
+    push:
+      endpoint: graph
+      per: trigger            # or connection: one subscription per account, shared by its triggers
+      requires: []            # config entries that must be set, e.g. [pubsubTopic]
+      lifetime: 4200m         # push.expires = now + lifetime
+      renewEvery: 24h         # default 24h; always at least 1h before expiry
+      subscribe:   { method: POST, url: "https://graph.microsoft.com/v1.0/subscriptions", body: { … } }
+      renew:       { method: PATCH, url: "https://graph.microsoft.com/v1.0/subscriptions/{{ push.id }}", body: { … } }  # default: subscribe again
+      unsubscribe: { method: DELETE, url: "https://graph.microsoft.com/v1.0/subscriptions/{{ push.id }}" }
+      id: "{{ response.body.id }}"
+      expires: "{{ response.body.expirationDateTime }}"   # RFC 3339 or epoch milliseconds
+```
+
+The request templates see `params`, `config` and `oauth` like a node request, plus `push`:
+`notificationUrl` (glue2flow's public endpoint), `clientState` (a random secret per
+subscription, stored encrypted and checked on every notification), `expires` and `id`. Like
+node requests they carry the account's token only to `oauth2.apiHosts` and go through the
+SSRF guard. See [`gmail.yaml`](../modules/gmail.yaml) and [`outlook.yaml`](../modules/outlook.yaml).
+
 ### Parameters
 
 Types: `string`, `text`, `number`, `boolean`, `select` (with `options`), `json`, `secret`,

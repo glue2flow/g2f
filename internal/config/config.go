@@ -87,6 +87,14 @@ type Config struct {
 	WebhookMaxWait time.Duration
 	// MaxStoredItems caps how many items per node output are persisted with an execution.
 	MaxStoredItems int
+
+	// MailPush lets mail triggers be woken by IMAP IDLE, Gmail push and
+	// Microsoft Graph notifications instead of only polling.
+	MailPush bool
+	// IMAPIdleMax caps the IMAP IDLE connections one replica keeps open.
+	IMAPIdleMax int
+	// PollWorkers bounds the polling checks running at once per replica.
+	PollWorkers int
 }
 
 type AuthConfig struct {
@@ -193,6 +201,21 @@ func Load() (*Config, error) {
 	c.HTTPAllowPrivate = env("G2F_HTTP_ALLOW_PRIVATE", "false") == "true"
 	if c.HTTPAllowed, err = netguard.ParseAllowList(splitList(env("G2F_HTTP_ALLOWED_HOSTS", ""))); err != nil {
 		return nil, fmt.Errorf("G2F_HTTP_ALLOWED_HOSTS: %w", err)
+	}
+	if c.MailPush, err = strconv.ParseBool(env("G2F_MAIL_PUSH", "true")); err != nil {
+		return nil, fmt.Errorf("G2F_MAIL_PUSH must be true or false")
+	}
+	if c.IMAPIdleMax, err = envInt("G2F_IMAP_IDLE_MAX", 50); err != nil {
+		return nil, err
+	}
+	if c.IMAPIdleMax < 0 {
+		return nil, fmt.Errorf("G2F_IMAP_IDLE_MAX must not be negative")
+	}
+	if c.PollWorkers, err = envInt("G2F_POLL_WORKERS", 8); err != nil {
+		return nil, err
+	}
+	if c.PollWorkers < 1 {
+		return nil, fmt.Errorf("G2F_POLL_WORKERS must be at least 1")
 	}
 	if c.InstanceTimeout, err = time.ParseDuration(env("G2F_INSTANCE_TIMEOUT", "30s")); err != nil {
 		return nil, fmt.Errorf("G2F_INSTANCE_TIMEOUT: %w", err)

@@ -2,6 +2,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -22,6 +23,7 @@ import (
 	"github.com/glue2flow/g2f/internal/nodes"
 	"github.com/glue2flow/g2f/internal/oauth"
 	"github.com/glue2flow/g2f/internal/plugin"
+	"github.com/glue2flow/g2f/internal/push"
 	"github.com/glue2flow/g2f/internal/secrets"
 	"github.com/glue2flow/g2f/internal/store"
 	"github.com/glue2flow/g2f/internal/workflow"
@@ -32,6 +34,26 @@ import (
 type ChangeListener interface {
 	WorkflowChanged(w *workflow.Workflow)
 	WorkflowDeleted(id string)
+}
+
+// Listeners notifies several listeners.
+type Listeners []ChangeListener
+
+func (l Listeners) WorkflowChanged(w *workflow.Workflow) {
+	for _, x := range l {
+		x.WorkflowChanged(w)
+	}
+}
+
+func (l Listeners) WorkflowDeleted(id string) {
+	for _, x := range l {
+		x.WorkflowDeleted(id)
+	}
+}
+
+// DeliverySource reports how polling triggers learn about new items (push).
+type DeliverySource interface {
+	Delivery(ctx context.Context, wf *workflow.Workflow, n *workflow.Node, admin bool) *push.Delivery
 }
 
 type Server struct {
@@ -50,6 +72,8 @@ type Server struct {
 	catalogs *plugin.Catalogs
 	oauth    *oauth.Manager
 	creds    *credentials.Service
+	push     http.Handler
+	delivery DeliverySource
 }
 
 type Deps struct {
@@ -74,6 +98,10 @@ type Deps struct {
 	OAuth    *oauth.Manager
 	// Credentials manages API-key credentials.
 	Credentials *credentials.Service
+	// Push handles /push/* (mail push notifications); optional.
+	Push http.Handler
+	// Delivery is optional; without it polling triggers report no push state.
+	Delivery DeliverySource
 }
 
 func New(d Deps) *Server {
@@ -81,7 +109,7 @@ func New(d Deps) *Server {
 		cfg: d.Config, store: d.Store, reg: d.Registry, engine: d.Engine,
 		auth: d.Auth, log: d.Logger, listener: d.Listener, webhooks: d.Webhooks, forms: d.Forms,
 		secrets: d.Secrets, plugins: d.Plugins, catalogs: d.Catalogs, resume: d.Resume, oauth: d.OAuth,
-		creds: d.Credentials,
+		creds: d.Credentials, push: d.Push, delivery: d.Delivery,
 	}
 }
 
@@ -144,6 +172,9 @@ func (s *Server) Handler() http.Handler {
 		r.Handle("/webhook-resume/*", s.resume)
 	}
 	r.Get("/oauth/callback", s.oauthCallback)
+	if s.push != nil {
+		r.Handle("/push/*", s.push)
+	}
 
 	r.NotFound(s.spa)
 	return r
@@ -155,7 +186,7 @@ func (s *Server) requestLogger(next http.Handler) http.Handler {
 		start := time.Now()
 		next.ServeHTTP(ww, r)
 		if strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/webhook/") ||
-			strings.HasPrefix(r.URL.Path, "/form/") {
+			strings.HasPrefix(r.URL.Path, "/form/") || strings.HasPrefix(r.URL.Path, "/push/") {
 			s.log.Info("http", "method", r.Method, "path", r.URL.Path, "status", ww.Status(),
 				"duration", time.Since(start).Round(time.Millisecond))
 		}

@@ -123,6 +123,8 @@ export interface NodeDef {
   /** Data URI of a node-specific icon; usually the module's icon is used. */
   icon?: string;
   trigger?: "manual" | "schedule" | "webhook" | "form" | "call" | "error" | "poll";
+  /** How a polling trigger can be woken up: listen (IMAP IDLE), gmail, graph. */
+  push?: string;
   dynamicOutputs?: { param: string; extra?: string[] };
   inputs: string[];
   outputs: string[];
@@ -219,7 +221,20 @@ export interface TriggerInfo {
   webhook?: { url: string; method: string; auth: "none" | "token" | "hmac"; header?: string; respond: string };
   form?: { url: string; questions: number; protection: "none" | "captcha" | "login" | "email"; warning?: string };
   schedule?: { mode: "cron" | "once"; timezone: string; next: string[] };
-  poll?: { intervalMinutes: number; next: string };
+  poll?: { intervalMinutes: number; configuredMinutes: number; next: string; delivery?: PollDelivery };
+}
+
+/** How a polling mail trigger learns about new mail (push or polling). */
+export interface PollDelivery {
+  push: boolean;
+  /** IMAP IDLE, Gmail or Microsoft Graph. */
+  via: string;
+  since?: string;
+  renews?: string;
+  /** Why the trigger polls. */
+  reason?: string;
+  /** Pub/Sub push endpoint to configure (admins, Gmail). */
+  endpoint?: string;
 }
 
 export interface ModuleInfo {

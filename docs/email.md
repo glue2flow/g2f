@@ -26,11 +26,22 @@ Passwords are only sent over TLS/STARTTLS, or to `localhost`.
 
 | Node | What it does |
 | --- | --- |
-| **Email Received** (trigger) | A [polling trigger](triggers.md#polling-triggers): starts a run when new mail arrives in a mailbox (optionally only unread, or matching From/Subject), one item per message with the same fields as Read Emails. It remembers the last message UID, so every message is handled once, even when it was read in between; *Mark as read* flags the messages it emits. |
+| **Email Received** (trigger) | A [polling trigger](triggers.md#polling-triggers): starts a run when new mail arrives in a mailbox (optionally only unread, or matching From/Subject), one item per message with the same fields as Read Emails. It remembers the last message UID, so every message is handled once, even when it was read in between; *Mark as read* flags the messages it emits. With [IMAP IDLE](#new-mail-within-seconds-imap-idle) it reacts within seconds. |
 | **Send Email** | One mail per item: From, To/Cc/Bcc (comma separated or arrays), Reply-To, subject, text and/or HTML, attachments `[{filename, content (base64), contentType}]`, extra headers (e.g. `In-Reply-To`). Bcc stays out of the headers. |
 | **Read Emails** | Searches a mailbox (unread only, since a date, From/Subject/text contains) and emits the newest N messages, oldest first, with `uid`, `from`, `to`, `subject`, `date`, `text`, `html`, `flags`, `messageId` and attachment info (optionally with content). *Mark as read* makes the next run skip them. |
 | **Move Email** | Moves messages by `uid` to another mailbox (MOVE, or copy + UID EXPUNGE). A plain EXPUNGE is never used, so other deleted messages are not purged. |
 | **Set Email Flags** | Adds or removes flags such as `\Seen` or `\Flagged`. |
+
+## New mail within seconds (IMAP IDLE)
+
+While its workflow is active, an Email Received trigger keeps an IMAP IDLE connection to its
+mailbox (one per trigger across all replicas) and is checked as soon as the server reports a
+new message, not only every *Check every* minutes. Nothing to configure: it uses the same
+server and login as the check. The trigger's info box shows *push · IMAP IDLE (connected
+since …)*, or why it polls (server without IDLE, connection error, limit
+`G2F_IMAP_IDLE_MAX` reached). Set the trigger's *Delivery* to *Polling only* to keep it from
+holding a connection, e.g. when the server limits connections per account. Details:
+[Push delivery](triggers.md#imap-idle).
 
 ```
 Email Received (subject contains "invoice", with attachment content) ─► Split Out (json.attachments)

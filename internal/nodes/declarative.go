@@ -212,7 +212,10 @@ func (d *declarativeNode) requests(ctx context.Context, ec *ExecContext, items [
 // (see pathSegment), so a parameter cannot add slashes, dot segments, a query
 // or a fragment. The rest (baseUrl, host, query part) is rendered as written.
 func (d *declarativeNode) requestURL(env expression.Env) (string, error) {
-	req := d.spec.Request
+	return d.requestURLFor(d.spec.Request, env)
+}
+
+func (d *declarativeNode) requestURLFor(req ManifestRequest, env expression.Env) (string, error) {
 	if req.URL != "" {
 		return expression.RenderWith(req.URL, env, func(prefix string, v any) (string, error) {
 			if inURLPath(prefix) {

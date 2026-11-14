@@ -92,3 +92,37 @@ nodes: [{ type: call, name: Call, params: [{ name: text }] }]
 		t.Fatalf("unknown credential: %q", ex.Error)
 	}
 }
+
+// TriggerContext resolves the credential and settings of a trigger exactly
+// like a check, for push listeners; resolution errors are scrubbed too.
+func TestTriggerContext(t *testing.T) {
+	m, err := nodes.ParseManifest([]byte(`
+module: keyed
+runtime: go
+credentials: { optional: true, fields: [{ name: token, type: secret, required: true }, { name: region }] }
+nodes: [{ type: watch, name: Watch, trigger: poll, params: [{ name: box, default: INBOX }] }]
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := nodes.NewRegistry()
+	if err := reg.RegisterModule(m.Info("test"), []nodes.Node{&leakyNode{m.NodeDefinition(m.Nodes[0], "test")}}); err != nil {
+		t.Fatal(err)
+	}
+	src := &fakeCredentials{}
+	e := New(reg, &memStore{execs: map[string]store.Execution{}}, discardLog(), Options{Credentials: src})
+	wf := &workflow.Workflow{ID: "wf", OrgID: "acme", Graph: workflow.Graph{Nodes: []workflow.Node{
+		{ID: "w", Name: "Watch", Type: "keyed.watch", Params: map[string]any{nodes.ConnectionParam: "c1"}},
+	}}}
+	ec, err := e.TriggerContext(context.Background(), wf, "w")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ec.Credential["token"] != "s3cret-token" || src.org != "acme" || ec.Node.ID != "w" || ec.Raw("box") != "INBOX" {
+		t.Fatalf("context: %+v", ec)
+	}
+	wf.Graph.Nodes[0].Params[nodes.ConnectionParam] = "other"
+	if _, err := e.TriggerContext(context.Background(), wf, "w"); err == nil || !strings.Contains(err.Error(), "credential") {
+		t.Fatalf("missing credential: %v", err)
+	}
+}
