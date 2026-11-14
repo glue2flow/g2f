@@ -20,6 +20,11 @@ A plugin (module) is a set of nodes described by a manifest. There are three run
 | Gmail | http + OAuth2 | New Email (trigger), Send Email, Search Messages, Get Message, Get Attachment, Change Labels, Move to Trash, List Labels | [`modules/gmail.yaml`](../modules/gmail.yaml) |
 | Outlook | http + OAuth2 | New Email (trigger), Send Email, List Messages, Get Message, Reply, Move Message, Mark as Read, List Folders | [`modules/outlook.yaml`](../modules/outlook.yaml) |
 | Microsoft Teams | http + OAuth2 | Send Channel Message, Reply in Channel Thread, Send Chat Message, List Teams / Channels / Chats | [`modules/ms-teams.yaml`](../modules/ms-teams.yaml) |
+| Google Calendar | http + OAuth2 | New or Changed Event (trigger), List Events, Get / Create / Update / Delete Event, List Calendars | [`modules/google-calendar.yaml`](../modules/google-calendar.yaml) |
+| Google Drive | http + OAuth2 | List Files, Get File, Create Folder, Copy File, Rename or Move File, Move to Trash, Delete Permanently, Share File, Export Doc as Text | [`modules/google-drive.yaml`](../modules/google-drive.yaml) |
+| HubSpot | http + OAuth2 | Get / Search / Create / Update Contact, Get / Search / Create / Update Deal, Create Company, List Owners | [`modules/hubspot.yaml`](../modules/hubspot.yaml) |
+| Salesforce | http + OAuth2 | SOQL Query, Get / Create / Update / Upsert / Delete Record of any sObject | [`modules/salesforce.yaml`](../modules/salesforce.yaml) |
+| SharePoint | http + OAuth2 | Search Sites, Get Site, List Lists, List / Get / Create / Update / Delete Items, List Document Libraries, List Files and Folders | [`modules/sharepoint.yaml`](../modules/sharepoint.yaml) |
 | Email (SMTP/IMAP) | go | Email Received (trigger), Send Email, Read Emails, Move Email, Set Email Flags ([docs](email.md)) | [`modules/email`](../modules/email) |
 | Telegram | wasm (Go and JS) | Send Message, Get Bot Info | [`examples/plugins/telegram`](../examples/plugins/telegram) |
 | Mistral AI | wasm (Go) | Chat (prompt → answer) | [`examples/plugins/mistral`](../examples/plugins/mistral) |

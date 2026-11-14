@@ -528,6 +528,8 @@ type OAuthToken struct {
 	AccessToken string `json:"accessToken"`
 	TokenType   string `json:"tokenType"`
 	Account     string `json:"account,omitempty"`
+	// InstanceURL is the account's API base URL (oauth2.instanceUrlField), if any.
+	InstanceURL string `json:"instanceUrl,omitempty"`
 }
 
 // AuthorizationHeader returns e.g. "Bearer <token>".

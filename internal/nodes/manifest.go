@@ -2,8 +2,10 @@ package nodes
 
 import (
 	"fmt"
+	"net"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -84,7 +86,15 @@ type OAuth2Spec struct {
 	// UserInfo optionally names the connected account (e.g. its email).
 	UserInfo *OAuth2UserInfo `yaml:"userInfo" json:"-"`
 	// APIHosts receive the access token (http runtime). Default: baseUrl host.
+	// Entries are hosts, optionally with a port ("api.example.com:8443"), or
+	// wildcards for subdomains ("*.example.com", at least two labels after the
+	// "*."). The scheme must be https and the port 443 unless an entry names one.
 	APIHosts []string `yaml:"apiHosts" json:"apiHosts"`
+	// InstanceURLField names the token response field that holds the API base
+	// URL of the account (e.g. instance_url at Salesforce). It is stored with
+	// the connection and available to manifest templates as
+	// {{ oauth.instanceUrl }}. It must be an https origin allowed by APIHosts.
+	InstanceURLField string `yaml:"instanceUrlField" json:"-"`
 }
 
 type OAuth2UserInfo struct {
@@ -312,12 +322,85 @@ func (m *Manifest) validateOAuth2() error {
 		}
 		o.APIHosts = []string{u.Host}
 	}
+	for _, h := range o.APIHosts {
+		if err := checkAPIHost(h); err != nil {
+			return fmt.Errorf("apiHosts: %w", err)
+		}
+	}
+	if o.InstanceURLField != "" && !nameRe.MatchString(o.InstanceURLField) {
+		return fmt.Errorf("instanceUrlField %q is not a field name", o.InstanceURLField)
+	}
 	for _, p := range append(append([]Param{}, m.Params...), m.Config...) {
 		if p.Name == ConnectionParam {
 			return fmt.Errorf("parameter name %q is reserved for the account picker", ConnectionParam)
 		}
 	}
 	return nil
+}
+
+// splitAPIHost splits an apiHosts entry into host and port (default 443).
+func splitAPIHost(h string) (host, port string) {
+	host, port, err := net.SplitHostPort(h)
+	if err != nil {
+		return strings.Trim(h, "[]"), "443"
+	}
+	return host, port
+}
+
+// checkAPIHost validates an apiHosts entry: a host with an optional port, or a
+// "*.suffix" wildcard with at least two labels in the suffix (never "*.com").
+func checkAPIHost(h string) error {
+	host, _ := splitAPIHost(h)
+	if _, port, err := net.SplitHostPort(h); err == nil {
+		if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
+			return fmt.Errorf("%q has an invalid port", h)
+		}
+	}
+	if host == "" || strings.ContainsAny(host, "/@?# ") {
+		return fmt.Errorf("%q is not a host", h)
+	}
+	if !strings.Contains(host, "*") {
+		return nil
+	}
+	suffix, ok := strings.CutPrefix(host, "*.")
+	if !ok || strings.Contains(suffix, "*") {
+		return fmt.Errorf("%q: a wildcard must be a prefix like *.example.com", h)
+	}
+	labels := strings.Split(suffix, ".")
+	if len(labels) < 2 {
+		return fmt.Errorf("%q: a wildcard needs at least two labels after \"*.\"", h)
+	}
+	for _, l := range labels {
+		if l == "" {
+			return fmt.Errorf("%q is not a valid wildcard host", h)
+		}
+	}
+	return nil
+}
+
+// hostMatches reports whether host (no port) matches an apiHosts host: equal,
+// or for "*.suffix" a subdomain of suffix (not suffix itself).
+func hostMatches(pattern, host string) bool {
+	if suffix, ok := strings.CutPrefix(pattern, "*"); ok && strings.HasPrefix(suffix, ".") {
+		return len(host) > len(suffix) && strings.EqualFold(host[len(host)-len(suffix):], suffix)
+	}
+	return strings.EqualFold(pattern, host)
+}
+
+// AllowsURL reports whether the access token may be sent to u: https (plain
+// http only in tests) and a host and port matching an apiHosts entry.
+func (o *OAuth2Spec) AllowsURL(u *url.URL) bool {
+	if o == nil {
+		return false
+	}
+	port := portOf(u)
+	for _, h := range o.APIHosts {
+		host, hp := splitAPIHost(h)
+		if hostMatches(host, u.Hostname()) && (allowInsecureAPIHosts || u.Scheme == "https" && hp == port) {
+			return true
+		}
+	}
+	return false
 }
 
 // checkProviderURL requires https, except for localhost (development, tests).

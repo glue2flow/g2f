@@ -369,3 +369,49 @@ func BenchmarkFilter1000(b *testing.B) {
 		}
 	}
 }
+
+func TestURLFunctions(t *testing.T) {
+	env := Env{"v": "a b/c?d=e&f#g+é"}
+	for in, want := range map[string]any{
+		"{{ urlEncode(v) }}":    "a+b%2Fc%3Fd%3De%26f%23g%2B%C3%A9",
+		"{{ urlEncode(nil) }}":  "",
+		"{{ urlEncode(12.5) }}": "12.5",
+		"{{ pathEscape(v) }}":   "a%20b%2Fc%3Fd=e&f%23g+%C3%A9",
+		"q={{ urlEncode(v) }}":  "q=a+b%2Fc%3Fd%3De%26f%23g%2B%C3%A9",
+		"{{ rawPath('a/b') }}":  RawPath("a/b"),
+	} {
+		got, err := Render(in, env)
+		if err != nil || got != want {
+			t.Errorf("%s: got %#v, %v; want %#v", in, got, err, want)
+		}
+	}
+	// Mixed with text, rawPath is plain text.
+	if got, _ := Render("/x/{{ rawPath('a/b') }}", env); got != "/x/a/b" {
+		t.Errorf("mixed: %#v", got)
+	}
+}
+
+func TestRenderWith(t *testing.T) {
+	env := Env{"a": "x/y", "n": 3}
+	var prefixes []string
+	got, err := RenderWith("/p/{{ a }}/q/{{ n }}", env, func(prefix string, v any) (string, error) {
+		prefixes = append(prefixes, prefix)
+		return "<" + Stringify(v) + ">", nil
+	})
+	if err != nil || got != "/p/<x/y>/q/<3>" {
+		t.Fatalf("%q %v", got, err)
+	}
+	if len(prefixes) != 2 || prefixes[0] != "/p/" || prefixes[1] != "/p/{{ a }}/q/" {
+		t.Fatalf("prefixes %q", prefixes)
+	}
+	if _, err := RenderWith("{{ a }", env, nil); err == nil {
+		t.Fatal("unterminated block accepted")
+	}
+	if got, err := RenderWith("no blocks", env, nil); err != nil || got != "no blocks" {
+		t.Fatalf("%q %v", got, err)
+	}
+	wantErr := errors.New("nope")
+	if _, err := RenderWith("{{ a }}", env, func(string, any) (string, error) { return "", wantErr }); err != wantErr {
+		t.Fatalf("callback error: %v", err)
+	}
+}

@@ -28,6 +28,7 @@ type Connection struct {
 	RefreshToken string     `json:"-"`
 	TokenType    string     `json:"tokenType"`
 	Scopes       string     `json:"scopes"`
+	InstanceURL  string     `json:"instanceUrl,omitempty"` // API base URL of the account, if the provider has one
 	ExpiresAt    *time.Time `json:"expiresAt,omitempty"`
 	CreatedAt    time.Time  `json:"createdAt"`
 	UpdatedAt    time.Time  `json:"updatedAt"`
@@ -57,14 +58,15 @@ func (c *Connection) ManageableBy(u *auth.User) bool {
 }
 
 const connCols = `id, org_id, module, name, account, owner_sub, owner_name, scope, groups,
-	access_token, refresh_token, token_type, scopes, expires_at, created_at, updated_at`
+	access_token, refresh_token, token_type, scopes, expires_at, created_at, updated_at, instance_url`
 
 func scanConnection(row pgx.Row) (*Connection, error) {
 	var c Connection
 	var id uuid.UUID
 	var groups []byte
+	var instanceURL *string
 	err := row.Scan(&id, &c.OrgID, &c.Module, &c.Name, &c.Account, &c.OwnerSub, &c.OwnerName, &c.Scope, &groups,
-		&c.AccessToken, &c.RefreshToken, &c.TokenType, &c.Scopes, &c.ExpiresAt, &c.CreatedAt, &c.UpdatedAt)
+		&c.AccessToken, &c.RefreshToken, &c.TokenType, &c.Scopes, &c.ExpiresAt, &c.CreatedAt, &c.UpdatedAt, &instanceURL)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -72,6 +74,9 @@ func scanConnection(row pgx.Row) (*Connection, error) {
 		return nil, err
 	}
 	c.ID = id.String()
+	if instanceURL != nil {
+		c.InstanceURL = *instanceURL
+	}
 	if err := json.Unmarshal(groups, &c.Groups); err != nil {
 		return nil, err
 	}
@@ -87,10 +92,10 @@ func (s *Store) CreateConnection(ctx context.Context, c *Connection) error {
 	}
 	groups, _ := json.Marshal(c.Groups)
 	return s.pool.QueryRow(ctx, `INSERT INTO connections (id, org_id, module, name, account, owner_sub, owner_name,
-		scope, groups, access_token, refresh_token, token_type, scopes, expires_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING created_at, updated_at`,
+		scope, groups, access_token, refresh_token, token_type, scopes, expires_at, instance_url)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,NULLIF($15,'')) RETURNING created_at, updated_at`,
 		c.ID, c.OrgID, c.Module, c.Name, c.Account, c.OwnerSub, c.OwnerName, c.Scope, groups,
-		c.AccessToken, c.RefreshToken, c.TokenType, c.Scopes, c.ExpiresAt,
+		c.AccessToken, c.RefreshToken, c.TokenType, c.Scopes, c.ExpiresAt, c.InstanceURL,
 	).Scan(&c.CreatedAt, &c.UpdatedAt)
 }
 
@@ -162,8 +167,8 @@ func (s *Store) RefreshConnection(ctx context.Context, id string, fn func(c *Con
 		}
 		if changed {
 			if _, err := tx.Exec(ctx, `UPDATE connections SET access_token=$2, refresh_token=$3, token_type=$4,
-				expires_at=$5, scopes=$6, updated_at=now() WHERE id=$1`,
-				c.ID, c.AccessToken, c.RefreshToken, c.TokenType, c.ExpiresAt, c.Scopes); err != nil {
+				expires_at=$5, scopes=$6, instance_url=NULLIF($7,''), updated_at=now() WHERE id=$1`,
+				c.ID, c.AccessToken, c.RefreshToken, c.TokenType, c.ExpiresAt, c.Scopes, c.InstanceURL); err != nil {
 				return err
 			}
 		}

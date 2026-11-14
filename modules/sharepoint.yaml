@@ -14,6 +14,8 @@
 #   3. Certificates & secrets -> New client secret.
 #   4. glue2flow -> Plugins -> SharePoint -> Settings: enter the application (client) ID
 #      and the secret value.
+# Path values are percent-encoded as one segment; site IDs may hold "/" and "," (e.g.
+# contoso.sharepoint.com:/sites/team), so they are inserted with rawPath().
 # The connected user only reaches the sites and lists they have access to in SharePoint.
 module: sharepoint
 name: SharePoint
@@ -71,7 +73,7 @@ nodes:
       - &siteId { name: siteId, label: Site ID, required: true, default: "{{ vars.defaultSiteId }}", description: "Site ID, contoso.sharepoint.com:/sites/team or root." }
     request:
       method: GET
-      path: /sites/{{ params.siteId }}
+      path: /sites/{{ rawPath(params.siteId) }}
     output: "{{ let s = response.body; {id: s.id, name: s.name, displayName: s.displayName, description: s.description, webUrl: s.webUrl, createdDateTime: s.createdDateTime} }}"
     outputSchema:
       fields: *siteFields
@@ -84,7 +86,7 @@ nodes:
       - { name: includeHidden, label: Include system lists, type: boolean, default: false }
     request:
       method: GET
-      path: /sites/{{ params.siteId }}/lists
+      path: /sites/{{ rawPath(params.siteId) }}/lists
       query:
         $select: id,name,displayName,description,webUrl,createdDateTime,lastModifiedDateTime,list
     output: "{{ map(filter(response.body.value ?? [], params.includeHidden || !(.list.hidden ?? false)), ({id: .id, name: .name, displayName: .displayName, description: .description, webUrl: .webUrl, template: .list.template, hidden: .list.hidden ?? false, lastModifiedDateTime: .lastModifiedDateTime})) }}"
@@ -110,7 +112,7 @@ nodes:
       - { name: top, label: Max items, type: number, default: 50, description: "At most 999." }
     request:
       method: GET
-      path: /sites/{{ params.siteId }}/lists/{{ params.listId }}/items
+      path: /sites/{{ rawPath(params.siteId) }}/lists/{{ params.listId }}/items
       headers:
         Prefer: "{{ (params.filter ?? '') != '' ? 'HonorNonIndexedQueriesWarningMayFailRandomly' : '' }}"
       query:
@@ -139,7 +141,7 @@ nodes:
       - &itemId { name: itemId, label: Item ID, required: true, default: "{{ json.id }}" }
     request:
       method: GET
-      path: /sites/{{ params.siteId }}/lists/{{ params.listId }}/items/{{ params.itemId }}
+      path: /sites/{{ rawPath(params.siteId) }}/lists/{{ params.listId }}/items/{{ params.itemId }}
       query:
         $expand: fields
     output: &item "{{ let i = response.body; {id: i.id, webUrl: i.webUrl, createdDateTime: i.createdDateTime, lastModifiedDateTime: i.lastModifiedDateTime, createdBy: i.createdBy.user.email, lastModifiedBy: i.lastModifiedBy.user.email, fields: i.fields} }}"
@@ -161,7 +163,7 @@ nodes:
         description: Internal column names and values. Lookup and person columns take "<Column>LookupId".
     request:
       method: POST
-      path: /sites/{{ params.siteId }}/lists/{{ params.listId }}/items
+      path: /sites/{{ rawPath(params.siteId) }}/lists/{{ params.listId }}/items
       body:
         fields: "{{ params.fields }}"
     output: *item
@@ -178,7 +180,7 @@ nodes:
       - *fields
     request:
       method: PATCH
-      path: /sites/{{ params.siteId }}/lists/{{ params.listId }}/items/{{ params.itemId }}/fields
+      path: /sites/{{ rawPath(params.siteId) }}/lists/{{ params.listId }}/items/{{ params.itemId }}/fields
       body: "{{ params.fields }}"
     output: "{{ {id: params.itemId, fields: response.body} }}"
     outputSchema:
@@ -195,7 +197,7 @@ nodes:
       - *itemId
     request:
       method: DELETE
-      path: /sites/{{ params.siteId }}/lists/{{ params.listId }}/items/{{ params.itemId }}
+      path: /sites/{{ rawPath(params.siteId) }}/lists/{{ params.listId }}/items/{{ params.itemId }}
     output: "{{ {id: params.itemId, deleted: response.status == 204} }}"
     outputSchema:
       fields:
@@ -209,7 +211,7 @@ nodes:
       - *siteId
     request:
       method: GET
-      path: /sites/{{ params.siteId }}/drives
+      path: /sites/{{ rawPath(params.siteId) }}/drives
     output: "{{ map(response.body.value ?? [], ({id: .id, name: .name, driveType: .driveType, webUrl: .webUrl})) }}"
     outputSchema:
       fields:
@@ -228,7 +230,7 @@ nodes:
       - { name: top, label: Max entries, type: number, default: 100 }
     request:
       method: GET
-      path: "/{{ (params.driveId ?? '') != '' ? 'drives/' + params.driveId : 'sites/' + params.siteId + '/drive' }}/{{ (params.folderId ?? '') != '' ? 'items/' + params.folderId : 'root' }}/children"
+      path: "/{{ rawPath((params.driveId ?? '') != '' ? 'drives/' + pathEscape(params.driveId) : 'sites/' + params.siteId + '/drive') }}/{{ rawPath((params.folderId ?? '') != '' ? 'items/' + pathEscape(params.folderId) : 'root') }}/children"
       query:
         $top: "{{ params.top }}"
     output: "{{ map(response.body.value ?? [], ({id: .id, name: .name, webUrl: .webUrl, isFolder: .folder != nil, size: .size, mimeType: .file.mimeType, createdDateTime: .createdDateTime, lastModifiedDateTime: .lastModifiedDateTime, lastModifiedBy: .lastModifiedBy.user.displayName, driveId: .parentReference.driveId})) }}"

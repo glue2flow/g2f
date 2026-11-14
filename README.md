@@ -61,7 +61,7 @@ replicas when you need them: if one stops, another continues its runs where they
 | **Data** | HTTP Request · Set Fields · Filter · Sort · Limit · Split Out · Aggregate · Map · Rename / Remove Fields · Date & Time · CSV · Transform Items · Code (JavaScript, isolated with a memory limit) · Log |
 | **Memory** | Remove Duplicates (within a run or across runs) · Data Store (values, counters between runs) |
 | **Long-running** | Wait for a time, a date, or an approval link, for days if needed, surviving restarts |
-| **Integrations** | Gmail · Outlook · Microsoft Teams · Google Sheets (OAuth2) · Email (SMTP/IMAP) · GitHub · Slack · Telegram · Mistral AI |
+| **Integrations** | Gmail · Outlook · Microsoft Teams · Google Sheets · Google Calendar · Google Drive · HubSpot · Salesforce · SharePoint (OAuth2) · Email (SMTP/IMAP) · GitHub · Slack · Telegram · Mistral AI |
 | **Accounts** | Users connect their own OAuth2 accounts and share them with groups |
 
 ## Try it in one minute
@@ -78,7 +78,6 @@ development without Docker: **[Getting started](docs/getting-started.md)**.
 
 - Reusable API-key credentials (like connections, for non-OAuth services)
 - Plugin signing and a plugin catalog
-- More OAuth2 integration packs (HubSpot, Salesforce, Google Calendar/Drive, SharePoint)
 - Push instead of polling for mail (IMAP IDLE, Gmail push notifications, Graph subscriptions)
 - XML / HTML parsing, file (binary) data between nodes
 - More native protocol modules: Postgres/MySQL, SFTP

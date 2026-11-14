@@ -16,7 +16,7 @@ func TestBundledOAuthModules(t *testing.T) {
 		trigger string
 	}{
 		"hubspot":         {[]string{"getContact", "searchContacts", "createContact", "updateContact", "getDeal", "searchDeals", "createDeal", "updateDeal", "createCompany", "listOwners"}, "api.hubapi.com", ""},
-		"salesforce":      {[]string{"query", "get", "create", "update", "upsert", "delete"}, "MYDOMAIN.my.salesforce.com", ""},
+		"salesforce":      {[]string{"query", "get", "create", "update", "upsert", "delete"}, "*.my.salesforce.com", ""},
 		"google-calendar": {[]string{"listCalendars", "listEvents", "getEvent", "createEvent", "updateEvent", "deleteEvent", "newEvent"}, "www.googleapis.com", "newEvent"},
 		"google-drive":    {[]string{"list", "get", "createFolder", "copy", "update", "trash", "delete", "share", "exportText"}, "www.googleapis.com", ""},
 		"sharepoint":      {[]string{"searchSites", "getSite", "listLists", "listItems", "getItem", "createItem", "updateItem", "deleteItem", "listDrives", "listDriveItems"}, "graph.microsoft.com", ""},
@@ -37,7 +37,11 @@ func TestBundledOAuthModules(t *testing.T) {
 			if len(m.OAuth2.APIHosts) != 1 || m.OAuth2.APIHosts[0] != w.host || m.OAuth2.ClientIDConfig != "clientId" {
 				t.Fatalf("oauth2: %+v", m.OAuth2)
 			}
-			if !strings.HasPrefix(m.BaseURL, "https://") || !strings.Contains(m.BaseURL, w.host) && module != "google-calendar" && module != "google-drive" && module != "sharepoint" {
+			if module == "salesforce" {
+				if m.BaseURL != "{{ oauth.instanceUrl }}" || m.OAuth2.InstanceURLField != "instance_url" {
+					t.Fatalf("baseUrl %q, instanceUrlField %q", m.BaseURL, m.OAuth2.InstanceURLField)
+				}
+			} else if !strings.HasPrefix(m.BaseURL, "https://") || !strings.Contains(m.BaseURL, w.host) && module != "google-calendar" && module != "google-drive" && module != "sharepoint" {
 				t.Fatalf("baseUrl %q", m.BaseURL)
 			}
 			list, err := HTTPModuleNodes(m, "test")

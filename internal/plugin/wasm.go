@@ -24,7 +24,7 @@ import (
 //	  "items":  [{"json": {...}, "params": {...}, "input": "main"}],
 //	  "config": {...},                         // plugin-only settings of the organization
 //	  "vars":   {...},                         // organization variables
-//	  "oauth":  {"accessToken": "...", "tokenType": "Bearer"}, // OAuth2 plugins
+//	  "oauth":  {"accessToken": "...", "tokenType": "Bearer", "instanceUrl": "..."}, // OAuth2 plugins (instanceUrl if the provider has one)
 //	  "workflow":  {"id": "...", "name": "..."},
 //	  "execution": {"id": "..."}
 //	}

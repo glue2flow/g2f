@@ -307,6 +307,14 @@ func Render(s string, env Env) (any, error) {
 		return Eval(strings.TrimSpace(trimmed[2:len(trimmed)-2]), env)
 	}
 
+	return RenderWith(s, env, func(_ string, v any) (string, error) { return Stringify(v), nil })
+}
+
+// RenderWith evaluates all {{ }} blocks in s like Render, but always yields
+// text: fn turns the value of each block into the text inserted for it. prefix
+// is the template text in front of the block, so fn can tell where the block
+// sits (e.g. in the path of a URL).
+func RenderWith(s string, env Env, fn func(prefix string, v any) (string, error)) (string, error) {
 	var b strings.Builder
 	rest := s
 	for {
@@ -317,14 +325,18 @@ func Render(s string, env Env) (any, error) {
 		}
 		end := strings.Index(rest[start:], "}}")
 		if end < 0 {
-			return nil, fmt.Errorf("unterminated expression in %q", s)
+			return "", fmt.Errorf("unterminated expression in %q", s)
 		}
 		b.WriteString(rest[:start])
 		v, err := Eval(strings.TrimSpace(rest[start+2:start+end]), env)
 		if err != nil {
-			return nil, err
+			return "", err
 		}
-		b.WriteString(Stringify(v))
+		text, err := fn(s[:len(s)-len(rest)+start], v)
+		if err != nil {
+			return "", err
+		}
+		b.WriteString(text)
 		rest = rest[start+end+2:]
 	}
 	return b.String(), nil

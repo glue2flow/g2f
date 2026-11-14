@@ -5,7 +5,6 @@ import (
 	"io"
 	"log/slog"
 	"net/url"
-	"os"
 	"strings"
 	"testing"
 
@@ -99,19 +98,6 @@ func TestSalesforceModule(t *testing.T) {
 	runShipped(t, sf["salesforce.upsert"], map[string]any{"sobject": "Contact", "externalIdField": "Ext__c", "externalId": "e-1", "fields": map[string]any{"LastName": "L"}}, Item{})
 	if got.method != "PATCH" || got.path != "/api/services/data/v62.0/sobjects/Contact/Ext__c/e-1" {
 		t.Fatalf("upsert: %+v", got)
-	}
-
-	// baseUrl and apiHosts must name the same host, so that editing both keeps the token safe.
-	raw, err := os.ReadFile("../../modules/salesforce.yaml")
-	if err != nil {
-		t.Fatal(err)
-	}
-	m, err := ParseManifest(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if m.BaseURL != "https://"+m.OAuth2.APIHosts[0] {
-		t.Fatalf("baseUrl %q and apiHosts %v must name the same host", m.BaseURL, m.OAuth2.APIHosts)
 	}
 }
 

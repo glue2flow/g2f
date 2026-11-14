@@ -112,7 +112,10 @@ export function Connections({ user }: { user: User }) {
                     <NodeIcon module={modules.find((m) => m.module === c.module)} size={18} /> {name(c.module)}
                   </span>
                 </td>
-                <td className="muted">{c.account || "–"}</td>
+                <td className="muted">
+                  {c.account || "–"}
+                  {c.instanceUrl && <div title={c.instanceUrl}>{new URL(c.instanceUrl).host}</div>}
+                </td>
                 <td>{c.ownerSub === user.sub ? "you" : c.ownerName}</td>
                 <td>
                   {c.canManage ? (

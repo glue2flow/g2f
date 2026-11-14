@@ -19,7 +19,7 @@ valid access token while a node runs.
 | Storage | Access and refresh tokens are encrypted (AES-256-GCM) and never returned by the API. |
 | Refresh | Tokens are refreshed shortly before they expire. The connection row is locked during a refresh, so parallel runs and replicas refresh only once; providers that rotate refresh tokens keep working. |
 | Flow security | Authorization code flow with PKCE (`pkce: true`). The `state` is an encrypted, 10-minute blob bound to the user, plugin and PKCE verifier, so no server-side session is needed. The flow is also bound to the browser that started it by a short-lived `HttpOnly` cookie (`g2f_oauth`) whose hash is stored in the state, so a provider link forwarded to someone else cannot be completed. |
-| Token delivery | HTTP plugins: added as `Authorization` header (or `{{ oauth.accessToken }}` in manifest templates), **only for `apiHosts`**. Requests to any other host are refused. WASM plugins: `input.oauth.accessToken`. Node fields cannot read the token. |
+| Token delivery | HTTP plugins: added as `Authorization` header (or `{{ oauth.accessToken }}` in manifest templates), **only for `apiHosts`** (exact hosts or `*.example.com` wildcards). Requests to any other host are refused. WASM plugins: `input.oauth.accessToken`. Node fields cannot read the token. |
 | Sharing | A connection belongs to whoever connected it and is *Only me*, shared with *Groups*, or the *Organization*. Selecting an account in a node requires access to it. Co-editors can still save workflows using someone else's account if they do not change that selection. Only the owner or an org admin can rename, share or remove it. |
 | Errors | Known token values are scrubbed from error messages. |
 
@@ -37,7 +37,7 @@ top of each file.
 | [`google-calendar`](../modules/google-calendar.yaml) | **New or Changed Event** (trigger), List Events, Get / Create / Update / Delete Event (attendees, Google Meet), List Calendars | Google Cloud OAuth client, Calendar API |
 | [`google-drive`](../modules/google-drive.yaml) | List Files (search), Get File, Create Folder, Copy File, Rename or Move File, Move to Trash, Delete Permanently, Share File, Export Doc as Text (metadata and folders only, no file upload or download) | Google Cloud OAuth client, Drive API (restricted scope `drive`) |
 | [`hubspot`](../modules/hubspot.yaml) | Get / Search / Create / Update Contact, Get / Search / Create / Update Deal, Create Company, List Owners | HubSpot app (CRM scopes) |
-| [`salesforce`](../modules/salesforce.yaml) | SOQL Query, Get / Create / Update / Upsert (external ID) / Delete Record of any sObject | Salesforce Connected App; the org's host is set in the manifest, see below |
+| [`salesforce`](../modules/salesforce.yaml) | SOQL Query, Get / Create / Update / Upsert (external ID) / Delete Record of any sObject | Salesforce Connected App; the org's host comes from the token response, see below |
 | [`sharepoint`](../modules/sharepoint.yaml) | Search Sites, Get Site, List Lists, List / Get / Create / Update / Delete Items, List Document Libraries, List Files and Folders | Microsoft Entra app (Graph `Sites.ReadWrite.All`, admin consent) |
 
 Google modules can share one OAuth client, as can the Microsoft modules (Outlook, Teams,
@@ -61,12 +61,13 @@ of each manifest.
   `crm.objects.owners.read`. Enter the app's client ID and secret in the plugin settings.
 - **Salesforce:** create a *Connected App* (Setup → App Manager) with the callback URL and the
   OAuth scopes `api`, `refresh_token`, `openid` and `email`, and enter its Consumer Key and
-  Secret. Salesforce APIs live on a per-org host (`https://<MyDomain>.my.salesforce.com`)
-  and the manifest format needs a fixed API host, so **copy `modules/salesforce.yaml`
-  and replace `MYDOMAIN.my.salesforce.com` in `baseUrl` and `oauth2.apiHosts`** with your
-  My Domain host (the access token is only ever sent there). One module copy serves one
-  org; for a sandbox use its host and `test.salesforce.com` (or the My Domain login URL)
-  in the OAuth URLs.
+  Secret in the plugin settings. Nothing in the file needs editing: Salesforce returns the
+  org's host (`instance_url`, e.g. `https://acme.my.salesforce.com`) with the token, glue2flow
+  stores it with the connection and sends requests there. The access token only goes to
+  `*.my.salesforce.com` (My Domain, including sandbox and scratch org hosts). **Sandboxes**
+  sign in at `test.salesforce.com`, which the manifest cannot make a setting: install a copy of
+  `modules/salesforce.yaml` with another module name (e.g. `salesforce-sandbox`) and
+  `test.salesforce.com` in `authorizeUrl`, `tokenUrl` and `userInfo.url`.
 - **SharePoint:** use a Microsoft Entra app as for Outlook and add the delegated Graph
   permissions `Sites.ReadWrite.All` and `offline_access`. `Sites.ReadWrite.All` requires
   **admin consent** (*Grant admin consent* on the API permissions page); without it users see
@@ -95,7 +96,8 @@ oauth2:
   pkce: true
   authorizeParams: { access_type: offline, prompt: consent }   # provider-specific extras
   userInfo: { url: https://openidconnect.googleapis.com/v1/userinfo, field: email }  # account label
-  apiHosts: [sheets.googleapis.com]   # default: host of baseUrl
+  apiHosts: [sheets.googleapis.com]   # default: host of baseUrl; also "*.example.com"
+  # instanceUrlField: instance_url    # per-account API host, see docs/http-modules.md
   # tokenAuth: basic                  # client auth at the token endpoint (default: body)
   # clientIdConfig / clientSecretConfig: names of the config entries (default clientId / clientSecret)
 ```

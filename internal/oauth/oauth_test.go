@@ -76,6 +76,18 @@ type fakeProvider struct {
 	challenge string
 	refreshes atomic.Int32
 	expiresIn int
+	// instanceURL, if set, is returned as instance_url (also on refresh unless
+	// noInstanceOnRefresh).
+	instanceURL         string
+	noInstanceOnRefresh bool
+}
+
+// withInstance adds instance_url to a token response.
+func (p *fakeProvider) withInstance(m map[string]any, refresh bool) map[string]any {
+	if p.instanceURL != "" && !(refresh && p.noInstanceOnRefresh) {
+		m["instance_url"] = p.instanceURL
+	}
+	return m
 }
 
 func newProvider(t *testing.T) *fakeProvider {
@@ -98,8 +110,8 @@ func newProvider(t *testing.T) *fakeProvider {
 					_, _ = w.Write([]byte(`{"error":"invalid_grant","error_description":"bad code or verifier"}`))
 					return
 				}
-				_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "access-1", "refresh_token": "refresh-1",
-					"token_type": "bearer", "expires_in": p.expiresIn, "scope": "sheets"})
+				_ = json.NewEncoder(w).Encode(p.withInstance(map[string]any{"access_token": "access-1", "refresh_token": "refresh-1",
+					"token_type": "bearer", "expires_in": p.expiresIn, "scope": "sheets"}, false))
 			case "refresh_token":
 				n := p.refreshes.Add(1)
 				want := "refresh-" + string(rune('0'+n))
@@ -108,8 +120,8 @@ func newProvider(t *testing.T) *fakeProvider {
 					_, _ = w.Write([]byte(`{"error":"invalid_grant","error_description":"stale refresh token"}`))
 					return
 				}
-				_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "access-" + string(rune('1'+n)),
-					"refresh_token": "refresh-" + string(rune('1'+n)), "expires_in": 3600})
+				_ = json.NewEncoder(w).Encode(p.withInstance(map[string]any{"access_token": "access-" + string(rune('1'+n)),
+					"refresh_token": "refresh-" + string(rune('1'+n)), "expires_in": 3600}, true))
 			}
 		case "/userinfo":
 			if r.Header.Get("Authorization") != "Bearer access-1" {
@@ -124,6 +136,12 @@ func newProvider(t *testing.T) *fakeProvider {
 }
 
 func setup(t *testing.T, p *fakeProvider) (*Manager, *memStore) {
+	t.Helper()
+	return setupWith(t, p, "")
+}
+
+// setupWith adds extra lines (indented by two spaces) to the oauth2 block.
+func setupWith(t *testing.T, p *fakeProvider, oauth2Extra string) (*Manager, *memStore) {
 	t.Helper()
 	key := make([]byte, 32)
 	_, _ = rand.Read(key)
@@ -145,6 +163,7 @@ oauth2:
   pkce: true
   authorizeParams: { access_type: offline }
   userInfo: { url: ` + p.srv.URL + `/userinfo, field: email }
+` + oauth2Extra + `
 nodes:
   - { type: read, name: Read, request: { path: /read } }
 `))
@@ -288,5 +307,85 @@ func TestCallbackBindsBrowser(t *testing.T) {
 	}
 	if _, err := mgr.Callback(context.Background(), "good-code", state, nonce); err != nil {
 		t.Fatalf("right nonce: %v", err)
+	}
+}
+
+const instanceSpec = `  instanceUrlField: instance_url
+  apiHosts: ["*.my.salesforce.com"]
+`
+
+func TestInstanceURLStoredAndKeptOnRefresh(t *testing.T) {
+	p := newProvider(t)
+	p.instanceURL = "https://acme.my.salesforce.com/"
+	mgr, st := setupWith(t, p, instanceSpec)
+	c := connect(t, mgr, p)
+	if c.InstanceURL != "https://acme.my.salesforce.com" {
+		t.Fatalf("stored %q", c.InstanceURL)
+	}
+	tok, err := mgr.Token(context.Background(), "acme", "sheets", c.ID)
+	if err != nil || tok.InstanceURL != "https://acme.my.salesforce.com" {
+		t.Fatalf("token %+v %v", tok, err)
+	}
+
+	expire := func() {
+		st.mu.Lock()
+		past := time.Now().Add(-time.Minute)
+		st.conns[c.ID].ExpiresAt = &past
+		st.mu.Unlock()
+	}
+	// A refresh response that repeats instance_url updates it ...
+	p.instanceURL = "https://acme2.my.salesforce.com"
+	expire()
+	if tok, err = mgr.Token(context.Background(), "acme", "sheets", c.ID); err != nil || tok.AccessToken != "access-2" || tok.InstanceURL != "https://acme2.my.salesforce.com" {
+		t.Fatalf("refresh with instance_url: %+v %v", tok, err)
+	}
+	// ... one that omits it keeps the stored value.
+	p.noInstanceOnRefresh = true
+	expire()
+	if tok, err = mgr.Token(context.Background(), "acme", "sheets", c.ID); err != nil || tok.AccessToken != "access-3" || tok.InstanceURL != "https://acme2.my.salesforce.com" {
+		t.Fatalf("refresh without instance_url: %+v %v", tok, err)
+	}
+}
+
+func TestInstanceURLRejected(t *testing.T) {
+	for _, bad := range []string{
+		"http://acme.my.salesforce.com",
+		"https://acme.my.salesforce.com/services",
+		"https://user:pw@acme.my.salesforce.com",
+		"https://acme.my.salesforce.com/?x=1",
+		"https://acme.my.salesforce.com#frag",
+		"https://evil.example.com",
+		"https://my.salesforce.com",
+		"//acme.my.salesforce.com",
+		"acme.my.salesforce.com",
+		"https://",
+	} {
+		p := newProvider(t)
+		p.instanceURL = bad
+		mgr, st := setupWith(t, p, instanceSpec)
+		u := &auth.User{Sub: "bob", Org: "acme"}
+		raw, nonce, err := mgr.AuthorizeURL(context.Background(), u, "sheets", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		au, _ := url.Parse(raw)
+		p.challenge = au.Query().Get("code_challenge")
+		_, err = mgr.Callback(context.Background(), "good-code", au.Query().Get("state"), nonce)
+		if err == nil || !strings.Contains(err.Error(), "instance_url") {
+			t.Errorf("%q: %v", bad, err)
+		}
+		if len(st.conns) != 0 {
+			t.Errorf("%q: connection stored", bad)
+		}
+	}
+
+	// A provider that names the field in the manifest but omits it: no connection.
+	p := newProvider(t)
+	mgr, _ := setupWith(t, p, instanceSpec)
+	raw, nonce, _ := mgr.AuthorizeURL(context.Background(), &auth.User{Sub: "bob", Org: "acme"}, "sheets", "")
+	au, _ := url.Parse(raw)
+	p.challenge = au.Query().Get("code_challenge")
+	if _, err := mgr.Callback(context.Background(), "good-code", au.Query().Get("state"), nonce); err == nil || !strings.Contains(err.Error(), "no instance_url") {
+		t.Fatalf("missing field: %v", err)
 	}
 }

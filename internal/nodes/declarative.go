@@ -3,7 +3,6 @@ package nodes
 import (
 	"context"
 	"fmt"
-	"net"
 	neturl "net/url"
 	"strings"
 	"time"
@@ -55,9 +54,32 @@ func ResolveParams(ec *ExecContext, item Item, index int) (map[string]any, error
 		if p.Required && (v == nil || v == "") {
 			return nil, fmt.Errorf("parameter %q is required", p.Label)
 		}
-		params[p.Name] = v
+		params[p.Name] = plainPaths(v)
 	}
 	return params, nil
+}
+
+// plainPaths turns rawPath(...) values written in node fields (or carried in
+// item data) back into plain strings: only the module's own path template may
+// opt out of escaping, never the workflow author.
+func plainPaths(v any) any {
+	switch t := v.(type) {
+	case expression.RawPath:
+		return string(t)
+	case map[string]any:
+		out := make(map[string]any, len(t))
+		for k, e := range t {
+			out[k] = plainPaths(e)
+		}
+		return out
+	case []any:
+		out := make([]any, len(t))
+		for i, e := range t {
+			out[i] = plainPaths(e)
+		}
+		return out
+	}
+	return v
 }
 
 func (d *declarativeNode) Execute(ctx context.Context, ec *ExecContext) (Output, error) {
@@ -92,13 +114,17 @@ func (d *declarativeNode) requests(ctx context.Context, ec *ExecContext, items [
 		env["config"] = ec.Config
 
 		req := d.spec.Request
-		url := req.URL
-		if url == "" {
-			url = strings.TrimRight(d.module.BaseURL, "/") + "/" + strings.TrimLeft(req.Path, "/")
-		}
 		resolve := func(v any) (any, error) { return expression.Resolve(v, env) }
 
-		urlV, err := resolve(url)
+		// The oauth scope is for the manifest (e.g. baseUrl: "{{ oauth.instanceUrl }}");
+		// node fields never see it.
+		if ec.OAuth != nil {
+			if d.module.OAuth2 != nil && d.module.OAuth2.InstanceURLField != "" && ec.OAuth.InstanceURL == "" {
+				return nil, fmt.Errorf("the %s account has no instance URL; reconnect the account", d.module.Name)
+			}
+			env["oauth"] = map[string]any{"accessToken": ec.OAuth.AccessToken, "tokenType": ec.OAuth.TokenType, "instanceUrl": ec.OAuth.InstanceURL}
+		}
+		reqURL, err := d.requestURL(env)
 		if err != nil {
 			return nil, err
 		}
@@ -107,11 +133,10 @@ func (d *declarativeNode) requests(ctx context.Context, ec *ExecContext, items [
 		// from node parameters can never send it elsewhere.
 		sendToken := false
 		if ec.OAuth != nil {
-			if !d.tokenHostAllowed(expression.Stringify(urlV)) {
-				return nil, fmt.Errorf("refusing to send the %s access token to %s (not in oauth2.apiHosts)", d.module.Name, hostOf(expression.Stringify(urlV)))
+			if !d.tokenHostAllowed(reqURL) {
+				return nil, fmt.Errorf("refusing to send the %s access token to %s (not in oauth2.apiHosts)", d.module.Name, hostOf(reqURL))
 			}
 			sendToken = true
-			env["oauth"] = map[string]any{"accessToken": ec.OAuth.AccessToken, "tokenType": ec.OAuth.TokenType}
 		}
 		headers := map[string]any{}
 		for _, h := range []map[string]any{d.module.Headers, req.Headers} {
@@ -135,7 +160,7 @@ func (d *declarativeNode) requests(ctx context.Context, ec *ExecContext, items [
 		query, _ := queryV.(map[string]any)
 
 		res, err := doHTTP(ctx, httpRequest{
-			Method: req.Method, URL: expression.Stringify(urlV), Headers: headers,
+			Method: req.Method, URL: reqURL, Headers: headers,
 			Query: query, Body: bodyV, Timeout: d.timeout, SameHostOnly: true,
 		})
 		if err != nil {
@@ -162,28 +187,69 @@ func (d *declarativeNode) requests(ctx context.Context, ec *ExecContext, items [
 	return out, nil
 }
 
-func (d *declarativeNode) tokenHostAllowed(raw string) bool {
-	if d.module.OAuth2 == nil {
-		return false
+// requestURL renders the request URL: baseUrl plus path, or the url template.
+// Every {{ }} block in the path part is percent-encoded as one path segment
+// (see pathSegment), so a parameter cannot add slashes, dot segments, a query
+// or a fragment. The rest (baseUrl, host, query part) is rendered as written.
+func (d *declarativeNode) requestURL(env expression.Env) (string, error) {
+	req := d.spec.Request
+	if req.URL != "" {
+		return expression.RenderWith(req.URL, env, func(prefix string, v any) (string, error) {
+			if inURLPath(prefix) {
+				return pathSegment(v)
+			}
+			return expression.Stringify(v), nil
+		})
 	}
-	u, err := neturl.Parse(raw)
+	base, err := expression.Render(d.module.BaseURL, env)
 	if err != nil {
+		return "", err
+	}
+	path, err := expression.RenderWith(req.Path, env, func(_ string, v any) (string, error) { return pathSegment(v) })
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimRight(expression.Stringify(base), "/") + "/" + strings.TrimLeft(path, "/"), nil
+}
+
+// inURLPath reports whether the end of the URL template prefix is in the path:
+// after the host's first "/" and before any "?" or "#".
+func inURLPath(prefix string) bool {
+	_, rest, ok := strings.Cut(prefix, "://")
+	if !ok {
 		return false
 	}
-	port := portOf(u)
-	for _, h := range d.module.OAuth2.APIHosts {
-		host, hp, err := net.SplitHostPort(h)
-		if err != nil {
-			host, hp = strings.Trim(h, "[]"), "443"
+	_, path, ok := strings.Cut(rest, "/")
+	return ok && !strings.ContainsAny(path, "?#")
+}
+
+// pathSegment renders the value of one {{ }} block of a path. Plain values are
+// percent-encoded as one segment and may not be "." or "..". rawPath(x) values
+// are inserted as written, but must not hold "?", "#", backslashes, control
+// characters or a "." / ".." segment (also not percent-encoded).
+func pathSegment(v any) (string, error) {
+	if raw, ok := v.(expression.RawPath); ok {
+		s := string(raw)
+		if strings.ContainsAny(s, "?#\\") || strings.IndexFunc(s, func(r rune) bool { return r < 0x20 || r == 0x7f }) >= 0 {
+			return "", fmt.Errorf("path value %q must not contain ?, #, backslashes or control characters", s)
 		}
-		if !strings.EqualFold(host, u.Hostname()) {
-			continue
+		for _, seg := range strings.Split(s, "/") {
+			if dec, err := neturl.PathUnescape(seg); err != nil || dec == "." || dec == ".." {
+				return "", fmt.Errorf("path value %q must not contain \".\" or \"..\" segments", s)
+			}
 		}
-		if allowInsecureAPIHosts || u.Scheme == "https" && hp == port {
-			return true
-		}
+		return s, nil
 	}
-	return false
+	s := expression.Stringify(v)
+	if s == "." || s == ".." {
+		return "", fmt.Errorf("path value %q is not allowed", s)
+	}
+	return neturl.PathEscape(s), nil
+}
+
+func (d *declarativeNode) tokenHostAllowed(raw string) bool {
+	u, err := neturl.Parse(raw)
+	return err == nil && d.module.OAuth2.AllowsURL(u)
 }
 
 // allowInsecureAPIHosts lets tests send tokens to plain http servers.

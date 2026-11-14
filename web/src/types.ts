@@ -272,6 +272,7 @@ export interface Connection {
   module: string;
   name: string;
   account: string;
+  instanceUrl?: string;
   ownerSub: string;
   ownerName: string;
   scope: Scope;

@@ -1,14 +1,12 @@
 # Salesforce (REST API) via OAuth2. Users connect their own Salesforce user; glue2flow
-# stores and refreshes the tokens and adds them to requests to your org's host.
+# stores and refreshes the tokens and adds them to requests to the org's own host.
 #
-# Salesforce APIs live on a per-org host (https://<MyDomain>.my.salesforce.com), which the
-# OAuth token response calls instance_url. The manifest format needs the API host to be
-# fixed, so the host of the org is written into this file ONCE (two places, both below):
-#   - baseUrl
-#   - oauth2.apiHosts (host only; it is the only host the access token is ever sent to)
-# Copy this file, replace MYDOMAIN.my.salesforce.com with your My Domain host (Setup ->
-# My Domain; sandboxes look like MYDOMAIN--SANDBOX.sandbox.my.salesforce.com) and install it
-# in G2F_MODULES_DIR or import it on the Plugins page.
+# Salesforce APIs live on a per-org host (https://<MyDomain>.my.salesforce.com). The token
+# response names it (instance_url, see instanceUrlField); glue2flow stores it with the
+# connection and uses it as the base URL ({{ oauth.instanceUrl }}), so this file needs no
+# editing. The access token is only ever sent to hosts matching apiHosts: *.my.salesforce.com
+# covers My Domain orgs including sandbox and scratch orgs (x--sb.sandbox.my.salesforce.com).
+# Add "*.salesforce.com" if you still have an org on a legacy host such as na1.salesforce.com.
 #
 # Setup (once per organization, by an admin):
 #   1. Salesforce Setup -> App Manager -> New Connected App (or "External Client App").
@@ -19,14 +17,16 @@
 #      PKCE is sent by glue2flow; the "Require Proof Key for Code Exchange" option may be on.
 #   2. Copy the Consumer Key and Consumer Secret.
 #   3. glue2flow -> Plugins -> Salesforce -> Settings: enter them as client ID and secret.
-# Sandbox orgs: use https://test.salesforce.com (or your My Domain login URL) in
-# authorizeUrl, tokenUrl and userInfo.url below.
+# Sandbox orgs sign in at https://test.salesforce.com: install a copy of this file with a
+# different module name (e.g. salesforce-sandbox) and test.salesforce.com instead of
+# login.salesforce.com in authorizeUrl, tokenUrl and userInfo.url below. The manifest
+# cannot make these URLs a setting.
 module: salesforce
 name: Salesforce
 version: 1.0.0
 description: Query and change Salesforce records with SOQL and the sObject REST API
 color: "#00a1e0"
-baseUrl: https://MYDOMAIN.my.salesforce.com
+baseUrl: "{{ oauth.instanceUrl }}"
 
 config:
   - name: clientId
@@ -44,7 +44,8 @@ oauth2:
   userInfo:
     url: https://login.salesforce.com/services/oauth2/userinfo
     field: email
-  apiHosts: [MYDOMAIN.my.salesforce.com]
+  instanceUrlField: instance_url
+  apiHosts: ["*.my.salesforce.com"]
 
 nodes:
   - type: query
