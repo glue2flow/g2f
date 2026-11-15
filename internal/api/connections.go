@@ -134,6 +134,16 @@ func (s *Server) updateConnection(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
+	// Validate before creds.Update, which saves the fields: a refused request
+	// must not change anything.
+	if in.Scope != nil {
+		switch *in.Scope {
+		case "private", "group", "org":
+		default:
+			writeError(w, http.StatusBadRequest, "scope must be private, group or org")
+			return
+		}
+	}
 	if in.Fields != nil {
 		if err := s.creds.Update(r.Context(), c, in.Fields); err != nil {
 			s.credentialError(w, err)
@@ -144,13 +154,7 @@ func (s *Server) updateConnection(w http.ResponseWriter, r *http.Request) {
 		c.Name = strings.TrimSpace(*in.Name)
 	}
 	if in.Scope != nil {
-		switch *in.Scope {
-		case "private", "group", "org":
-			c.Scope = *in.Scope
-		default:
-			writeError(w, http.StatusBadRequest, "scope must be private, group or org")
-			return
-		}
+		c.Scope = *in.Scope
 	}
 	if in.Groups != nil {
 		c.Groups = []string{}
