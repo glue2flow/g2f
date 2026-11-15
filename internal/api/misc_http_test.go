@@ -90,14 +90,17 @@ func TestAPIErrorsAreJSON(t *testing.T) {
 		t.Fatalf("%d %v", code, body)
 	}
 
-	t.Run("unsupported method (current behaviour)", func(t *testing.T) {
-		// chi answers 405 itself, before authentication and without the
-		// JSON error body the handlers use. Pinned so a change is noticed.
-		rec := s.anon().raw("PATCH", "/api/workflows", nil, nil)
-		if rec.Code != http.StatusMethodNotAllowed {
-			t.Fatalf("%d", rec.Code)
+	t.Run("unsupported method", func(t *testing.T) {
+		for _, c := range []*client{s.anon(), s.as(alice)} {
+			rec := c.raw("PATCH", "/api/workflows", nil, nil)
+			if rec.Code != http.StatusMethodNotAllowed || !strings.HasPrefix(rec.Header().Get("Content-Type"), "application/json") ||
+				errorOf(t, decodeBody(t, rec)) != "method not allowed" {
+				t.Fatalf("%d %v %s", rec.Code, rec.Header(), rec.Body)
+			}
+			if allow := rec.Header()["Allow"]; len(allow) != 2 || !contains(allow, "GET") || !contains(allow, "POST") {
+				t.Errorf("Allow %q, want GET and POST", allow)
+			}
 		}
-		t.Logf("PATCH /api/workflows without token: %d, body %q, Allow %q", rec.Code, rec.Body, rec.Header().Get("Allow"))
 	})
 }
 

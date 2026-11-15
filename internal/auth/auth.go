@@ -50,7 +50,9 @@ func (a *Authenticator) Middleware(next http.Handler) http.Handler {
 		u, err := a.Authenticate(r)
 		if err != nil {
 			w.Header().Set("WWW-Authenticate", `Bearer realm="g2f"`)
-			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"error":"unauthorized"}` + "\n"))
 			return
 		}
 		next.ServeHTTP(w, r.WithContext(WithUser(r.Context(), u)))

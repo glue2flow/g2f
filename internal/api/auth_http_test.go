@@ -47,6 +47,9 @@ func TestEveryRouteOutsideAllowListRequiresToken(t *testing.T) {
 			if !strings.HasPrefix(rec.Header().Get("WWW-Authenticate"), "Bearer") {
 				t.Errorf("no WWW-Authenticate challenge: %v", rec.Header())
 			}
+			if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
+				t.Errorf("Content-Type %q, want application/json", ct)
+			}
 		})
 		checked++
 		return nil
@@ -121,6 +124,9 @@ func TestAuthentication(t *testing.T) {
 			}
 			if rec.Header().Get("WWW-Authenticate") != `Bearer realm="g2f"` {
 				t.Errorf("WWW-Authenticate = %q", rec.Header().Get("WWW-Authenticate"))
+			}
+			if rec.Header().Get("Content-Type") != "application/json" {
+				t.Errorf("Content-Type %q", rec.Header().Get("Content-Type"))
 			}
 			if got := errorOf(t, decodeBody(t, rec)); got != "unauthorized" {
 				t.Errorf("error %q", got)

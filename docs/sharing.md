@@ -12,7 +12,7 @@ Each workflow has an **owner**, an **organization** and a **scope**:
 | `group` | owner + members of the listed Keycloak groups (subgroups included: a share for `/engineering` also covers `/engineering/backend`) |
 | `org` | everyone in the organization with the default `orgRole`; group shares can grant more |
 
-Roles: `viewer` (see workflow and runs) < `runner` (+ run manually) < `editor` (+ edit, activate)
+Roles: `viewer` (see workflow and runs) < `runner` (+ run manually, with `items` only for the Manual trigger) < `editor` (+ edit, activate)
 < `owner` (+ delete, change sharing). Users with the realm role `g2f-admin` are owners of every
 workflow in their organization. Workflows are never visible across organizations.
 Secret parameters are never returned by the API, whatever the role (see [Secrets](secrets.md)).

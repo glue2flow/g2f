@@ -390,10 +390,25 @@ func (s *Server) runWorkflow(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	u := auth.FromContext(r.Context())
-	exec, err := s.engine.Start(r.Context(), engine.Request{
+	req := engine.Request{
 		Workflow: wf, TriggerType: nodes.TriggerManual, TriggerNode: in.NodeID,
 		Items: in.Items, TriggeredBy: u.Name,
-	})
+	}
+	// Items stand in for trigger data: runners may only pass them to the
+	// Manual trigger, everything else needs the editor role.
+	if len(in.Items) > 0 && !wf.Access.AtLeast(workflow.RoleEditor) {
+		_, kind, err := s.engine.TriggerFor(req)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if kind != nodes.TriggerManual {
+			writeError(w, http.StatusForbidden, fmt.Sprintf(
+				"only editors can supply items for a %s trigger; runners can run it with its test data", kind))
+			return
+		}
+	}
+	exec, err := s.engine.Start(r.Context(), req)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return

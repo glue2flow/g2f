@@ -127,6 +127,7 @@ func (s *Server) Handler() http.Handler {
 
 	r.Route("/api", func(r chi.Router) {
 		r.Use(middleware.NoCache)
+		r.MethodNotAllowed(methodNotAllowed(r))
 		r.Get("/config", s.getConfig)
 		r.Group(func(r chi.Router) {
 			r.Use(s.auth.Middleware)
@@ -178,6 +179,20 @@ func (s *Server) Handler() http.Handler {
 
 	r.NotFound(s.spa)
 	return r
+}
+
+// methodNotAllowed answers 405 in the API's JSON shape. A custom handler gets
+// no method list from chi, so Allow is rebuilt by probing the router.
+func methodNotAllowed(routes chi.Routes) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		path := chi.RouteContext(r.Context()).RoutePath
+		for _, m := range []string{http.MethodGet, http.MethodHead, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete} {
+			if routes.Match(chi.NewRouteContext(), m, path) {
+				w.Header().Add("Allow", m)
+			}
+		}
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
 }
 
 func (s *Server) requestLogger(next http.Handler) http.Handler {

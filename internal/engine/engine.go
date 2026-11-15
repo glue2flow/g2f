@@ -292,6 +292,15 @@ func (e *Engine) prepare(ctx context.Context, req Request) (*store.Execution, *w
 	return exec, start, nil
 }
 
+// TriggerFor returns the trigger node a run of req would start from and its kind.
+func (e *Engine) TriggerFor(req Request) (*workflow.Node, nodes.TriggerKind, error) {
+	n, err := e.findTrigger(req)
+	if err != nil {
+		return nil, "", err
+	}
+	return n, e.reg.TriggerKind(n.Type), nil
+}
+
 func (e *Engine) findTrigger(req Request) (*workflow.Node, error) {
 	g := &req.Workflow.Graph
 	if req.TriggerNode != "" {

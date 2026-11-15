@@ -401,10 +401,17 @@ func TestWorkflowValidation(t *testing.T) {
 		t.Fatalf("rejected workflows were stored: %d", n)
 	}
 
-	t.Run("reserved __ names are not checked on save (current behaviour)", func(t *testing.T) {
-		// expression.Identifiers only parses; "__" names are refused when the
-		// expression is evaluated. Pinned so a change is noticed.
-		a.must(http.StatusCreated, "POST", "/api/workflows", wfBody("reserved", set(map[string]any{"t": "{{ __budget }}"}), nil))
+	t.Run("reserved __ names are rejected on save", func(t *testing.T) {
+		for _, code := range []string{"{{ __budget }}", "{{ let __x = 1; __x }}", "{{ __tick(1) }}", "{{ json.a + __ctx }}"} {
+			c, body := a.do("POST", "/api/workflows", wfBody("reserved", set(map[string]any{"t": code}), nil))
+			if c != http.StatusBadRequest || !strings.Contains(errorOf(t, body), `names starting with "__" are reserved`) {
+				t.Errorf("%s: %d %v", code, c, body)
+			}
+		}
+	})
+	t.Run("fields named with underscores are allowed", func(t *testing.T) {
+		a.must(http.StatusCreated, "POST", "/api/workflows", wfBody("typename",
+			set(map[string]any{"t": `{{ json.__typename }} {{ json["__x"] }}`}), nil))
 	})
 }
 
@@ -539,31 +546,86 @@ func TestCancelWaitingExecution(t *testing.T) {
 	}
 }
 
-// A runner can start any trigger node and supply its items, so a manual run
-// can fabricate the payload of a webhook or form trigger (which the public
-// endpoints would only produce after their own authentication). This pins
-// the CURRENT behaviour found in review; it is not an endorsement.
-func TestRunnerCanSupplyTriggerItems_CurrentBehaviour(t *testing.T) {
+// Items stand in for trigger data: runners may pass them to the Manual
+// trigger only, editors to any trigger.
+func TestSupplyingTriggerItems(t *testing.T) {
 	s := newTestServer(t)
 	owner := s.as(alice)
-	wf := owner.createWF("forge", graph([]map[string]any{
+	g := graph([]map[string]any{
 		node("start", "trigger.manual", nil),
 		node("hook", "trigger.webhook", map[string]any{"auth": "token", "secret": "hook-secret-value"}),
+		formGraph("none")["nodes"].([]map[string]any)[0],
 		node("log", "core.log", map[string]any{"message": "{{ json.body.approved }}"}),
-	}, edge("hook", "log")), shared("/eng/frontend", "runner"))
+	}, edge("hook", "log"))
+	runnerWF := owner.createWF("forge", g, shared("/eng/frontend", "runner"))["id"].(string)
+	editorWF := owner.createWF("forge-editor", g, shared("/eng/frontend", "editor"))["id"].(string)
+	// Only a webhook trigger: the default trigger of a manual run.
+	hookOnly := owner.createWF("hook only", graph([]map[string]any{
+		node("hook", "trigger.webhook", map[string]any{"auth": "token", "secret": "hook-secret-value"}),
+		node("log", "core.log", nil),
+	}, edge("hook", "log")), shared("/eng/frontend", "runner"))["id"].(string)
 
-	forged := []any{map[string]any{"method": "POST", "headers": map[string]any{"X-G2F-Token": "anything"},
-		"body": map[string]any{"approved": true}}}
-	started := obj(t, s.as(dave).must(http.StatusAccepted, "POST", "/api/workflows/"+wf["id"].(string)+"/run",
-		map[string]any{"nodeId": "hook", "items": forged}))
-	ex := s.as(dave).waitExec(started["id"].(string), finished)
-	if ex["triggerNode"] != "hook" || ex["triggerType"] != "manual" || ex["status"] != "success" {
-		t.Fatalf("execution: %v", ex)
+	forged := []any{map[string]any{"method": "POST", "body": map[string]any{"approved": true}, "submittedBy": "boss"}}
+	execCount := func(id string) int {
+		return len(list(t, owner.must(http.StatusOK, "GET", "/api/workflows/"+id+"/executions", nil)))
 	}
-	out := stepOutput(t, ex, "hook")
-	if len(out) != 1 || mustJSON(t, obj(t, out[0])["body"]) != `{"approved":true}` {
-		t.Fatalf("hook output %v", out)
+	run := func(who testUser, id string, body map[string]any) (int, any) {
+		return s.as(who).do("POST", "/api/workflows/"+id+"/run", body)
 	}
-	t.Logf("CURRENT BEHAVIOUR: a runner fabricated the webhook payload %v (execution triggerType=%v, triggeredBy=%v)",
-		out[0], ex["triggerType"], ex["triggeredBy"])
+
+	t.Run("runner with items on the manual trigger", func(t *testing.T) {
+		code, body := run(dave, runnerWF, map[string]any{"nodeId": "start", "items": []any{map[string]any{"n": 1}}})
+		if code != http.StatusAccepted {
+			t.Fatalf("%d %v", code, body)
+		}
+		s.as(dave).waitExec(obj(t, body)["id"].(string), finished)
+	})
+	for id, kind := range map[string]string{"hook": "webhook", "form": "form"} {
+		t.Run("runner with items on the "+kind+" trigger is refused", func(t *testing.T) {
+			before := execCount(runnerWF)
+			code, body := run(dave, runnerWF, map[string]any{"nodeId": id, "items": forged})
+			if code != http.StatusForbidden || !strings.Contains(errorOf(t, body), "only editors can supply items for a "+kind+" trigger") {
+				t.Fatalf("%d %v", code, body)
+			}
+			if n := execCount(runnerWF); n != before {
+				t.Fatalf("executions: %d, want %d", n, before)
+			}
+		})
+	}
+	t.Run("runner with items and no nodeId, default trigger is a webhook", func(t *testing.T) {
+		code, body := run(dave, hookOnly, map[string]any{"items": forged})
+		if code != http.StatusForbidden || !strings.Contains(errorOf(t, body), "webhook trigger") {
+			t.Fatalf("%d %v", code, body)
+		}
+		if n := execCount(hookOnly); n != 0 {
+			t.Fatalf("%d executions", n)
+		}
+	})
+	t.Run("runner without items on a webhook trigger", func(t *testing.T) {
+		code, body := run(dave, runnerWF, map[string]any{"nodeId": "hook"})
+		if code != http.StatusAccepted {
+			t.Fatalf("%d %v", code, body)
+		}
+		s.as(dave).waitExec(obj(t, body)["id"].(string), finished)
+		if code, body := run(dave, hookOnly, nil); code != http.StatusAccepted {
+			t.Fatalf("no body: %d %v", code, body)
+		}
+	})
+	t.Run("runner with items for an unknown node is a bad request", func(t *testing.T) {
+		if code, body := run(dave, runnerWF, map[string]any{"nodeId": "ghost", "items": forged}); code != http.StatusBadRequest {
+			t.Fatalf("%d %v", code, body)
+		}
+	})
+	for _, id := range []string{"hook", "form"} {
+		t.Run("editor with items on the "+id+" trigger", func(t *testing.T) {
+			code, body := run(dave, editorWF, map[string]any{"nodeId": id, "items": forged})
+			if code != http.StatusAccepted {
+				t.Fatalf("%d %v", code, body)
+			}
+			ex := s.as(dave).waitExec(obj(t, body)["id"].(string), finished)
+			if ex["triggerNode"] != id || ex["triggerType"] != "manual" {
+				t.Fatalf("execution: %v", ex)
+			}
+		})
+	}
 }

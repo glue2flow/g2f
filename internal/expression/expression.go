@@ -389,6 +389,7 @@ func Stringify(v any) string {
 
 // Identifiers returns the top-level variable names used by the {{ }} blocks in
 // v (strings, maps and slices are searched recursively), e.g. "json", "vars".
+// Like evaluation, it rejects reserved "__" names.
 func Identifiers(v any) ([]string, error) {
 	seen := map[string]bool{}
 	var walk func(any) error
@@ -399,6 +400,9 @@ func Identifiers(v any) ([]string, error) {
 				tree, err := parser.Parse(code)
 				if err != nil {
 					return fmt.Errorf("expression %q: %w", code, err)
+				}
+				if err := checkReserved(code); err != nil {
+					return err
 				}
 				ast.Walk(&tree.Node, identCollector(seen))
 			}

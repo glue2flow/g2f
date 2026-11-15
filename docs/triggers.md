@@ -16,6 +16,8 @@ Every workflow starts at a trigger node. A workflow may have several triggers.
 
 Any trigger can also be run manually from the editor (select it, then ▶ Run). Webhook and
 schedule triggers then use their test payload, so a flow can be tested before activation.
+Through the API, `items` in the run request replace the test payload of a **Manual** trigger.
+For any other trigger kind, supplying `items` requires the `editor` role (`403` for runners).
 
 ## Polling triggers
 

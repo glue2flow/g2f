@@ -74,6 +74,17 @@ func TestIdentifiers(t *testing.T) {
 	}
 }
 
+func TestIdentifiersRejectReservedNames(t *testing.T) {
+	for _, code := range []string{"{{ __budget }}", "{{ let __x = 1; __x }}", "{{ __tick(1) }}"} {
+		if _, err := Identifiers(code); err == nil || !strings.Contains(err.Error(), "reserved") {
+			t.Errorf("%s: err %v", code, err)
+		}
+	}
+	if _, err := Identifiers(`{{ json.__typename }} {{ json["__x"] }}`); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestNormalizeInterfaceMaps(t *testing.T) {
 	v, err := Render("{{ fromPairs([['a', 1], ['b', [fromPairs([['c', 2]])]]]) }}", Env{})
 	if err != nil {
