@@ -62,6 +62,11 @@ func NativeModuleNodes(m *Manifest, source string) ([]Node, error) {
 			return nil, fmt.Errorf("node %s: no Go implementation", n.Type)
 		}
 		declared[n.Type] = true
+		if n.Push != nil && n.Push.Endpoint == PushListen {
+			if _, ok := Listener(m.Module + "." + n.Type); !ok {
+				return nil, fmt.Errorf("node %s: push endpoint listen, but no listener is registered", n.Type)
+			}
+		}
 		out = append(out, &nativeNode{def: m.NodeDefinition(n, source), fn: fn})
 	}
 	for t := range impls {

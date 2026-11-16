@@ -1,0 +1,297 @@
+# HubSpot CRM (API v3) via OAuth2. Users connect their own HubSpot account; glue2flow
+# stores and refreshes the tokens and adds them to requests to api.hubapi.com.
+#
+# Setup (once per organization, by an admin):
+#   1. HubSpot developer account -> Apps -> Create app. Auth tab: Redirect URL
+#      <G2F_PUBLIC_URL>/oauth/callback
+#   2. Scopes: crm.objects.contacts.read/write, crm.objects.companies.read/write,
+#      crm.objects.deals.read/write, crm.objects.owners.read. They must match the
+#      "scopes" below; HubSpot refuses the consent if the app lacks one of them.
+#   3. glue2flow -> Plugins -> HubSpot -> Settings: enter the app's client ID and secret.
+module: hubspot
+name: HubSpot
+version: 1.0.0
+description: Find, create and update HubSpot CRM contacts, companies and deals
+color: "#ff7a59"
+baseUrl: https://api.hubapi.com
+
+config:
+  - name: clientId
+    label: Client ID
+    description: From the HubSpot app's Auth tab.
+  - name: clientSecret
+    label: Client secret
+    type: secret
+
+oauth2:
+  authorizeUrl: https://app.hubspot.com/oauth/authorize
+  tokenUrl: https://api.hubapi.com/oauth/v1/token
+  scopes:
+    - crm.objects.contacts.read
+    - crm.objects.contacts.write
+    - crm.objects.companies.read
+    - crm.objects.companies.write
+    - crm.objects.deals.read
+    - crm.objects.deals.write
+    - crm.objects.owners.read
+  apiHosts: [api.hubapi.com]
+
+nodes:
+  - type: getContact
+    name: Get Contact
+    description: Fetch a contact by its HubSpot ID, or by email address.
+    params:
+      - { name: contactId, label: Contact ID or email, required: true, default: "{{ json.id }}" }
+      - &idProperty
+        name: idProperty
+        label: Look up by
+        type: select
+        default: id
+        options:
+          - { label: HubSpot ID, value: id }
+          - { label: Email address, value: email }
+      - &contactProps
+        name: properties
+        label: Properties
+        default: email,firstname,lastname,phone,company,jobtitle,lifecyclestage,hubspot_owner_id
+        description: Comma-separated internal property names to return.
+    request:
+      method: GET
+      path: /crm/v3/objects/contacts/{{ params.contactId }}
+      query:
+        properties: "{{ params.properties }}"
+        idProperty: "{{ params.idProperty == 'id' ? '' : params.idProperty }}"
+    output: &object "{{ let r = response.body; fromPairs(concat([['id', r.id], ['createdAt', r.createdAt], ['updatedAt', r.updatedAt], ['archived', r.archived]], toPairs(r.properties ?? {}))) }}"
+    outputSchema:
+      fields: &contactFields
+        - { path: id, type: string, description: HubSpot object ID }
+        - { path: createdAt, type: string }
+        - { path: updatedAt, type: string }
+        - { path: archived, type: boolean }
+        - { path: email, type: string }
+        - { path: firstname, type: string }
+        - { path: lastname, type: string }
+        - { path: phone, type: string }
+        - { path: company, type: string }
+        - { path: jobtitle, type: string }
+        - { path: lifecyclestage, type: string }
+        - { path: hubspot_owner_id, type: string }
+
+  - type: searchContacts
+    name: Search Contacts
+    description: Find contacts by text or by a property filter (one item per contact, up to 200).
+    params:
+      - { name: query, label: Text search, description: "Matches names, email, phone and company." }
+      - { name: filterProperty, label: Filter property, placeholder: email, description: Internal property name to filter on. }
+      - &operator
+        name: operator
+        label: Operator
+        type: select
+        default: EQ
+        options:
+          - { label: equals, value: EQ }
+          - { label: does not equal, value: NEQ }
+          - { label: contains word, value: CONTAINS_TOKEN }
+          - { label: greater than, value: GT }
+          - { label: greater or equal, value: GTE }
+          - { label: less than, value: LT }
+          - { label: less or equal, value: LTE }
+          - { label: has a value, value: HAS_PROPERTY }
+          - { label: has no value, value: NOT_HAS_PROPERTY }
+      - { name: filterValue, label: Filter value }
+      - &filterGroups
+        name: filterGroups
+        label: Filter groups (advanced)
+        type: json
+        description: Raw HubSpot filterGroups array; replaces the three filter fields above.
+      - *contactProps
+      - { name: limit, label: Max results, type: number, default: 20, description: At most 200. }
+    request:
+      method: POST
+      path: /crm/v3/objects/contacts/search
+      body: &searchBody >-
+        {{ let groups = type(params.filterGroups) == 'array' && len(params.filterGroups) > 0 ? params.filterGroups :
+             ((params.filterProperty ?? '') != '' ? [{filters: [{propertyName: params.filterProperty, operator: params.operator, value: params.filterValue ?? ''}]}] : []);
+           fromPairs(filter(toPairs({
+             query: params.query ?? '',
+             filterGroups: len(groups) > 0 ? groups : nil,
+             properties: map(split(params.properties ?? '', ','), trim(#)),
+             limit: params.limit
+           }), #[1] != '' && #[1] != nil)) }}
+    output: &objects "{{ map(response.body.results ?? [], fromPairs(concat([['id', #.id], ['createdAt', #.createdAt], ['updatedAt', #.updatedAt], ['archived', #.archived]], toPairs(#.properties ?? {})))) }}"
+    outputSchema:
+      fields: *contactFields
+
+  - type: createContact
+    name: Create Contact
+    description: Create a contact. HubSpot answers 409 if the email already exists.
+    params:
+      - &contactEdit
+        name: properties
+        label: Properties
+        type: json
+        required: true
+        default: { email: "{{ json.email }}", firstname: "{{ json.firstname }}", lastname: "{{ json.lastname }}" }
+        description: Internal property names and values. Custom properties work too.
+    request:
+      method: POST
+      path: /crm/v3/objects/contacts
+      body:
+        properties: "{{ params.properties }}"
+    output: *object
+    outputSchema:
+      fields: *contactFields
+
+  - type: updateContact
+    name: Update Contact
+    description: Change properties of a contact. Only the given properties are changed.
+    params:
+      - { name: contactId, label: Contact ID or email, required: true, default: "{{ json.id }}" }
+      - *idProperty
+      - *contactEdit
+    request:
+      method: PATCH
+      path: /crm/v3/objects/contacts/{{ params.contactId }}
+      query:
+        idProperty: "{{ params.idProperty == 'id' ? '' : params.idProperty }}"
+      body:
+        properties: "{{ params.properties }}"
+    output: *object
+    outputSchema:
+      fields: *contactFields
+
+  - type: getDeal
+    name: Get Deal
+    description: Fetch a deal by its HubSpot ID.
+    params:
+      - { name: dealId, label: Deal ID, required: true, default: "{{ json.id }}" }
+      - &dealProps
+        name: properties
+        label: Properties
+        default: dealname,amount,dealstage,pipeline,closedate,hubspot_owner_id
+        description: Comma-separated internal property names to return.
+    request:
+      method: GET
+      path: /crm/v3/objects/deals/{{ params.dealId }}
+      query:
+        properties: "{{ params.properties }}"
+    output: *object
+    outputSchema:
+      fields: &dealFields
+        - { path: id, type: string, description: HubSpot object ID }
+        - { path: createdAt, type: string }
+        - { path: updatedAt, type: string }
+        - { path: archived, type: boolean }
+        - { path: dealname, type: string }
+        - { path: amount, type: string }
+        - { path: dealstage, type: string }
+        - { path: pipeline, type: string }
+        - { path: closedate, type: string }
+        - { path: hubspot_owner_id, type: string }
+
+  - type: searchDeals
+    name: Search Deals
+    description: Find deals by text or by a property filter (one item per deal, up to 200).
+    params:
+      - { name: query, label: Text search, description: Matches the deal name and other searchable properties. }
+      - { name: filterProperty, label: Filter property, placeholder: dealstage }
+      - *operator
+      - { name: filterValue, label: Filter value }
+      - *filterGroups
+      - *dealProps
+      - { name: limit, label: Max results, type: number, default: 20, description: At most 200. }
+    request:
+      method: POST
+      path: /crm/v3/objects/deals/search
+      body: *searchBody
+    output: *objects
+    outputSchema:
+      fields: *dealFields
+
+  - type: createDeal
+    name: Create Deal
+    description: Create a deal, optionally associated with a contact.
+    params:
+      - name: properties
+        label: Properties
+        type: json
+        required: true
+        default: { dealname: "{{ json.dealname }}", amount: "{{ json.amount }}", pipeline: default, dealstage: appointmentscheduled }
+        description: Internal property names and values. Pipeline and stage take internal IDs.
+      - { name: contactId, label: Associate contact ID, description: Optional HubSpot contact ID to link the deal to. }
+    request:
+      method: POST
+      path: /crm/v3/objects/deals
+      body: >-
+        {{ (params.contactId ?? '') != ''
+             ? {properties: params.properties, associations: [{to: {id: params.contactId}, types: [{associationCategory: 'HUBSPOT_DEFINED', associationTypeId: 3}]}]}
+             : {properties: params.properties} }}
+    output: *object
+    outputSchema:
+      fields: *dealFields
+
+  - type: updateDeal
+    name: Update Deal
+    description: Change properties of a deal, e.g. move it to another stage.
+    params:
+      - { name: dealId, label: Deal ID, required: true, default: "{{ json.id }}" }
+      - name: properties
+        label: Properties
+        type: json
+        required: true
+        default: { dealstage: closedwon }
+        description: Internal property names and values to change.
+    request:
+      method: PATCH
+      path: /crm/v3/objects/deals/{{ params.dealId }}
+      body:
+        properties: "{{ params.properties }}"
+    output: *object
+    outputSchema:
+      fields: *dealFields
+
+  - type: createCompany
+    name: Create Company
+    description: Create a company.
+    params:
+      - name: properties
+        label: Properties
+        type: json
+        required: true
+        default: { name: "{{ json.company }}", domain: "{{ json.domain }}" }
+        description: Internal property names and values.
+    request:
+      method: POST
+      path: /crm/v3/objects/companies
+      body:
+        properties: "{{ params.properties }}"
+    output: *object
+    outputSchema:
+      fields:
+        - { path: id, type: string }
+        - { path: createdAt, type: string }
+        - { path: updatedAt, type: string }
+        - { path: name, type: string }
+        - { path: domain, type: string }
+
+  - type: listOwners
+    name: List Owners
+    description: List HubSpot owners (users), to find the IDs for hubspot_owner_id.
+    params:
+      - { name: email, label: Email, description: Only the owner with this email address. }
+      - { name: limit, label: Max results, type: number, default: 100 }
+    request:
+      method: GET
+      path: /crm/v3/owners
+      query:
+        limit: "{{ params.limit }}"
+        email: "{{ params.email }}"
+    output: "{{ map(response.body.results ?? [], ({id: .id, email: .email, firstName: .firstName, lastName: .lastName, userId: .userId, archived: .archived})) }}"
+    outputSchema:
+      fields:
+        - { path: id, type: string, description: Owner ID }
+        - { path: email, type: string }
+        - { path: firstName, type: string }
+        - { path: lastName, type: string }
+        - { path: userId, type: number }
+        - { path: archived, type: boolean }

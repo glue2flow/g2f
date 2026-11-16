@@ -4,16 +4,23 @@ name: Slack
 description: Post messages through Slack incoming webhooks
 color: "#4a154b"
 
+# The incoming webhook URL is the secret: it is stored as a credential and
+# must point to hooks.slack.com, checked when it is saved and on every request.
+credentials:
+  fields:
+    - name: webhookUrl
+      label: Webhook URL
+      type: secretUrl
+      required: true
+      placeholder: https://hooks.slack.com/services/...
+      description: Slack app → Incoming Webhooks → Webhook URL of the channel.
+  apiHosts: [hooks.slack.com]
+
 nodes:
   - type: webhook.post
     name: Post Message (Webhook)
-    description: Send a message to a channel via an incoming webhook URL.
+    description: Send a message to the channel of the credential's incoming webhook.
     params:
-      - name: webhookUrl
-        label: Webhook URL
-        type: secret
-        required: true
-        placeholder: https://hooks.slack.com/services/...
       - name: text
         label: Text
         type: text
@@ -21,7 +28,7 @@ nodes:
         default: "Workflow {{ workflow.name }} says hi"
     request:
       method: POST
-      url: "{{ params.webhookUrl }}"
+      url: "{{ credential.webhookUrl }}"
       body:
         text: "{{ params.text }}"
     output: "{{ {ok: response.status == 200} }}"

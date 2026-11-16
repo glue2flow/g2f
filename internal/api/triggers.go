@@ -6,8 +6,10 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/glue2flow/g2f/internal/auth"
 	"github.com/glue2flow/g2f/internal/config"
 	"github.com/glue2flow/g2f/internal/nodes"
+	"github.com/glue2flow/g2f/internal/push"
 	"github.com/glue2flow/g2f/internal/trigger"
 	"github.com/glue2flow/g2f/internal/workflow"
 	"github.com/glue2flow/g2f/modules/email"
@@ -50,8 +52,12 @@ type scheduleInfo struct {
 }
 
 type pollInfo struct {
-	IntervalMinutes float64   `json:"intervalMinutes"`
-	Next            time.Time `json:"next"`
+	// IntervalMinutes is the current time between checks: the configured
+	// interval, or at least the push safety net while push works.
+	IntervalMinutes   float64        `json:"intervalMinutes"`
+	ConfiguredMinutes float64        `json:"configuredMinutes"`
+	Next              time.Time      `json:"next"`
+	Delivery          *push.Delivery `json:"delivery,omitempty"`
 }
 
 // listTriggers describes how each trigger of the stored workflow is invoked.
@@ -105,7 +111,16 @@ func (s *Server) listTriggers(w http.ResponseWriter, r *http.Request) {
 			}
 		case nodes.TriggerPoll:
 			d := nodes.PollInterval(n.Params)
-			info.Poll = &pollInfo{IntervalMinutes: d.Minutes(), Next: time.Now().Truncate(d).Add(d)}
+			var dl *push.Delivery
+			if s.delivery != nil {
+				u := auth.FromContext(r.Context())
+				dl = s.delivery.Delivery(r.Context(), wf, &n, u != nil && u.Admin)
+			}
+			eff := trigger.EffectiveInterval(d, dl != nil && dl.Push)
+			info.Poll = &pollInfo{
+				IntervalMinutes: eff.Minutes(), ConfiguredMinutes: d.Minutes(),
+				Next: trigger.NextPoll(wf.ID, n.ID, eff, time.Now()), Delivery: dl,
+			}
 		case nodes.TriggerSchedule:
 			sched, err := nodes.ParseSchedule(n.Params)
 			if err != nil {

@@ -37,7 +37,7 @@ nodes:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if m.OAuth2.APIHosts[0] != "127.0.0.1" || m.OAuth2.ClientIDConfig != "clientId" {
+	if m.OAuth2.APIHosts[0] != strings.TrimPrefix(api.URL, "http://") || m.OAuth2.ClientIDConfig != "clientId" {
 		t.Fatalf("defaults: %+v", m.OAuth2)
 	}
 	list, _ := HTTPModuleNodes(m, "test")

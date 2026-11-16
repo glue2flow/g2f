@@ -21,7 +21,7 @@ config:
   - name: apiKey
     label: Default API key
     type: secret
-    description: Organization-wide Mistral API key, used when a node does not set its own.
+    description: Organization-wide Mistral API key, used by nodes without a credential.
   - name: apiBaseUrl
     label: API base URL
     default: https://api.mistral.ai
@@ -32,12 +32,17 @@ vars:
     label: Default model
     description: Model used by Chat nodes unless they set another one, e.g. mistral-small-latest.
 
-# Per-node parameters shared by all nodes.
-params:
-  - name: apiKey
-    label: API key
-    type: secret
-    description: Your own Mistral API key. Leave empty to use the organization's default key.
+# Users store their own API key once as a credential (Connections page) and
+# pick it in nodes; the plugin receives it as `credential`. Nodes without a
+# credential use the organization's default key above.
+credentials:
+  optional: true
+  fields:
+    - name: apiKey
+      label: API key
+      type: secret
+      required: true
+      description: Your Mistral API key (console.mistral.ai → API Keys).
 
 nodes:
   - type: chat

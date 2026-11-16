@@ -1,0 +1,281 @@
+# Google Drive (API v3) via OAuth2. Users connect their own Google account; glue2flow
+# stores and refreshes the tokens and adds them to requests to www.googleapis.com.
+# File metadata and folders only: there is no upload or download of binary content, but
+# Google Docs, Sheets and Slides can be exported as text.
+#
+# Setup (once per organization, by an admin):
+#   1. Google Cloud console -> APIs & Services: enable the "Google Drive API".
+#   2. OAuth consent screen: add the scope .../auth/drive. It is a "restricted" scope: apps
+#      that are not only used inside your own Google Workspace organization (set the
+#      consent screen to "Internal") need Google's verification. The narrower
+#      .../auth/drive.file scope only sees files created by this app, which is not
+#      enough for searching and managing existing files.
+#   3. Credentials -> Create OAuth client ID -> "Web application".
+#      Authorized redirect URI: <G2F_PUBLIC_URL>/oauth/callback
+#   4. glue2flow -> Plugins -> Google Drive -> Settings: enter client ID and secret.
+# The other Google modules can use the same OAuth client.
+module: google-drive
+name: Google Drive
+version: 1.0.0
+description: Search, organize and share files and folders in Google Drive
+color: "#0066da"
+baseUrl: https://www.googleapis.com/drive/v3
+
+config:
+  - name: clientId
+    label: OAuth client ID
+    description: From Google Cloud console (Web application client).
+  - name: clientSecret
+    label: OAuth client secret
+    type: secret
+
+oauth2:
+  authorizeUrl: https://accounts.google.com/o/oauth2/v2/auth
+  tokenUrl: https://oauth2.googleapis.com/token
+  scopes:
+    - https://www.googleapis.com/auth/drive
+    - openid
+    - email
+  pkce: true
+  authorizeParams:
+    access_type: offline # returns a refresh token
+    prompt: consent
+  userInfo:
+    url: https://openidconnect.googleapis.com/v1/userinfo
+    field: email
+  apiHosts: [www.googleapis.com]
+
+nodes:
+  - type: list
+    name: List Files
+    description: Search files and folders (one item per file). Shared drives are included.
+    params:
+      - { name: nameContains, label: Name contains }
+      - { name: folderId, label: In folder, description: "Folder ID, or root for My Drive. Empty searches everywhere." }
+      - { name: mimeType, label: MIME type, placeholder: application/vnd.google-apps.folder, description: "Only files of this type, e.g. application/pdf." }
+      - { name: query, label: Drive query (advanced), description: "Added with AND, e.g. modifiedTime > '2026-01-01T00:00:00' and starred = true" }
+      - { name: includeTrashed, label: Include trashed files, type: boolean, default: false }
+      - name: orderBy
+        label: Sort by
+        type: select
+        default: modifiedTime desc
+        options:
+          - { label: Modified (newest first), value: modifiedTime desc }
+          - { label: Modified (oldest first), value: modifiedTime }
+          - { label: Name, value: name }
+          - { label: Created (newest first), value: createdTime desc }
+      - { name: pageSize, label: Max files, type: number, default: 50, description: At most 1000. }
+    request:
+      method: GET
+      path: /files
+      query:
+        q: >-
+          {{ join(filter([
+               (params.nameContains ?? '') != '' ? 'name contains \'' + replace(replace(params.nameContains, '\\', '\\\\'), '\'', '\\\'') + '\'' : '',
+               (params.folderId ?? '') != '' ? '\'' + replace(params.folderId, '\'', '') + '\' in parents' : '',
+               (params.mimeType ?? '') != '' ? 'mimeType = \'' + replace(params.mimeType, '\'', '') + '\'' : '',
+               params.includeTrashed ? '' : 'trashed = false',
+               params.query ?? ''
+             ], # != ''), ' and ') }}
+        orderBy: "{{ params.orderBy }}"
+        pageSize: "{{ params.pageSize }}"
+        fields: "files(id,name,mimeType,parents,size,createdTime,modifiedTime,webViewLink,trashed,driveId,owners(emailAddress))"
+        supportsAllDrives: true
+        includeItemsFromAllDrives: true
+    output: &files >-
+      {{ map(response.body.files ?? [], ({
+           id: .id, name: .name, mimeType: .mimeType, isFolder: .mimeType == 'application/vnd.google-apps.folder',
+           parents: .parents ?? [], size: .size, createdTime: .createdTime, modifiedTime: .modifiedTime,
+           webViewLink: .webViewLink, trashed: .trashed ?? false, driveId: .driveId, owner: .owners[0].emailAddress
+         })) }}
+    outputSchema:
+      fields: &fileFields
+        - { path: id, type: string, description: File ID }
+        - { path: name, type: string }
+        - { path: mimeType, type: string }
+        - { path: isFolder, type: boolean }
+        - { path: parents, type: array, description: IDs of the parent folders }
+        - { path: size, type: string, description: Size in bytes (empty for Google Docs and folders) }
+        - { path: createdTime, type: string }
+        - { path: modifiedTime, type: string }
+        - { path: webViewLink, type: string, description: Opens the file in Google Drive }
+        - { path: trashed, type: boolean }
+        - { path: driveId, type: string, description: Set for files in a shared drive }
+        - { path: owner, type: string, description: Email address of the owner }
+
+  - type: get
+    name: Get File
+    description: Fetch the metadata of a file or folder.
+    params:
+      - &fileId { name: fileId, label: File ID, required: true, default: "{{ json.id }}" }
+    request:
+      method: GET
+      path: /files/{{ params.fileId }}
+      query: &fileQuery
+        fields: "id,name,mimeType,parents,size,createdTime,modifiedTime,webViewLink,trashed,driveId,owners(emailAddress)"
+        supportsAllDrives: true
+    output: &file >-
+      {{ let f = response.body; {
+           id: f.id, name: f.name, mimeType: f.mimeType, isFolder: f.mimeType == 'application/vnd.google-apps.folder',
+           parents: f.parents ?? [], size: f.size, createdTime: f.createdTime, modifiedTime: f.modifiedTime,
+           webViewLink: f.webViewLink, trashed: f.trashed ?? false, driveId: f.driveId, owner: f.owners[0].emailAddress
+         } }}
+    outputSchema:
+      fields: *fileFields
+
+  - type: createFolder
+    name: Create Folder
+    description: Create a folder.
+    params:
+      - { name: name, label: Folder name, required: true }
+      - { name: parentId, label: Parent folder ID, description: Empty creates the folder in My Drive. }
+    request:
+      method: POST
+      path: /files
+      query: *fileQuery
+      body: >-
+        {{ (params.parentId ?? '') != ''
+             ? {name: params.name, mimeType: 'application/vnd.google-apps.folder', parents: [params.parentId]}
+             : {name: params.name, mimeType: 'application/vnd.google-apps.folder'} }}
+    output: *file
+    outputSchema:
+      fields: *fileFields
+
+  - type: copy
+    name: Copy File
+    description: Copy a file (not folders), e.g. to fill a Google Docs template.
+    params:
+      - *fileId
+      - { name: name, label: Name of the copy, description: Empty keeps "Copy of ...". }
+      - { name: parentId, label: Target folder ID, description: Empty puts the copy next to the original. }
+    request:
+      method: POST
+      path: /files/{{ params.fileId }}/copy
+      query: *fileQuery
+      body: >-
+        {{ fromPairs(filter(toPairs({name: params.name, parents: (params.parentId ?? '') != '' ? [params.parentId] : nil}), #[1] != '' && #[1] != nil)) }}
+    output: *file
+    outputSchema:
+      fields: *fileFields
+
+  - type: update
+    name: Rename or Move File
+    description: Rename a file or folder and/or move it to another folder.
+    params:
+      - *fileId
+      - { name: name, label: New name, description: Empty keeps the name. }
+      - { name: addParent, label: Move to folder ID, description: Folder to move the file into. }
+      - { name: removeParent, label: Remove from folder ID, description: "Folder the file is moved out of (see the parents field of Get File)." }
+    request:
+      method: PATCH
+      path: /files/{{ params.fileId }}
+      query:
+        fields: "id,name,mimeType,parents,size,createdTime,modifiedTime,webViewLink,trashed,driveId,owners(emailAddress)"
+        supportsAllDrives: true
+        addParents: "{{ params.addParent }}"
+        removeParents: "{{ params.removeParent }}"
+      body: >-
+        {{ fromPairs(filter(toPairs({name: params.name}), #[1] != '' && #[1] != nil)) }}
+    output: *file
+    outputSchema:
+      fields: *fileFields
+
+  - type: trash
+    name: Move to Trash
+    description: Move a file or folder to the trash (can be restored).
+    params:
+      - *fileId
+    request:
+      method: PATCH
+      path: /files/{{ params.fileId }}
+      query: *fileQuery
+      body:
+        trashed: true
+    output: *file
+    outputSchema:
+      fields: *fileFields
+
+  - type: delete
+    name: Delete Permanently
+    description: Delete a file or folder immediately, skipping the trash. This cannot be undone.
+    params:
+      - *fileId
+    request:
+      method: DELETE
+      path: /files/{{ params.fileId }}
+      query:
+        supportsAllDrives: true
+    output: "{{ {id: params.fileId, deleted: response.status == 204} }}"
+    outputSchema:
+      fields:
+        - { path: id, type: string }
+        - { path: deleted, type: boolean }
+
+  - type: share
+    name: Share File
+    description: Give a user, group, domain or everyone access to a file or folder.
+    params:
+      - *fileId
+      - name: type
+        label: Share with
+        type: select
+        default: user
+        options:
+          - { label: A user (email address), value: user }
+          - { label: A group (email address), value: group }
+          - { label: A whole domain, value: domain }
+          - { label: Anyone with the link, value: anyone }
+      - { name: target, label: Email or domain, description: 'Email address (user, group) or domain name. Not used for "anyone".' }
+      - name: role
+        label: Access
+        type: select
+        default: reader
+        options:
+          - { label: Viewer, value: reader }
+          - { label: Commenter, value: commenter }
+          - { label: Editor, value: writer }
+      - { name: sendNotification, label: Send notification email, type: boolean, default: true }
+      - { name: message, label: Message, type: text, description: Added to the notification email. }
+    request:
+      method: POST
+      path: /files/{{ params.fileId }}/permissions
+      query:
+        supportsAllDrives: true
+        sendNotificationEmail: "{{ params.type == 'user' || params.type == 'group' ? params.sendNotification : '' }}"
+        emailMessage: "{{ params.message }}"
+      body: >-
+        {{ params.type == 'anyone' ? {type: 'anyone', role: params.role} :
+           (params.type == 'domain' ? {type: 'domain', role: params.role, domain: params.target} :
+             {type: params.type, role: params.role, emailAddress: params.target}) }}
+    output: "{{ {fileId: params.fileId, permissionId: response.body.id, type: response.body.type, role: response.body.role} }}"
+    outputSchema:
+      fields:
+        - { path: fileId, type: string }
+        - { path: permissionId, type: string }
+        - { path: type, type: string }
+        - { path: role, type: string }
+
+  - type: exportText
+    name: Export Doc as Text
+    description: Export a Google Doc (plain text), Sheet (CSV, first sheet) or Slides deck (plain text) as text. Up to 10 MB.
+    params:
+      - *fileId
+      - name: mimeType
+        label: Format
+        type: select
+        default: text/plain
+        options:
+          - { label: "Plain text (Docs, Slides)", value: text/plain }
+          - { label: "CSV, first sheet (Sheets)", value: text/csv }
+          - { label: HTML (Docs), value: text/html }
+    request:
+      method: GET
+      path: /files/{{ params.fileId }}/export
+      query:
+        mimeType: "{{ params.mimeType }}"
+    output: "{{ {id: params.fileId, mimeType: params.mimeType, text: response.body} }}"
+    outputSchema:
+      fields:
+        - { path: id, type: string }
+        - { path: mimeType, type: string }
+        - { path: text, type: string, description: The exported content }

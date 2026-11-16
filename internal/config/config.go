@@ -10,6 +10,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/glue2flow/g2f/internal/netguard"
+	"github.com/glue2flow/g2f/internal/plugin/signing"
 )
 
 // demoSecretKeys are published in this repository (docker-compose.yml and the
@@ -43,6 +46,12 @@ type Config struct {
 	SecretKeysOld []string
 	// PluginSync is how often imported plugins are re-read from the database.
 	PluginSync time.Duration
+	// PluginTrustedKeys are the publishers whose plugin signatures are accepted.
+	PluginTrustedKeys signing.Keys
+	// PluginRequireSigned refuses plugins without a valid trusted signature.
+	PluginRequireSigned bool
+	// PluginCatalogs are the index URLs of plugin catalogs.
+	PluginCatalogs []string
 	// TrustedProxies are the reverse proxies whose X-Forwarded-For header is
 	// believed when determining client addresses (rate limits, logs).
 	TrustedProxies []netip.Prefix
@@ -54,6 +63,12 @@ type Config struct {
 	// ExpressionMaxSteps is the number of predicate iterations (all, filter,
 	// map, ...) one expression evaluation may run.
 	ExpressionMaxSteps int
+	// HTTPAllowPrivate lets workflow HTTP requests reach private and local
+	// addresses (SSRF protection off).
+	HTTPAllowPrivate bool
+	// HTTPAllowed are exceptions to the private network block: IPs, CIDRs and
+	// host names.
+	HTTPAllowed netguard.AllowList
 
 	// InstanceTimeout: how long an instance may miss heartbeats before other
 	// instances take over its running executions.
@@ -72,6 +87,14 @@ type Config struct {
 	WebhookMaxWait time.Duration
 	// MaxStoredItems caps how many items per node output are persisted with an execution.
 	MaxStoredItems int
+
+	// MailPush lets mail triggers be woken by IMAP IDLE, Gmail push and
+	// Microsoft Graph notifications instead of only polling.
+	MailPush bool
+	// IMAPIdleMax caps the IMAP IDLE connections one replica keeps open.
+	IMAPIdleMax int
+	// PollWorkers bounds the polling checks running at once per replica.
+	PollWorkers int
 }
 
 type AuthConfig struct {
@@ -150,6 +173,18 @@ func Load() (*Config, error) {
 	if c.PluginSync, err = time.ParseDuration(env("G2F_PLUGIN_SYNC", "30s")); err != nil {
 		return nil, fmt.Errorf("G2F_PLUGIN_SYNC: %w", err)
 	}
+	if c.PluginTrustedKeys, err = signing.ParseKeys(env("G2F_PLUGIN_TRUSTED_KEYS", "")); err != nil {
+		return nil, fmt.Errorf("G2F_PLUGIN_TRUSTED_KEYS: %w", err)
+	}
+	if c.PluginRequireSigned, err = strconv.ParseBool(env("G2F_PLUGIN_REQUIRE_SIGNED", "false")); err != nil {
+		return nil, fmt.Errorf("G2F_PLUGIN_REQUIRE_SIGNED must be true or false")
+	}
+	if c.PluginRequireSigned && len(c.PluginTrustedKeys) == 0 {
+		return nil, fmt.Errorf("G2F_PLUGIN_REQUIRE_SIGNED=true needs at least one key in G2F_PLUGIN_TRUSTED_KEYS")
+	}
+	if c.PluginCatalogs, err = parseCatalogs(env("G2F_PLUGIN_CATALOGS", "")); err != nil {
+		return nil, fmt.Errorf("G2F_PLUGIN_CATALOGS: %w", err)
+	}
 	c.DisableCodeNode = env("G2F_DISABLE_CODE_NODE", "false") == "true"
 	if c.CodeMemoryMB, err = envInt("G2F_CODE_MEMORY_MB", 128); err != nil {
 		return nil, err
@@ -162,6 +197,25 @@ func Load() (*Config, error) {
 	}
 	if c.ExpressionMaxSteps <= 0 {
 		return nil, fmt.Errorf("G2F_EXPRESSION_MAX_STEPS must be greater than 0")
+	}
+	c.HTTPAllowPrivate = env("G2F_HTTP_ALLOW_PRIVATE", "false") == "true"
+	if c.HTTPAllowed, err = netguard.ParseAllowList(splitList(env("G2F_HTTP_ALLOWED_HOSTS", ""))); err != nil {
+		return nil, fmt.Errorf("G2F_HTTP_ALLOWED_HOSTS: %w", err)
+	}
+	if c.MailPush, err = strconv.ParseBool(env("G2F_MAIL_PUSH", "true")); err != nil {
+		return nil, fmt.Errorf("G2F_MAIL_PUSH must be true or false")
+	}
+	if c.IMAPIdleMax, err = envInt("G2F_IMAP_IDLE_MAX", 50); err != nil {
+		return nil, err
+	}
+	if c.IMAPIdleMax < 0 {
+		return nil, fmt.Errorf("G2F_IMAP_IDLE_MAX must not be negative")
+	}
+	if c.PollWorkers, err = envInt("G2F_POLL_WORKERS", 8); err != nil {
+		return nil, err
+	}
+	if c.PollWorkers < 1 {
+		return nil, fmt.Errorf("G2F_POLL_WORKERS must be at least 1")
 	}
 	if c.InstanceTimeout, err = time.ParseDuration(env("G2F_INSTANCE_TIMEOUT", "30s")); err != nil {
 		return nil, fmt.Errorf("G2F_INSTANCE_TIMEOUT: %w", err)
@@ -254,6 +308,26 @@ func splitList(s string) []string {
 		}
 	}
 	return out
+}
+
+// parseCatalogs parses catalog index URLs. They must be https; plain http is
+// accepted for localhost, where nobody in between can change the index.
+func parseCatalogs(s string) ([]string, error) {
+	var out []string
+	for _, raw := range splitList(s) {
+		u, err := url.Parse(raw)
+		if err != nil || u.Host == "" || (u.Scheme != "https" && u.Scheme != "http") {
+			return nil, fmt.Errorf("%q is not an http(s) URL", raw)
+		}
+		if u.Scheme == "http" && !isLocalURL(raw) {
+			return nil, fmt.Errorf("%q must use https", raw)
+		}
+		if u.User != nil {
+			return nil, fmt.Errorf("%q must not contain credentials", raw)
+		}
+		out = append(out, raw)
+	}
+	return out, nil
 }
 
 // parseProxies parses a comma separated list of CIDRs and single IPs.

@@ -29,6 +29,9 @@ Besides the expr builtins (`toBase64`, `fromJSON`, `map`, …) there are a few h
 | Function | Result |
 | --- | --- |
 | `toBase64Url(s)` / `fromBase64Url(s)` | URL-safe base64 (fromBase64Url also takes standard base64; nil → `""`) |
+| `urlEncode(s)` | query-component escaping (`a b/c` → `a+b%2Fc`), for text built into a URL query or form body |
+| `pathEscape(s)` | escapes `s` as one path segment (`a b/c` → `a%20b%2Fc`) |
+| `rawPath(s)` | only for manifest `path` templates: inserts `s` unescaped, see [HTTP modules](http-modules.md#path-values-are-escaped) |
 | `emailAddresses(v)` | `"a@x.com, \"Doe, Jane\" <j@x.com>"` or an array → `[{name, address}]` |
 | `mimeMessage({from, to, cc, bcc, replyTo, subject, text, html, headers, attachments})` | a complete RFC 5322 e-mail (UTF-8, multipart when needed); attachments are `[{filename, content (base64), contentType}]` |
 

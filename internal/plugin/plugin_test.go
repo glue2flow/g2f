@@ -14,9 +14,12 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/glue2flow/g2f/internal/engine"
+	"github.com/glue2flow/g2f/internal/netguard"
 	"github.com/glue2flow/g2f/internal/nodes"
 	"github.com/glue2flow/g2f/internal/store"
 	"github.com/glue2flow/g2f/internal/workflow"
@@ -75,6 +78,7 @@ type memStore struct {
 	plugins map[string]*store.PluginRecord
 	execs   map[string]store.Execution
 	n       int
+	saveErr error // returned by SavePlugin when set
 }
 
 func newMemStore() *memStore {
@@ -101,10 +105,19 @@ func (m *memStore) PluginDigests(context.Context) (map[string]string, error) {
 	return out, nil
 }
 
-func (m *memStore) SavePlugin(_ context.Context, p *store.PluginRecord) error {
+func (m *memStore) SavePlugin(_ context.Context, p *store.PluginRecord, replace bool) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.plugins[p.Module] = p
+	if m.saveErr != nil {
+		return m.saveErr
+	}
+	if _, ok := m.plugins[p.Module]; ok && !replace {
+		return store.ErrPluginExists
+	}
+	c := *p
+	c.InstalledAt = time.Now().UTC()
+	p.InstalledAt = c.InstalledAt
+	m.plugins[p.Module] = &c
 	return nil
 }
 
@@ -203,7 +216,7 @@ func TestTelegramWasmPlugin(t *testing.T) {
 	st := newMemStore()
 	mgr := NewManager(reg, st, discard)
 
-	info, err := mgr.Import(context.Background(), "telegram.zip", sampleZip(t, "127.0.0.1"), "alice")
+	info, err := mgr.Import(context.Background(), "telegram.zip", sampleZip(t, "127.0.0.1"), "alice", ImportOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -286,7 +299,7 @@ func TestWasmSandboxBlocksOtherHosts(t *testing.T) {
 	_ = nodes.RegisterBuiltins(reg)
 	mgr := NewManager(reg, newMemStore(), discard)
 	// Only api.telegram.org is allowed; the fake server on 127.0.0.1 is not.
-	if _, err := mgr.Import(context.Background(), "telegram.zip", sampleZip(t, "api.telegram.org"), "alice"); err != nil {
+	if _, err := mgr.Import(context.Background(), "telegram.zip", sampleZip(t, "api.telegram.org"), "alice", ImportOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	res := runTelegram(t, reg, fakeSecrets{config: map[string]any{"botToken": "s3cr3t-token", "apiBaseUrl": srv.URL}}, "42")
@@ -316,5 +329,54 @@ func TestParseBundleRejects(t *testing.T) {
 		if _, err := ParseBundle(name, []byte(data)); err == nil {
 			t.Errorf("%s: expected error", name)
 		}
+	}
+}
+
+// The allowedHosts of a plugin also apply to every redirect hop.
+func TestWasmRedirectLeavesAllowedHosts(t *testing.T) {
+	_, tokens := fakeTelegram(t)
+	var reached atomic.Int32
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { reached.Add(1) }))
+	defer target.Close()
+	redirector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// localhost is not in allowedHosts (127.0.0.1 is).
+		http.Redirect(w, r, strings.Replace(target.URL, "127.0.0.1", "localhost", 1)+"/x", http.StatusTemporaryRedirect)
+	}))
+	defer redirector.Close()
+
+	reg := nodes.NewRegistry()
+	_ = nodes.RegisterBuiltins(reg)
+	mgr := NewManager(reg, newMemStore(), discard)
+	if _, err := mgr.Import(context.Background(), "telegram.zip", sampleZip(t, "127.0.0.1"), "alice", ImportOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	res := runTelegram(t, reg, fakeSecrets{config: map[string]any{"botToken": "tok", "apiBaseUrl": redirector.URL}}, "42")
+	if res.Execution.Status != store.StatusError || !strings.Contains(res.Execution.Error, "not allowed by the plugin's allowedHosts") {
+		t.Fatalf("expected the redirect to be refused, got %q", res.Execution.Error)
+	}
+	if reached.Load() != 0 || len(*tokens) != 0 {
+		t.Fatal("redirect target was reached")
+	}
+}
+
+// Plugin HTTP goes through the SSRF guard even for hosts in allowedHosts.
+func TestWasmHTTPBlocksPrivateAddresses(t *testing.T) {
+	srv, tokens := fakeTelegram(t)
+	old := netguard.CurrentPolicy()
+	netguard.SetPolicy(netguard.Policy{})
+	t.Cleanup(func() { netguard.SetPolicy(old) })
+
+	reg := nodes.NewRegistry()
+	_ = nodes.RegisterBuiltins(reg)
+	mgr := NewManager(reg, newMemStore(), discard)
+	if _, err := mgr.Import(context.Background(), "telegram.zip", sampleZip(t, "127.0.0.1"), "alice", ImportOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	res := runTelegram(t, reg, fakeSecrets{config: map[string]any{"botToken": "tok", "apiBaseUrl": srv.URL}}, "42")
+	if res.Execution.Status != store.StatusError || !strings.Contains(res.Execution.Error, "private and local addresses are not allowed") {
+		t.Fatalf("expected the guard to block, got %q", res.Execution.Error)
+	}
+	if len(*tokens) != 0 {
+		t.Fatal("request reached the server")
 	}
 }

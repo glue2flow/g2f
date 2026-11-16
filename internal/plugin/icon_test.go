@@ -34,7 +34,7 @@ func TestImportedPluginIcons(t *testing.T) {
 
 	// Bundled with a top-level folder; the icon path is relative to plugin.yaml.
 	data := iconZip(t, map[string]string{"iconic/plugin.yaml": manifest, "iconic/img/logo.svg": iconSVG})
-	info, err := mgr.Import(ctx, "iconic.zip", data, "alice")
+	info, err := mgr.Import(ctx, "iconic.zip", data, "alice", ImportOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,11 +56,11 @@ func TestImportedPluginIcons(t *testing.T) {
 		"missing": {"plugin.yaml": manifest},
 		"script":  {"plugin.yaml": manifest, "img/logo.svg": `<svg><script>alert(1)</script></svg>`},
 	} {
-		if _, err := mgr.Import(ctx, "x.zip", iconZip(t, files), "alice"); err == nil {
+		if _, err := mgr.Import(ctx, "x.zip", iconZip(t, files), "alice", ImportOptions{}); err == nil {
 			t.Errorf("%s icon accepted", name)
 		}
 	}
-	if _, err := mgr.Import(ctx, "x.yaml", []byte(manifest), "alice"); err == nil || !strings.Contains(err.Error(), ".zip") {
+	if _, err := mgr.Import(ctx, "x.yaml", []byte(manifest), "alice", ImportOptions{}); err == nil || !strings.Contains(err.Error(), ".zip") {
 		t.Errorf("yaml upload with icon file: %v", err)
 	}
 }

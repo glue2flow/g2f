@@ -72,7 +72,10 @@ export type ParamType =
   | "workflow"
   | "workflows"
   | "connection"
-  | "formFields";
+  | "formFields"
+  /** Credential fields only: a URL on one of the module's apiHosts. */
+  | "url"
+  | "secretUrl";
 
 /** One question of a Form Trigger (see internal/nodes/form.go). */
 export interface FormFieldDef {
@@ -120,6 +123,8 @@ export interface NodeDef {
   /** Data URI of a node-specific icon; usually the module's icon is used. */
   icon?: string;
   trigger?: "manual" | "schedule" | "webhook" | "form" | "call" | "error" | "poll";
+  /** How a polling trigger can be woken up: listen (IMAP IDLE), gmail, graph. */
+  push?: string;
   dynamicOutputs?: { param: string; extra?: string[] };
   inputs: string[];
   outputs: string[];
@@ -198,6 +203,10 @@ export interface ClientConfig {
   clientId?: string;
   publicUrl: string;
   oauthRedirectUrl: string;
+  /** Plugin catalogs are configured (G2F_PLUGIN_CATALOGS). */
+  pluginCatalog?: boolean;
+  /** Only plugins signed by a trusted key can be imported (G2F_PLUGIN_REQUIRE_SIGNED). */
+  pluginRequireSigned?: boolean;
 }
 
 export const roleRank: Record<Role, number> = { viewer: 1, runner: 2, editor: 3, owner: 4 };
@@ -212,7 +221,20 @@ export interface TriggerInfo {
   webhook?: { url: string; method: string; auth: "none" | "token" | "hmac"; header?: string; respond: string };
   form?: { url: string; questions: number; protection: "none" | "captcha" | "login" | "email"; warning?: string };
   schedule?: { mode: "cron" | "once"; timezone: string; next: string[] };
-  poll?: { intervalMinutes: number; next: string };
+  poll?: { intervalMinutes: number; configuredMinutes: number; next: string; delivery?: PollDelivery };
+}
+
+/** How a polling mail trigger learns about new mail (push or polling). */
+export interface PollDelivery {
+  push: boolean;
+  /** IMAP IDLE, Gmail or Microsoft Graph. */
+  via: string;
+  since?: string;
+  renews?: string;
+  /** Why the trigger polls. */
+  reason?: string;
+  /** Pub/Sub push endpoint to configure (admins, Gmail). */
+  endpoint?: string;
 }
 
 export interface ModuleInfo {
@@ -229,9 +251,68 @@ export interface ModuleInfo {
   vars: ParamDef[];
   allowedHosts?: string[];
   oauth2?: { authorizeUrl: string; tokenUrl: string; scopes: string[]; apiHosts?: string[] };
+  /** Set for modules whose nodes use API-key credentials (see internal/nodes/credentials.go). */
+  credentials?: CredentialsSpec;
   nodes: string[];
   installedBy?: string;
   installedAt?: string;
+  /** Trusted key that signed an imported plugin; absent = unsigned. */
+  signer?: string;
+  /** Why a stored plugin is not loaded (it has no nodes then). */
+  blocked?: string;
+}
+
+/** One version of a plugin, as shown when an import would replace another. */
+export interface PluginSummary {
+  module: string;
+  name: string;
+  version?: string;
+  signer?: string;
+  blocked?: string;
+}
+
+/** Body of a 409 response to an import that needs confirmation. */
+export interface PluginConflict {
+  current: PluginSummary;
+  incoming: PluginSummary;
+}
+
+export interface CatalogPlugin {
+  module: string;
+  name: string;
+  version: string;
+  description?: string;
+  runtime?: string;
+  homepage?: string;
+  /** Key named by the entry's signature; verified on install. */
+  keyId?: string;
+  verification: "trusted" | "unknown-key" | "unsigned";
+  state: "available" | "installed" | "update" | "older" | "blocked" | "bundled";
+  installedVersion?: string;
+  installedSigner?: string;
+  installable: boolean;
+  reason?: string;
+}
+
+export interface CatalogView {
+  url: string;
+  name: string;
+  error?: string;
+  fetchedAt?: string;
+  plugins: CatalogPlugin[];
+}
+
+export interface CatalogResponse {
+  requireSigned: boolean;
+  catalogs: CatalogView[];
+}
+
+export interface CredentialsSpec {
+  /** Types: string, url (readable), secret, secretUrl (write-only). */
+  fields: ParamDef[];
+  apiHosts?: string[];
+  /** Nodes may run without a credential. */
+  optional?: boolean;
 }
 
 export interface ConfigValue extends ParamDef {
@@ -270,8 +351,11 @@ export function outputsFor(def: NodeDef | undefined, params: Record<string, unkn
 export interface Connection {
   id: string;
   module: string;
+  /** oauth2: connected account; credential: API-key credential. */
+  kind: "oauth2" | "credential";
   name: string;
   account: string;
+  instanceUrl?: string;
   ownerSub: string;
   ownerName: string;
   scope: Scope;
@@ -280,4 +364,8 @@ export interface Connection {
   expiresAt?: string;
   createdAt: string;
   canManage: boolean;
+  /** Credentials: non-secret field values. */
+  fields?: Record<string, string>;
+  /** Credentials: which secret fields hold a value (never the value). */
+  secrets?: Record<string, boolean>;
 }

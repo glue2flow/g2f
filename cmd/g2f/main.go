@@ -15,11 +15,14 @@ import (
 	"github.com/glue2flow/g2f/internal/api"
 	"github.com/glue2flow/g2f/internal/auth"
 	"github.com/glue2flow/g2f/internal/config"
+	"github.com/glue2flow/g2f/internal/credentials"
 	"github.com/glue2flow/g2f/internal/engine"
 	"github.com/glue2flow/g2f/internal/expression"
+	"github.com/glue2flow/g2f/internal/netguard"
 	"github.com/glue2flow/g2f/internal/nodes"
 	"github.com/glue2flow/g2f/internal/oauth"
 	"github.com/glue2flow/g2f/internal/plugin"
+	"github.com/glue2flow/g2f/internal/push"
 	"github.com/glue2flow/g2f/internal/secrets"
 	"github.com/glue2flow/g2f/internal/store"
 	"github.com/glue2flow/g2f/internal/trigger"
@@ -37,6 +40,10 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "healthcheck" {
 		os.Exit(healthcheck())
 	}
+	// `g2f plugin keygen|sign|verify|catalog` are tools for plugin publishers.
+	if len(os.Args) > 1 && os.Args[1] == "plugin" {
+		os.Exit(pluginCommand(os.Args[2:], os.Stdout, os.Stderr))
+	}
 
 	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	if err := run(log); err != nil {
@@ -50,6 +57,10 @@ func run(log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	// Workflow HTTP requests and WASM plugins must not reach private networks
+	// unless configured; installed before any plugin is loaded.
+	netguard.SetPolicy(netguard.Policy{AllowPrivate: cfg.HTTPAllowPrivate, Allow: cfg.HTTPAllowed})
+	netguard.InstallDefaults()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -71,6 +82,9 @@ func run(log *slog.Logger) error {
 		return err
 	}
 	plugins := plugin.NewManager(reg, st, log)
+	plugins.SetTrust(plugin.Trust{Keys: cfg.PluginTrustedKeys, RequireSigned: cfg.PluginRequireSigned})
+	log.Info("plugin signatures", "trustedKeys", len(cfg.PluginTrustedKeys), "requireSigned", cfg.PluginRequireSigned,
+		"catalogs", len(cfg.PluginCatalogs))
 	count, err := plugins.LoadDir(ctx, cfg.ModulesDir)
 	if err != nil {
 		return fmt.Errorf("load modules: %w", err)
@@ -90,19 +104,21 @@ func run(log *slog.Logger) error {
 	}
 
 	oauthMgr := oauth.NewManager(st, box, reg, sec, cfg.PublicURL)
+	creds := credentials.NewService(st, box, reg)
 	nodes.CodeNodeEnabled = !cfg.DisableCodeNode
 	nodes.CodeMemoryLimit = int64(cfg.CodeMemoryMB) << 20
 	expression.MaxSteps = int64(cfg.ExpressionMaxSteps)
 	signer := trigger.NewResumeSigner(cfg.SecretKey, cfg.PublicURL)
 	errDispatch := trigger.NewErrorDispatcher(st, nil, reg, log, cfg.PublicURL)
 	eng := engine.New(reg, st, log, engine.Options{
-		Secrets:   sec,
-		Tokens:    oauthMgr,
-		State:     st,
-		Workflows: st,
-		ResumeURL: signer.URL,
-		OnFailure: errDispatch.WorkflowFailed,
-		Workers:   cfg.Workers, Timeout: cfg.ExecutionTimeout, MaxStoredItems: cfg.MaxStoredItems,
+		Secrets:     sec,
+		Tokens:      oauthMgr,
+		Credentials: creds,
+		State:       st,
+		Workflows:   st,
+		ResumeURL:   signer.URL,
+		OnFailure:   errDispatch.WorkflowFailed,
+		Workers:     cfg.Workers, Timeout: cfg.ExecutionTimeout, MaxStoredItems: cfg.MaxStoredItems,
 	})
 
 	errDispatch.SetEngine(eng)
@@ -116,24 +132,39 @@ func run(log *slog.Logger) error {
 	defer stopRecovery()
 	go eng.RunRecovery(recoveryCtx, cfg.InstanceTimeout)
 
-	sched := trigger.NewScheduler(st, eng, reg, log, trigger.SchedulerOptions{CatchUp: cfg.ScheduleCatchUp, ExecutionRetention: cfg.ExecutionRetention})
+	sched := trigger.NewScheduler(st, eng, reg, log, trigger.SchedulerOptions{
+		CatchUp: cfg.ScheduleCatchUp, ExecutionRetention: cfg.ExecutionRetention,
+		Instance: eng.InstanceID(), CheckWorkers: cfg.PollWorkers, Health: st,
+	})
+	// Push wakes polling mail triggers (IMAP IDLE, Gmail, Microsoft Graph).
+	pushSvc := push.New(push.Options{
+		Store: st, Registry: reg, Box: box, Waker: sched.Checks(), Contexts: eng, Tokens: oauthMgr, Settings: sec, Log: log,
+		Instance: eng.InstanceID(), PublicURL: cfg.PublicURL, Enabled: cfg.MailPush, IdleMax: cfg.IMAPIdleMax,
+	})
+	log.Info("mail push", "enabled", cfg.MailPush, "imapIdleMax", cfg.IMAPIdleMax, "pollWorkers", cfg.PollWorkers)
 	schedCtx, stopSched := context.WithCancel(context.Background())
 	defer stopSched()
 	schedDone := make(chan struct{})
 	go func() { defer close(schedDone); sched.Run(schedCtx) }()
+	pushDone := make(chan struct{})
+	go func() { defer close(pushDone); pushSvc.Run(schedCtx) }()
 
 	srv := api.New(api.Deps{
 		Config: cfg, Store: st, Registry: reg, Engine: eng, Auth: authn, Logger: log,
-		Listener: sched,
+		Listener: api.Listeners{sched, pushSvc},
 		Webhooks: trigger.NewWebhookHandler(st, eng, reg, sec, log, cfg.WebhookMaxWait),
 		Forms: trigger.NewFormHandler(st, eng, reg, log, trigger.FormOptions{
 			SecretKey: cfg.SecretKey, PublicURL: cfg.PublicURL,
 			State: st, Auth: authn, Mailer: email.OrgMailer{Settings: sec.ModuleSettings},
 		}),
-		Resume:  trigger.NewResumeHandler(signer, eng, log),
-		Secrets: sec,
-		Plugins: plugins,
-		OAuth:   oauthMgr,
+		Resume:      trigger.NewResumeHandler(signer, eng, log),
+		Secrets:     sec,
+		Plugins:     plugins,
+		Catalogs:    plugin.NewCatalogs(cfg.PluginCatalogs, plugins, version),
+		OAuth:       oauthMgr,
+		Credentials: creds,
+		Push:        pushSvc.Handler(),
+		Delivery:    pushSvc,
 	})
 	go plugins.Run(schedCtx, cfg.PluginSync)
 	go eng.RunResumer(schedCtx, 2*time.Second)
@@ -160,6 +191,7 @@ func run(log *slog.Logger) error {
 	log.Info("shutting down")
 	stopSched()
 	<-schedDone
+	<-pushDone
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	_ = httpSrv.Shutdown(shutdownCtx)

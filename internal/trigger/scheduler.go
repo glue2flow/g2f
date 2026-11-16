@@ -3,6 +3,7 @@ package trigger
 
 import (
 	"context"
+	"hash/fnv"
 	"log/slog"
 	"sync"
 	"time"
@@ -20,6 +21,13 @@ type Store interface {
 	ClaimFiring(ctx context.Context, workflowID, nodeID, key string) (bool, error)
 	HasFired(ctx context.Context, workflowID, nodeID, key string) (bool, error)
 	PruneFirings(ctx context.Context, age time.Duration) (int64, error)
+	CheckStore
+}
+
+// PushHealth reports which polling triggers currently receive push
+// notifications; they are polled less often. *store.Store implements it.
+type PushHealth interface {
+	HealthyPushTriggers(ctx context.Context) ([]store.TriggerRef, error)
 }
 
 // Engine starts executions.
@@ -59,15 +67,55 @@ type SchedulerOptions struct {
 	// Resync: how often the active workflow set is reloaded from the database,
 	// which picks up changes made through other replicas.
 	Resync time.Duration
+
+	// Instance identifies this replica in check claims (engine instance id).
+	Instance string
+	// CheckWorkers bounds how many polling checks run at once on this replica.
+	CheckWorkers int
+	// Health is optional; without it every trigger polls at its interval.
+	Health PushHealth
 }
 
-// Scheduler fires schedule triggers and runs the checks of polling triggers
-// of active workflows.
+// PushSafetyNet is the longest interval between checks of a trigger whose
+// push delivery is healthy: notifications can be lost, the check catches up.
+const PushSafetyNet = 15 * time.Minute
+
+// EffectiveInterval is the interval between checks of a polling trigger
+// configured to d: while push works, at least PushSafetyNet.
+func EffectiveInterval(d time.Duration, pushHealthy bool) time.Duration {
+	if pushHealthy {
+		return max(d, PushSafetyNet)
+	}
+	return d
+}
+
+// pollOffset spreads polling triggers over their interval: a stable offset
+// per trigger, the same on every replica, so checks do not all start at the
+// same second.
+func pollOffset(workflowID, nodeID string, d time.Duration) time.Duration {
+	secs := uint64(d / time.Second)
+	if secs == 0 {
+		return 0
+	}
+	h := fnv.New64a()
+	h.Write([]byte(workflowID + "/" + nodeID))
+	return time.Duration(h.Sum64()%secs) * time.Second
+}
+
+// NextPoll returns the next scheduled check of a trigger after t.
+func NextPoll(workflowID, nodeID string, d time.Duration, t time.Time) time.Time {
+	off := pollOffset(workflowID, nodeID, d)
+	return nextSlot(t.Add(-off), d).Add(off)
+}
+
+// Scheduler fires schedule triggers and requests the checks of polling
+// triggers of active workflows.
 //
 // Every replica may run a Scheduler: each firing is claimed in the database
 // with a key derived from the scheduled time, so exactly one replica executes
-// it. Polling checks happen at times aligned to their interval (e.g. every
-// full 5 minutes), so all replicas compute the same keys.
+// it. Polling checks happen at slots aligned to their interval plus a fixed
+// offset per trigger, so all replicas compute the same slots; each slot is
+// requested once and the Checker runs it.
 type Scheduler struct {
 	store Store
 	eng   Engine
@@ -76,8 +124,11 @@ type Scheduler struct {
 	opts  SchedulerOptions
 	now   func() time.Time
 
+	checks *Checker
+
 	mu      sync.Mutex
 	entries map[string]*wfEntry // workflow id -> jobs
+	healthy map[store.TriggerRef]bool
 	wake    chan struct{}
 }
 
@@ -90,9 +141,13 @@ type job struct {
 	workflowID string
 	nodeID     string
 	sched      *nodes.Schedule // schedule triggers
-	poll       time.Duration   // polling triggers: interval
+	poll       time.Duration   // polling triggers: configured interval
+	push       bool            // polling triggers: push delivery is healthy
 	next       time.Time
 }
+
+// interval is the time between checks of a polling job.
+func (j *job) interval() time.Duration { return EffectiveInterval(j.poll, j.push) }
 
 // nextSlot returns the first multiple of d after t (counted from the zero
 // time), the same on every replica.
@@ -107,14 +162,22 @@ func NewScheduler(st Store, eng Engine, reg *nodes.Registry, log *slog.Logger, o
 	if opts.Resync <= 0 {
 		opts.Resync = 30 * time.Second
 	}
-	return &Scheduler{
+	s := &Scheduler{
 		store: st, eng: eng, reg: reg, log: log.With("component", "scheduler"), opts: opts,
-		now: time.Now, entries: map[string]*wfEntry{}, wake: make(chan struct{}, 1),
+		now: time.Now, entries: map[string]*wfEntry{}, healthy: map[store.TriggerRef]bool{}, wake: make(chan struct{}, 1),
 	}
+	s.checks = newChecker(st, st.GetWorkflow, eng, reg, s.log, opts.Instance, opts.CheckWorkers)
+	return s
 }
+
+// Checks runs the polling checks; push sources wake triggers through it.
+func (s *Scheduler) Checks() *Checker { return s.checks }
 
 // Run blocks until ctx is cancelled.
 func (s *Scheduler) Run(ctx context.Context) {
+	checksDone := make(chan struct{})
+	go func() { defer close(checksDone); s.checks.Run(ctx) }()
+	defer func() { <-checksDone }()
 	s.sync(ctx)
 	resync := time.NewTicker(s.opts.Resync)
 	defer resync.Stop()
@@ -178,15 +241,40 @@ func (s *Scheduler) poke() {
 	}
 }
 
-// sync reloads all active workflows and rebuilds changed entries.
+// sync reloads all active workflows and rebuilds changed entries, and
+// adapts poll intervals to the current push health.
 func (s *Scheduler) sync(ctx context.Context) {
 	wfs, err := s.store.ListActiveWorkflows(ctx)
 	if err != nil {
 		s.log.Error("load active workflows", "err", err)
 		return
 	}
+	var healthy map[store.TriggerRef]bool
+	if s.opts.Health != nil {
+		refs, err := s.opts.Health.HealthyPushTriggers(ctx)
+		if err != nil {
+			s.log.Error("load push health", "err", err)
+		} else {
+			healthy = map[store.TriggerRef]bool{}
+			for _, r := range refs {
+				healthy[r] = true
+			}
+		}
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if healthy != nil {
+		s.healthy = healthy
+		now := s.now()
+		for _, e := range s.entries {
+			for _, j := range e.jobs {
+				if push := healthy[store.TriggerRef{WorkflowID: j.workflowID, NodeID: j.nodeID}]; j.poll > 0 && push != j.push {
+					j.push = push
+					j.next = NextPoll(j.workflowID, j.nodeID, j.interval(), now)
+				}
+			}
+		}
+	}
 	seen := map[string]bool{}
 	for _, w := range wfs {
 		seen[w.ID] = true
@@ -215,8 +303,10 @@ func (s *Scheduler) setLocked(ctx context.Context, w *workflow.Workflow) {
 			continue
 		}
 		if s.reg.TriggerKind(n.Type) == nodes.TriggerPoll {
-			d := nodes.PollInterval(n.Params)
-			entry.jobs = append(entry.jobs, &job{workflowID: w.ID, nodeID: n.ID, poll: d, next: nextSlot(now, d)})
+			j := &job{workflowID: w.ID, nodeID: n.ID, poll: nodes.PollInterval(n.Params)}
+			j.push = s.healthy[store.TriggerRef{WorkflowID: w.ID, NodeID: n.ID}]
+			j.next = NextPoll(w.ID, n.ID, j.interval(), now)
+			entry.jobs = append(entry.jobs, j)
 			continue
 		}
 		if s.reg.TriggerKind(n.Type) != nodes.TriggerSchedule {
@@ -286,7 +376,7 @@ func (s *Scheduler) fireDue(ctx context.Context) {
 			}
 			due = append(due, firing{job: *j, scheduledAt: j.next})
 			if j.poll > 0 {
-				j.next = nextSlot(now, j.poll)
+				j.next = NextPoll(j.workflowID, j.nodeID, j.interval(), now)
 				kept = append(kept, j)
 			} else if j.sched.Mode == nodes.ScheduleCron {
 				j.next = j.sched.Next(now)
@@ -298,14 +388,31 @@ func (s *Scheduler) fireDue(ctx context.Context) {
 	s.mu.Unlock()
 
 	for _, f := range due {
+		if f.job.poll > 0 {
+			s.requestCheck(ctx, f)
+			continue
+		}
 		go s.fire(ctx, f)
 	}
 }
 
-func fireKey(sched *nodes.Schedule, at time.Time) string {
-	if sched == nil {
-		return "poll:" + at.UTC().Format(time.RFC3339)
+// requestCheck asks for the check of a polling slot. The first replica to
+// request the slot hands it to its Checker; the request is stored, so the
+// check happens even if this replica stops before running it.
+func (s *Scheduler) requestCheck(ctx context.Context, f firing) {
+	ok, err := s.store.RequestSlot(ctx, f.job.workflowID, f.job.nodeID, f.scheduledAt)
+	if err != nil {
+		if ctx.Err() == nil {
+			s.log.Error("request polling check", "workflow", f.job.workflowID, "node", f.job.nodeID, "err", err)
+		}
+		return
 	}
+	if ok {
+		s.checks.enqueue(store.TriggerRef{WorkflowID: f.job.workflowID, NodeID: f.job.nodeID})
+	}
+}
+
+func fireKey(sched *nodes.Schedule, at time.Time) string {
 	if sched.Mode == nodes.ScheduleOnce {
 		return "once:" + at.UTC().Format(time.RFC3339)
 	}
@@ -331,10 +438,6 @@ func (s *Scheduler) fire(ctx context.Context, f firing) {
 	if !w.Active {
 		return
 	}
-	if f.job.poll > 0 {
-		s.check(ctx, w, f.job.nodeID, log)
-		return
-	}
 	exec, err := s.eng.Start(ctx, engine.Request{
 		Workflow:    w,
 		TriggerType: nodes.TriggerSchedule,
@@ -351,29 +454,6 @@ func (s *Scheduler) fire(ctx context.Context, f firing) {
 		return
 	}
 	log.Info("schedule fired", "execution", exec.ID)
-}
-
-// check runs one polling check and starts a run with the new items.
-func (s *Scheduler) check(ctx context.Context, w *workflow.Workflow, nodeID string, log *slog.Logger) {
-	if n := w.Graph.Node(nodeID); n == nil || n.Disabled || s.reg.TriggerKind(n.Type) != nodes.TriggerPoll {
-		return // changed since the job was planned
-	}
-	items, err := s.eng.Poll(ctx, w, nodeID)
-	if err != nil {
-		log.Warn("polling check failed", "err", err)
-		return
-	}
-	if len(items) == 0 {
-		return
-	}
-	exec, err := s.eng.Start(ctx, engine.Request{
-		Workflow: w, TriggerType: nodes.TriggerPoll, TriggerNode: nodeID, TriggeredBy: "poll", Items: items,
-	})
-	if err != nil {
-		log.Error("start polled execution", "err", err)
-		return
-	}
-	log.Info("polling trigger found new items", "items", len(items), "execution", exec.ID)
 }
 
 // pruneExecutions deletes finished executions past the retention period in

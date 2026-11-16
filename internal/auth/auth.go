@@ -8,10 +8,12 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
 
 	"github.com/glue2flow/g2f/internal/config"
+	"github.com/glue2flow/g2f/internal/netguard"
 )
 
 // Authenticator turns bearer tokens into Users.
@@ -32,7 +34,9 @@ func New(ctx context.Context, cfg config.AuthConfig) (*Authenticator, error) {
 		// so glue2flow can boot before Keycloak is reachable.
 		jwks = cfg.Issuer + "/protocol/openid-connect/certs"
 	}
-	keySet := oidc.NewRemoteKeySet(ctx, jwks)
+	// The identity provider is configured by the administrator and may be on a
+	// private network (Keycloak in docker-compose): not subject to the SSRF guard.
+	keySet := oidc.NewRemoteKeySet(oidc.ClientContext(ctx, &http.Client{Timeout: 30 * time.Second, Transport: netguard.Unguarded()}), jwks)
 	a.verifier = oidc.NewVerifier(cfg.Issuer, keySet, &oidc.Config{
 		// Keycloak access tokens carry aud=account by default; we check azp instead.
 		SkipClientIDCheck: true,
@@ -46,7 +50,9 @@ func (a *Authenticator) Middleware(next http.Handler) http.Handler {
 		u, err := a.Authenticate(r)
 		if err != nil {
 			w.Header().Set("WWW-Authenticate", `Bearer realm="g2f"`)
-			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"error":"unauthorized"}` + "\n"))
 			return
 		}
 		next.ServeHTTP(w, r.WithContext(WithUser(r.Context(), u)))

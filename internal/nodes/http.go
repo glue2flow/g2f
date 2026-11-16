@@ -4,19 +4,22 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
+	neturl "net/url"
 	"strings"
 	"time"
 
 	"github.com/glue2flow/g2f/internal/expression"
+	"github.com/glue2flow/g2f/internal/netguard"
 )
 
 const maxResponseBody = 10 << 20 // 10 MiB
 
-var httpClient = &http.Client{Timeout: 60 * time.Second}
+// httpClient dials through the SSRF guard, for every redirect hop as well.
+var httpClient = &http.Client{Timeout: 60 * time.Second, Transport: netguard.NewTransport()}
 
 // httpRequest is shared by the HTTP Request node and declarative modules.
 type httpRequest struct {
@@ -26,13 +29,16 @@ type httpRequest struct {
 	Query   map[string]any
 	Body    any
 	Timeout time.Duration
+	// SameHostOnly refuses redirects that leave the original scheme, host or
+	// port, so credentials set by a module are never forwarded.
+	SameHostOnly bool
 }
 
 func doHTTP(ctx context.Context, r httpRequest) (Item, error) {
 	if r.Method == "" {
 		r.Method = http.MethodGet
 	}
-	u, err := url.Parse(r.URL)
+	u, err := neturl.Parse(r.URL)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
 		return nil, fmt.Errorf("invalid URL %q", r.URL)
 	}
@@ -86,7 +92,13 @@ func doHTTP(ctx context.Context, r httpRequest) (Item, error) {
 		}
 	}
 
-	resp, err := httpClient.Do(req)
+	client := httpClient
+	if r.SameHostOnly {
+		c := *httpClient
+		c.CheckRedirect = sameHostRedirect
+		client = &c
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -108,6 +120,33 @@ func doHTTP(ctx context.Context, r httpRequest) (Item, error) {
 		}
 	}
 	return Item{"status": resp.StatusCode, "headers": headers, "body": parsed}, nil
+}
+
+// sameHostRedirect follows redirects within the original origin only.
+func sameHostRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) >= 10 {
+		return errors.New("stopped after 10 redirects")
+	}
+	from, to := via[0].URL, req.URL
+	if from.Scheme != to.Scheme || !sameHostPort(from, to) {
+		return fmt.Errorf("redirect from %s to %s refused: module credentials are only sent to the configured API host", from.Host, to.Host)
+	}
+	return nil
+}
+
+func sameHostPort(a, b *neturl.URL) bool {
+	return strings.EqualFold(a.Hostname(), b.Hostname()) && portOf(a) == portOf(b)
+}
+
+// portOf returns the explicit port or the default of the scheme.
+func portOf(u *neturl.URL) string {
+	if p := u.Port(); p != "" {
+		return p
+	}
+	if u.Scheme == "http" {
+		return "80"
+	}
+	return "443"
 }
 
 func toMap(v any) (map[string]any, error) {

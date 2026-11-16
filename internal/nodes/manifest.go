@@ -2,8 +2,10 @@ package nodes
 
 import (
 	"fmt"
+	"net"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -58,6 +60,11 @@ type Manifest struct {
 	// token to the plugin; workflow editors never see it.
 	OAuth2 *OAuth2Spec `yaml:"oauth2"`
 
+	// Credentials lets users store API keys (or other account settings) once
+	// as a named, shareable credential and pick it in nodes, for services
+	// without OAuth2. A module uses either oauth2 or credentials.
+	Credentials *CredentialsSpec `yaml:"credentials"`
+
 	// wasm runtime
 	Wasm         string   `yaml:"wasm"`         // file name inside the bundle (default plugin.wasm)
 	AllowedHosts []string `yaml:"allowedHosts"` // hosts the plugin may call over HTTP
@@ -84,7 +91,15 @@ type OAuth2Spec struct {
 	// UserInfo optionally names the connected account (e.g. its email).
 	UserInfo *OAuth2UserInfo `yaml:"userInfo" json:"-"`
 	// APIHosts receive the access token (http runtime). Default: baseUrl host.
+	// Entries are hosts, optionally with a port ("api.example.com:8443"), or
+	// wildcards for subdomains ("*.example.com", at least two labels after the
+	// "*."). The scheme must be https and the port 443 unless an entry names one.
 	APIHosts []string `yaml:"apiHosts" json:"apiHosts"`
+	// InstanceURLField names the token response field that holds the API base
+	// URL of the account (e.g. instance_url at Salesforce). It is stored with
+	// the connection and available to manifest templates as
+	// {{ oauth.instanceUrl }}. It must be an https origin allowed by APIHosts.
+	InstanceURLField string `yaml:"instanceUrlField" json:"-"`
 }
 
 type OAuth2UserInfo struct {
@@ -92,8 +107,8 @@ type OAuth2UserInfo struct {
 	Field string `yaml:"field"` // top-level field of the JSON response, e.g. email
 }
 
-// ConnectionParam is the name of the parameter that OAuth2 modules add to
-// every node; it holds the id of the connected account to use.
+// ConnectionParam is the name of the parameter that OAuth2 and credential
+// modules add to every node; it holds the id of the connection to use.
 const ConnectionParam = "connection"
 
 type ManifestNode struct {
@@ -114,6 +129,9 @@ type ManifestNode struct {
 	// PollKey (http runtime) identifies items, e.g. {{ json.id }}: items whose
 	// key was emitted before are not new. Go modules track new items themselves.
 	PollKey string `yaml:"pollKey"`
+	// Push lets the trigger's source wake it up instead of waiting for the
+	// next check (see PushSpec).
+	Push *PushSpec `yaml:"push"`
 
 	// http runtime
 	Request ManifestRequest `yaml:"request"`
@@ -139,8 +157,17 @@ var (
 	nameRe   = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_.-]{0,63}$`)
 )
 
+// ValidModuleName reports whether name can be a plugin's module name.
+func ValidModuleName(name string) bool { return moduleRe.MatchString(name) && !reservedModules[name] }
+
 // reservedModules cannot be used by plugins because built-in node types use them.
 var reservedModules = map[string]bool{BuiltinModule: true, "core": true, "trigger": true, "logic": true, "flow": true, "data": true}
+
+// Limits of WASM plugins per node run.
+const (
+	MaxWasmTimeout  = 5 * time.Minute
+	MaxWasmMemoryMB = 1024
+)
 
 // ParseManifest decodes and validates a manifest.
 func ParseManifest(raw []byte) (*Manifest, error) {
@@ -177,16 +204,33 @@ func (m *Manifest) validate() error {
 		m.Wasm = "plugin.wasm"
 	}
 	if m.Timeout != "" {
-		if _, err := time.ParseDuration(m.Timeout); err != nil {
+		d, err := time.ParseDuration(m.Timeout)
+		if err != nil {
 			return fmt.Errorf("timeout: %w", err)
 		}
+		if d <= 0 || d > MaxWasmTimeout {
+			return fmt.Errorf("timeout must be positive and at most %s", MaxWasmTimeout)
+		}
+	}
+	// One node run of an imported plugin must not be able to claim the
+	// server's memory or a worker for an unbounded time.
+	if m.MemoryMB < 0 || m.MemoryMB > MaxWasmMemoryMB {
+		return fmt.Errorf("memoryMB must be between 1 and %d", MaxWasmMemoryMB)
 	}
 	if len(m.Nodes) == 0 {
 		return fmt.Errorf("at least one node is required")
 	}
+	if m.OAuth2 != nil && m.Credentials != nil {
+		return fmt.Errorf("a module uses either oauth2 or credentials, not both")
+	}
 	if m.OAuth2 != nil {
 		if err := m.validateOAuth2(); err != nil {
 			return fmt.Errorf("oauth2: %w", err)
+		}
+	}
+	if m.Credentials != nil {
+		if err := m.validateCredentials(); err != nil {
+			return fmt.Errorf("credentials: %w", err)
 		}
 	}
 	if err := normalizeParams(m.Config, "config"); err != nil {
@@ -254,6 +298,19 @@ func (m *Manifest) validate() error {
 		default:
 			return fmt.Errorf("node %s: unknown trigger %q (supported: poll)", n.Type, n.Trigger)
 		}
+		if n.Push != nil {
+			if n.Trigger != string(TriggerPoll) {
+				return fmt.Errorf("node %s: push requires trigger: poll", n.Type)
+			}
+			if err := n.Push.validate(m); err != nil {
+				return fmt.Errorf("node %s: push: %w", n.Type, err)
+			}
+			for _, p := range n.Params {
+				if p.Name == DeliveryParam {
+					return fmt.Errorf("node %s: parameter %q is reserved", n.Type, DeliveryParam)
+				}
+			}
+		}
 		if len(n.Inputs) == 0 && n.Trigger == "" {
 			n.Inputs = []string{"main"}
 		}
@@ -310,14 +367,95 @@ func (m *Manifest) validateOAuth2() error {
 		if err != nil || u.Hostname() == "" {
 			return fmt.Errorf("apiHosts is required when the module has no baseUrl")
 		}
-		o.APIHosts = []string{u.Hostname()}
+		o.APIHosts = []string{u.Host}
 	}
+	for _, h := range o.APIHosts {
+		if err := checkAPIHost(h); err != nil {
+			return fmt.Errorf("apiHosts: %w", err)
+		}
+	}
+	if o.InstanceURLField != "" && !nameRe.MatchString(o.InstanceURLField) {
+		return fmt.Errorf("instanceUrlField %q is not a field name", o.InstanceURLField)
+	}
+	return m.checkConnectionName()
+}
+
+// checkConnectionName keeps the name of the automatic picker parameter free.
+func (m *Manifest) checkConnectionName() error {
 	for _, p := range append(append([]Param{}, m.Params...), m.Config...) {
 		if p.Name == ConnectionParam {
 			return fmt.Errorf("parameter name %q is reserved for the account picker", ConnectionParam)
 		}
 	}
 	return nil
+}
+
+// splitAPIHost splits an apiHosts entry into host and port (default 443).
+func splitAPIHost(h string) (host, port string) {
+	host, port, err := net.SplitHostPort(h)
+	if err != nil {
+		return strings.Trim(h, "[]"), "443"
+	}
+	return host, port
+}
+
+// checkAPIHost validates an apiHosts entry: a host with an optional port, or a
+// "*.suffix" wildcard with at least two labels in the suffix (never "*.com").
+func checkAPIHost(h string) error {
+	host, _ := splitAPIHost(h)
+	if _, port, err := net.SplitHostPort(h); err == nil {
+		if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
+			return fmt.Errorf("%q has an invalid port", h)
+		}
+	}
+	if host == "" || strings.ContainsAny(host, "/@?# ") {
+		return fmt.Errorf("%q is not a host", h)
+	}
+	if !strings.Contains(host, "*") {
+		return nil
+	}
+	suffix, ok := strings.CutPrefix(host, "*.")
+	if !ok || strings.Contains(suffix, "*") {
+		return fmt.Errorf("%q: a wildcard must be a prefix like *.example.com", h)
+	}
+	labels := strings.Split(suffix, ".")
+	if len(labels) < 2 {
+		return fmt.Errorf("%q: a wildcard needs at least two labels after \"*.\"", h)
+	}
+	for _, l := range labels {
+		if l == "" {
+			return fmt.Errorf("%q is not a valid wildcard host", h)
+		}
+	}
+	return nil
+}
+
+// hostMatches reports whether host (no port) matches an apiHosts host: equal,
+// or for "*.suffix" a subdomain of suffix (not suffix itself).
+func hostMatches(pattern, host string) bool {
+	if suffix, ok := strings.CutPrefix(pattern, "*"); ok && strings.HasPrefix(suffix, ".") {
+		return len(host) > len(suffix) && strings.EqualFold(host[len(host)-len(suffix):], suffix)
+	}
+	return strings.EqualFold(pattern, host)
+}
+
+// AllowsURL reports whether the access token may be sent to u: https (plain
+// http only in tests) and a host and port matching an apiHosts entry.
+func (o *OAuth2Spec) AllowsURL(u *url.URL) bool {
+	return o != nil && hostsAllow(o.APIHosts, u)
+}
+
+// hostsAllow reports whether u is https (plain http only in tests) and its
+// host and port match one of the apiHosts entries.
+func hostsAllow(hosts []string, u *url.URL) bool {
+	port := portOf(u)
+	for _, h := range hosts {
+		host, hp := splitAPIHost(h)
+		if hostMatches(host, u.Hostname()) && (allowInsecureAPIHosts || u.Scheme == "https" && hp == port) {
+			return true
+		}
+	}
+	return false
 }
 
 // checkProviderURL requires https, except for localhost (development, tests).
@@ -363,7 +501,7 @@ func (m *Manifest) Info(source string) ModuleInfo {
 	return ModuleInfo{
 		Module: m.Module, Name: m.Name, Version: m.Version, Description: m.Description,
 		Color: m.Color, Icon: m.IconURI, Runtime: m.Runtime, Source: source, Config: m.Config, Vars: m.Vars, AllowedHosts: m.AllowedHosts,
-		OAuth2: m.OAuth2,
+		OAuth2: m.OAuth2, Credentials: m.Credentials,
 	}
 }
 
@@ -376,16 +514,31 @@ func (m *Manifest) NodeDefinition(n ManifestNode, source string) Definition {
 			Description: "Connected " + m.Name + " account used by this node.",
 		})
 	}
+	if c := m.Credentials; c != nil {
+		desc := m.Name + " credential used by this node (Connections page)."
+		if c.Optional {
+			desc = "Optional " + desc
+		}
+		params = append(params, Param{
+			Name: ConnectionParam, Label: "Credential", Type: ParamConnection, Required: !c.Optional, NoExpression: true,
+			Description: desc,
+		})
+	}
 	params = append(append(params, m.Params...), n.Params...)
 	var trigger TriggerKind
 	if n.Trigger != "" {
 		trigger = TriggerKind(n.Trigger)
 		params = append(params, pollIntervalParam())
 	}
+	push := ""
+	if n.Push != nil {
+		push = n.Push.Endpoint
+		params = append(params, deliveryParam())
+	}
 	category := m.Name
 	return Definition{
 		Type: m.Module + "." + n.Type, Name: n.Name, Category: category, Description: n.Description,
 		Color: m.Color, Icon: n.IconURI, Trigger: trigger, Inputs: n.Inputs, Outputs: n.Outputs, Params: params,
-		OutputSchema: n.OutputSchema, Module: m.Module, Source: source,
+		OutputSchema: n.OutputSchema, Module: m.Module, Source: source, Push: push,
 	}
 }

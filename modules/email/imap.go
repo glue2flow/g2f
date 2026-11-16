@@ -41,6 +41,7 @@ func connectIMAP(ctx context.Context, srv server) (*client.Client, error) {
 	}
 	conn.SetDeadline(time.Time{})
 	c.Timeout = commandTimeout
+	c.ErrorLog = quiet{} // errors are returned; closed connections need no log line
 	fail := func(err error) (*client.Client, error) {
 		c.Terminate()
 		return nil, err
@@ -61,6 +62,11 @@ func connectIMAP(ctx context.Context, srv server) (*client.Client, error) {
 	}
 	return c, nil
 }
+
+type quiet struct{}
+
+func (quiet) Printf(string, ...any) {}
+func (quiet) Println(...any)        {}
 
 func closeIMAP(c *client.Client) {
 	if err := c.Logout(); err != nil {

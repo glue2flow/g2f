@@ -2,6 +2,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -17,10 +18,12 @@ import (
 
 	"github.com/glue2flow/g2f/internal/auth"
 	"github.com/glue2flow/g2f/internal/config"
+	"github.com/glue2flow/g2f/internal/credentials"
 	"github.com/glue2flow/g2f/internal/engine"
 	"github.com/glue2flow/g2f/internal/nodes"
 	"github.com/glue2flow/g2f/internal/oauth"
 	"github.com/glue2flow/g2f/internal/plugin"
+	"github.com/glue2flow/g2f/internal/push"
 	"github.com/glue2flow/g2f/internal/secrets"
 	"github.com/glue2flow/g2f/internal/store"
 	"github.com/glue2flow/g2f/internal/workflow"
@@ -31,6 +34,26 @@ import (
 type ChangeListener interface {
 	WorkflowChanged(w *workflow.Workflow)
 	WorkflowDeleted(id string)
+}
+
+// Listeners notifies several listeners.
+type Listeners []ChangeListener
+
+func (l Listeners) WorkflowChanged(w *workflow.Workflow) {
+	for _, x := range l {
+		x.WorkflowChanged(w)
+	}
+}
+
+func (l Listeners) WorkflowDeleted(id string) {
+	for _, x := range l {
+		x.WorkflowDeleted(id)
+	}
+}
+
+// DeliverySource reports how polling triggers learn about new items (push).
+type DeliverySource interface {
+	Delivery(ctx context.Context, wf *workflow.Workflow, n *workflow.Node, admin bool) *push.Delivery
 }
 
 type Server struct {
@@ -46,7 +69,11 @@ type Server struct {
 	resume   http.Handler
 	secrets  *secrets.Service
 	plugins  *plugin.Manager
+	catalogs *plugin.Catalogs
 	oauth    *oauth.Manager
+	creds    *credentials.Service
+	push     http.Handler
+	delivery DeliverySource
 }
 
 type Deps struct {
@@ -66,14 +93,23 @@ type Deps struct {
 	Resume  http.Handler
 	Secrets *secrets.Service
 	Plugins *plugin.Manager
-	OAuth   *oauth.Manager
+	// Catalogs serves plugin catalogs; optional.
+	Catalogs *plugin.Catalogs
+	OAuth    *oauth.Manager
+	// Credentials manages API-key credentials.
+	Credentials *credentials.Service
+	// Push handles /push/* (mail push notifications); optional.
+	Push http.Handler
+	// Delivery is optional; without it polling triggers report no push state.
+	Delivery DeliverySource
 }
 
 func New(d Deps) *Server {
 	return &Server{
 		cfg: d.Config, store: d.Store, reg: d.Registry, engine: d.Engine,
 		auth: d.Auth, log: d.Logger, listener: d.Listener, webhooks: d.Webhooks, forms: d.Forms,
-		secrets: d.Secrets, plugins: d.Plugins, resume: d.Resume, oauth: d.OAuth,
+		secrets: d.Secrets, plugins: d.Plugins, catalogs: d.Catalogs, resume: d.Resume, oauth: d.OAuth,
+		creds: d.Credentials, push: d.Push, delivery: d.Delivery,
 	}
 }
 
@@ -91,6 +127,7 @@ func (s *Server) Handler() http.Handler {
 
 	r.Route("/api", func(r chi.Router) {
 		r.Use(middleware.NoCache)
+		r.MethodNotAllowed(methodNotAllowed(r))
 		r.Get("/config", s.getConfig)
 		r.Group(func(r chi.Router) {
 			r.Use(s.auth.Middleware)
@@ -108,6 +145,7 @@ func (s *Server) Handler() http.Handler {
 			r.Post("/executions/{id}/cancel", s.cancelExecution)
 
 			r.Get("/connections", s.listConnections)
+			r.Post("/connections", s.createCredential)
 			r.Post("/connections/authorize", s.authorizeConnection)
 			r.Patch("/connections/{id}", s.updateConnection)
 			r.Delete("/connections/{id}", s.deleteConnection)
@@ -115,6 +153,11 @@ func (s *Server) Handler() http.Handler {
 			r.Get("/plugins", s.listPlugins)
 			r.Post("/plugins", s.importPlugin)
 			r.Delete("/plugins/{module}", s.deletePlugin)
+			if s.catalogs.Enabled() {
+				r.Get("/plugins/catalog", s.listCatalog)
+				r.Post("/plugins/catalog/refresh", s.refreshCatalog)
+				r.Post("/plugins/catalog/install", s.installFromCatalog)
+			}
 			r.Get("/plugins/{module}/config", s.getPluginConfig)
 			r.Put("/plugins/{module}/config", s.putPluginConfig)
 		})
@@ -130,9 +173,26 @@ func (s *Server) Handler() http.Handler {
 		r.Handle("/webhook-resume/*", s.resume)
 	}
 	r.Get("/oauth/callback", s.oauthCallback)
+	if s.push != nil {
+		r.Handle("/push/*", s.push)
+	}
 
 	r.NotFound(s.spa)
 	return r
+}
+
+// methodNotAllowed answers 405 in the API's JSON shape. A custom handler gets
+// no method list from chi, so Allow is rebuilt by probing the router.
+func methodNotAllowed(routes chi.Routes) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		path := chi.RouteContext(r.Context()).RoutePath
+		for _, m := range []string{http.MethodGet, http.MethodHead, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete} {
+			if routes.Match(chi.NewRouteContext(), m, path) {
+				w.Header().Add("Allow", m)
+			}
+		}
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
 }
 
 func (s *Server) requestLogger(next http.Handler) http.Handler {
@@ -141,7 +201,7 @@ func (s *Server) requestLogger(next http.Handler) http.Handler {
 		start := time.Now()
 		next.ServeHTTP(ww, r)
 		if strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/webhook/") ||
-			strings.HasPrefix(r.URL.Path, "/form/") {
+			strings.HasPrefix(r.URL.Path, "/form/") || strings.HasPrefix(r.URL.Path, "/push/") {
 			s.log.Info("http", "method", r.Method, "path", r.URL.Path, "status", ww.Status(),
 				"duration", time.Since(start).Round(time.Millisecond))
 		}
@@ -185,10 +245,17 @@ type clientConfig struct {
 	PublicURL   string          `json:"publicUrl"`
 	// OAuthRedirectURL must be registered at OAuth2 providers.
 	OAuthRedirectURL string `json:"oauthRedirectUrl"`
+	// PluginCatalog is true when plugin catalogs are configured.
+	PluginCatalog bool `json:"pluginCatalog"`
+	// PluginRequireSigned: only signed plugins can be imported.
+	PluginRequireSigned bool `json:"pluginRequireSigned"`
 }
 
 func (s *Server) getConfig(w http.ResponseWriter, _ *http.Request) {
-	c := clientConfig{AuthMode: s.cfg.Auth.Mode, PublicURL: s.cfg.PublicURL, OAuthRedirectURL: s.cfg.PublicURL + "/oauth/callback"}
+	c := clientConfig{
+		AuthMode: s.cfg.Auth.Mode, PublicURL: s.cfg.PublicURL, OAuthRedirectURL: s.cfg.PublicURL + "/oauth/callback",
+		PluginCatalog: s.catalogs.Enabled(), PluginRequireSigned: s.cfg.PluginRequireSigned,
+	}
 	if s.cfg.Auth.Mode == config.AuthOIDC {
 		// Keycloak issuers look like https://host/realms/<realm>.
 		if base, realm, ok := strings.Cut(s.cfg.Auth.Issuer, "/realms/"); ok {

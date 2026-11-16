@@ -27,6 +27,7 @@ import (
 
 	"github.com/glue2flow/g2f/internal/auth"
 	"github.com/glue2flow/g2f/internal/expression"
+	"github.com/glue2flow/g2f/internal/netguard"
 	"github.com/glue2flow/g2f/internal/nodes"
 	"github.com/glue2flow/g2f/internal/secrets"
 	"github.com/glue2flow/g2f/internal/store"
@@ -73,7 +74,7 @@ func NewManager(st Store, box *secrets.Box, reg *nodes.Registry, settings Settin
 	return &Manager{
 		store: st, box: box, reg: reg, settings: settings,
 		publicURL: strings.TrimRight(publicURL, "/"),
-		client:    &http.Client{Timeout: 30 * time.Second},
+		client:    &http.Client{Timeout: 30 * time.Second, Transport: netguard.Unguarded()},
 		now:       time.Now,
 	}
 }
@@ -205,10 +206,13 @@ func (m *Manager) Callback(ctx context.Context, code, state, nonce string) (*sto
 	}
 
 	c := &store.Connection{
-		OrgID: st.Org, Module: st.Module, Name: st.Name, OwnerSub: st.Sub, OwnerName: st.Owner,
+		OrgID: st.Org, Module: st.Module, Kind: store.KindOAuth2, Name: st.Name, OwnerSub: st.Sub, OwnerName: st.Owner,
 		Scope: "private", Groups: []string{},
 	}
 	c.ID = newID()
+	if spec.InstanceURLField != "" && tok.InstanceURL == "" {
+		return nil, fmt.Errorf("provider returned no %s", spec.InstanceURLField)
+	}
 	if err := m.applyToken(c, tok); err != nil {
 		return nil, err
 	}
@@ -225,7 +229,7 @@ func (m *Manager) Callback(ctx context.Context, code, state, nonce string) (*sto
 // expires soon. org and module must match the connection.
 func (m *Manager) Token(ctx context.Context, org, module, id string) (*nodes.OAuthToken, error) {
 	c, err := m.store.GetConnection(ctx, id)
-	if errors.Is(err, store.ErrNotFound) || (err == nil && (c.OrgID != org || c.Module != module)) {
+	if errors.Is(err, store.ErrNotFound) || (err == nil && (c.OrgID != org || c.Module != module || c.Kind == store.KindCredential)) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
@@ -251,7 +255,7 @@ func (m *Manager) Token(ctx context.Context, org, module, id string) (*nodes.OAu
 	if err != nil {
 		return nil, err
 	}
-	return &nodes.OAuthToken{AccessToken: access, TokenType: c.TokenType, Account: c.Account}, nil
+	return &nodes.OAuthToken{AccessToken: access, TokenType: c.TokenType, Account: c.Account, InstanceURL: c.InstanceURL}, nil
 }
 
 func (m *Manager) expiring(c *store.Connection) bool {
@@ -286,6 +290,7 @@ type tokenResponse struct {
 	TokenType    string
 	Scope        string
 	ExpiresIn    int64
+	InstanceURL  string // validated; set if the spec names instanceUrlField and the response has it
 }
 
 func (m *Manager) tokenRequest(ctx context.Context, spec *nodes.OAuth2Spec, app client, form url.Values) (*tokenResponse, error) {
@@ -344,7 +349,30 @@ func (m *Manager) tokenRequest(ctx context.Context, spec *nodes.OAuth2Spec, app 
 	if t.AccessToken == "" {
 		return nil, errors.New("provider returned no access token")
 	}
+	if spec.InstanceURLField != "" {
+		if raw := expression.Stringify(fields[spec.InstanceURLField]); raw != "" {
+			if t.InstanceURL, err = checkInstanceURL(spec, raw); err != nil {
+				return nil, err
+			}
+		}
+	}
 	return t, nil
+}
+
+// checkInstanceURL accepts an https origin (no userinfo, path, query or
+// fragment) whose host the module may send the token to, and returns it
+// without a trailing slash.
+func checkInstanceURL(spec *nodes.OAuth2Spec, raw string) (string, error) {
+	u, err := url.Parse(raw)
+	switch {
+	case err != nil || u.Scheme != "https" || u.Hostname() == "":
+		return "", fmt.Errorf("provider returned an invalid %s %q: it must be an https URL with a host", spec.InstanceURLField, raw)
+	case u.User != nil || (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Fragment != "" || strings.ContainsAny(raw, "?#"):
+		return "", fmt.Errorf("provider returned an invalid %s %q: it must not have credentials, a path, a query or a fragment", spec.InstanceURLField, raw)
+	case !spec.AllowsURL(u):
+		return "", fmt.Errorf("provider returned %s %q, whose host is not in the plugin's oauth2.apiHosts", spec.InstanceURLField, raw)
+	}
+	return "https://" + u.Host, nil
 }
 
 func (m *Manager) applyToken(c *store.Connection, t *tokenResponse) error {
@@ -357,6 +385,9 @@ func (m *Manager) applyToken(c *store.Connection, t *tokenResponse) error {
 		if c.RefreshToken, err = m.box.Seal(t.RefreshToken, aad(c.ID, "refresh")); err != nil {
 			return err
 		}
+	}
+	if t.InstanceURL != "" {
+		c.InstanceURL = t.InstanceURL // a refresh response may omit it: keep the stored one
 	}
 	c.TokenType = t.TokenType
 	if c.TokenType == "" {

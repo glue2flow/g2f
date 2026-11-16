@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/glue2flow/g2f/internal/config"
+	"github.com/glue2flow/g2f/internal/netguard"
 )
 
 // Server-side login (OIDC authorization code flow with PKCE) for pages that
@@ -61,7 +62,7 @@ func (a *Authenticator) tokenURL() string {
 	return a.cfg.Issuer + "/protocol/openid-connect/token"
 }
 
-var loginClient = &http.Client{Timeout: 15 * time.Second}
+var loginClient = &http.Client{Timeout: 15 * time.Second, Transport: netguard.Unguarded()}
 
 // Exchange redeems an authorization code and returns the signed-in user.
 func (a *Authenticator) Exchange(ctx context.Context, code, verifier, redirectURI string) (*User, error) {

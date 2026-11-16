@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"net/url"
 	"reflect"
 
 	"github.com/expr-lang/expr"
@@ -60,6 +61,25 @@ var functions = []expr.Option{
 		return string(b), nil
 	}, new(func(any) string)),
 
+	// urlEncode(s): query-component escaping (space becomes +), for text that
+	// is built into a URL query or form body.
+	expr.Function("urlEncode", func(params ...any) (any, error) {
+		return url.QueryEscape(Stringify(params[0])), nil
+	}, new(func(any) string)),
+
+	// pathEscape(s): escapes s as one URL path segment (space becomes %20, "/"
+	// becomes %2F). Path templates do this for every {{ }} block already; the
+	// function is for values composed inside rawPath(...).
+	expr.Function("pathEscape", func(params ...any) (any, error) {
+		return url.PathEscape(Stringify(params[0])), nil
+	}, new(func(any) string)),
+
+	// rawPath(s): in a manifest path template, inserts s unescaped (it may hold
+	// slashes or be pre-encoded). ".." segments, "?" and "#" are still refused.
+	expr.Function("rawPath", func(params ...any) (any, error) {
+		return RawPath(Stringify(params[0])), nil
+	}, new(func(any) any)),
+
 	// emailAddresses(v): parses "a@x.com, Jane <j@x.com>" (or an array) into
 	// [{name, address}], e.g. for Microsoft Graph recipients.
 	expr.Function("emailAddresses", func(params ...any) (any, error) {
@@ -93,6 +113,10 @@ var functions = []expr.Option{
 		return string(raw), nil
 	}, new(func(any) string)),
 }
+
+// RawPath is the value of rawPath(x): text that a path template inserts as is
+// instead of percent-encoding it as one segment.
+type RawPath string
 
 // uniqKey maps a value to a comparable key: equal numbers (1 and 1.0) share a
 // key, maps and slices are keyed by their JSON form.

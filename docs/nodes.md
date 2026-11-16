@@ -22,6 +22,18 @@ Calls any HTTP API, once per input item. Method, URL, headers, query and body ac
 expressions. Outputs `{status, headers, body}`; JSON bodies are parsed. By default the node
 fails on HTTP status ≥ 400.
 
+### Network access
+
+Requests to private and local addresses are blocked, so a workflow cannot reach internal
+services or the cloud metadata endpoint: loopback, `10/8`, `172.16/12`, `192.168/16`,
+link-local (`169.254/16`, `fe80::/10`), CGNAT, unique local IPv6, multicast, unspecified and
+other reserved ranges, also in IPv4-mapped form. The check runs after DNS resolution on every
+connection, so redirects and DNS tricks do not get around it. Redirects are followed (at most
+10) and each hop is checked. To reach internal services set `G2F_HTTP_ALLOWED_HOSTS` (specific
+IPs, CIDRs or host names) or turn the block off with `G2F_HTTP_ALLOW_PRIVATE=true`, see
+[Configuration](configuration.md). If an HTTP proxy is set in the environment (`HTTP_PROXY`,
+`HTTPS_PROXY`), only the connection to the proxy is checked: the proxy resolves the target.
+
 ## Set Fields
 
 Adds or overwrites fields on each item. Values may use `{{ expressions }}`. With

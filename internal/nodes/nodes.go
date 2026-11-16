@@ -51,8 +51,14 @@ const (
 	ParamWorkflow ParamType = "workflow"
 	// ParamWorkflows references several workflows (comma separated ids).
 	ParamWorkflows ParamType = "workflows"
-	// ParamConnection references a connected OAuth2 account (added automatically).
+	// ParamConnection references a connection: an OAuth2 account or an API-key
+	// credential (added automatically).
 	ParamConnection ParamType = "connection"
+	// ParamURL and ParamSecretURL are credential fields holding a URL on one
+	// of the module's apiHosts; the secret variant is write-only (e.g. a Slack
+	// incoming webhook URL).
+	ParamURL       ParamType = "url"
+	ParamSecretURL ParamType = "secretUrl"
 	// ParamDateTime is a local date-time string "YYYY-MM-DDTHH:MM".
 	ParamDateTime ParamType = "datetime"
 	// ParamFormFields is the question list of a form trigger (editor shows a form builder).
@@ -92,9 +98,12 @@ type Definition struct {
 	// (ModuleInfo.Icon); usually empty.
 	Icon    string      `json:"icon,omitempty"`
 	Trigger TriggerKind `json:"trigger,omitempty"`
-	Inputs  []string    `json:"inputs"`
-	Outputs []string    `json:"outputs"`
-	Params  []Param     `json:"params"`
+	// Push names how a polling trigger can be woken up (PushListen,
+	// PushGmail, PushGraph); empty if it only polls.
+	Push    string   `json:"push,omitempty"`
+	Inputs  []string `json:"inputs"`
+	Outputs []string `json:"outputs"`
+	Params  []Param  `json:"params"`
 	// DynamicOutputs makes the outputs depend on a parameter (e.g. Switch cases).
 	DynamicOutputs *DynamicOutputs `json:"dynamicOutputs,omitempty"`
 	// OutputSchema describes the emitted items (for the editor's field picker).
@@ -187,9 +196,13 @@ type ExecContext struct {
 	Vars map[string]any
 	// OAuth holds a valid access token of the node's connected account
 	// (OAuth2 modules only). Like Config, it is not visible to node fields.
-	OAuth  *OAuthToken
-	Env    expression.Env // shared scope: nodes, trigger, execution, workflow
-	Logger *slog.Logger
+	OAuth *OAuthToken
+	// Credential holds the field values of the node's selected credential
+	// (credential modules only; nil if none is selected). Like Config, it is
+	// not visible to node fields.
+	Credential map[string]any
+	Env        expression.Env // shared scope: nodes, trigger, execution, workflow
+	Logger     *slog.Logger
 	// Runtime is provided by the engine (sub-workflows, resume URL).
 	Runtime Runtime
 	// State is the workflow's durable key/value storage (nil if unavailable).
@@ -345,9 +358,15 @@ type ModuleInfo struct {
 	Vars         []Param     `json:"vars"`           // per-organization values usable in node fields
 	AllowedHosts []string    `json:"allowedHosts,omitempty"`
 	OAuth2       *OAuth2Spec `json:"oauth2,omitempty"`
-	Nodes        []string    `json:"nodes"`
-	InstalledBy  string      `json:"installedBy,omitempty"`
-	InstalledAt  *time.Time  `json:"installedAt,omitempty"`
+	// Credentials tells the editor which fields a credential of the module has.
+	Credentials *CredentialsSpec `json:"credentials,omitempty"`
+	Nodes       []string         `json:"nodes"`
+	InstalledBy string           `json:"installedBy,omitempty"`
+	InstalledAt *time.Time       `json:"installedAt,omitempty"`
+	// Signer is the trusted key that signed an imported plugin ("" = unsigned).
+	Signer string `json:"signer,omitempty"`
+	// Blocked says why a stored plugin is not loaded (its nodes are absent).
+	Blocked string `json:"blocked,omitempty"`
 }
 
 // BuiltinModule is the module name of nodes implemented in Go.
@@ -528,6 +547,8 @@ type OAuthToken struct {
 	AccessToken string `json:"accessToken"`
 	TokenType   string `json:"tokenType"`
 	Account     string `json:"account,omitempty"`
+	// InstanceURL is the account's API base URL (oauth2.instanceUrlField), if any.
+	InstanceURL string `json:"instanceUrl,omitempty"`
 }
 
 // AuthorizationHeader returns e.g. "Bearer <token>".

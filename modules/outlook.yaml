@@ -12,6 +12,10 @@
 #   3. Certificates & secrets -> New client secret.
 #   4. glue2flow -> Plugins -> Outlook -> Settings: enter the application (client)
 #      ID and the secret value. The Microsoft Teams module can use the same app.
+#
+# Push: with a public https G2F_PUBLIC_URL, New Email triggers subscribe to
+# Microsoft Graph change notifications (Mail.ReadWrite covers them) and
+# check right away when mail arrives. Nothing else to set up.
 module: outlook
 name: Outlook
 version: 1.0.0
@@ -262,6 +266,31 @@ nodes:
     description: Start a run when new messages arrive in a folder (one item per message, oldest first).
     trigger: poll
     pollKey: "{{ json.id }}"
+    # Graph subscriptions on mail last at most 4230 minutes.
+    push:
+      endpoint: graph
+      lifetime: 4200m
+      renewEvery: 24h
+      subscribe:
+        method: POST
+        url: https://graph.microsoft.com/v1.0/subscriptions
+        body:
+          changeType: created
+          notificationUrl: "{{ push.notificationUrl }}"
+          lifecycleNotificationUrl: "{{ push.notificationUrl }}"
+          resource: "me/mailFolders('{{ params.folder }}')/messages"
+          expirationDateTime: "{{ push.expires }}"
+          clientState: "{{ push.clientState }}"
+      renew:
+        method: PATCH
+        url: https://graph.microsoft.com/v1.0/subscriptions/{{ push.id }}
+        body:
+          expirationDateTime: "{{ push.expires }}"
+      unsubscribe:
+        method: DELETE
+        url: https://graph.microsoft.com/v1.0/subscriptions/{{ push.id }}
+      id: "{{ response.body.id }}"
+      expires: "{{ response.body.expirationDateTime }}"
     params:
       - { name: folder, label: Folder, default: inbox, description: "inbox, archive, … or a folder ID" }
       - { name: unreadOnly, label: Only unread, type: boolean, default: false }

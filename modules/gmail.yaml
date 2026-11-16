@@ -8,6 +8,11 @@
 #      Authorized redirect URI: <G2F_PUBLIC_URL>/oauth/callback
 #   4. glue2flow -> Plugins -> Gmail -> Settings: enter client ID and secret.
 # The Google Sheets module can use the same OAuth client.
+#
+# Push (optional): New Email triggers check right away when Gmail reports
+# changes through Google Cloud Pub/Sub. Set the topic below and create a push
+# subscription to the endpoint URL glue2flow shows in the trigger (admins);
+# see docs/triggers.md, "Push delivery for mail triggers".
 module: gmail
 name: Gmail
 version: 1.0.0
@@ -22,6 +27,19 @@ config:
   - name: clientSecret
     label: OAuth client secret
     type: secret
+  - name: pubsubTopic
+    label: Pub/Sub topic for push
+    placeholder: projects/my-project/topics/gmail-push
+    description: >-
+      Optional. Gmail publishes new-mail notifications to this topic, so New Email triggers react within seconds.
+      Empty: they poll. The topic needs gmail-api-push@system.gserviceaccount.com as Publisher and a push
+      subscription to the endpoint shown in the trigger.
+  - name: pushServiceAccount
+    label: Push service account
+    placeholder: gmail-push@my-project.iam.gserviceaccount.com
+    description: >-
+      Optional. If set, push requests must carry a Google-signed OIDC token of this service account
+      (push subscription with authentication enabled, audience = the endpoint URL).
 
 oauth2:
   authorizeUrl: https://accounts.google.com/o/oauth2/v2/auth
@@ -235,6 +253,22 @@ nodes:
     description: Start a run when new messages match a Gmail search (one item per message, oldest first). Follow with Get Message for the content.
     trigger: poll
     pollKey: "{{ json.id }}"
+    # Gmail watches a whole mailbox (any change notifies); the check decides
+    # what is new. Watches expire after 7 days.
+    push:
+      endpoint: gmail
+      per: connection
+      requires: [pubsubTopic]
+      renewEvery: 24h
+      subscribe:
+        method: POST
+        path: /watch
+        body:
+          topicName: "{{ config.pubsubTopic }}"
+      unsubscribe:
+        method: POST
+        path: /stop
+      expires: "{{ response.body.expiration }}"
     params:
       - name: query
         label: Search

@@ -1,4 +1,5 @@
-// Package secrets encrypts sensitive values (node secrets, plugin config) at rest.
+// Package secrets encrypts sensitive values (node secrets, plugin config,
+// credential fields) at rest.
 //
 // Values are sealed with AES-256-GCM. Every ciphertext is bound to its storage
 // location through additional authenticated data (e.g. "node/<wf>/<node>/<param>"),
@@ -104,4 +105,10 @@ func NodeAAD(workflowID, nodeID, param string) string {
 // ConfigAAD is the binding for a plugin config value of an organization.
 func ConfigAAD(org, module, key string) string {
 	return "config/" + org + "/" + module + "/" + key
+}
+
+// CredentialAAD is the binding for a secret field of an API-key credential
+// (a row of the connections table).
+func CredentialAAD(connectionID, field string) string {
+	return "conn/" + connectionID + "/field/" + field
 }

@@ -11,6 +11,7 @@ import (
 
 	extism "github.com/extism/go-sdk"
 
+	"github.com/glue2flow/g2f/internal/netguard"
 	"github.com/glue2flow/g2f/internal/nodes"
 )
 
@@ -23,7 +24,8 @@ import (
 //	  "items":  [{"json": {...}, "params": {...}, "input": "main"}],
 //	  "config": {...},                         // plugin-only settings of the organization
 //	  "vars":   {...},                         // organization variables
-//	  "oauth":  {"accessToken": "...", "tokenType": "Bearer"}, // OAuth2 plugins
+//	  "oauth":  {"accessToken": "...", "tokenType": "Bearer", "instanceUrl": "..."}, // OAuth2 plugins (instanceUrl if the provider has one)
+//	  "credential": {"apiKey": "...", ...},   // credential plugins: fields of the node's credential (absent if none selected)
 //	  "workflow":  {"id": "...", "name": "..."},
 //	  "execution": {"id": "..."}
 //	}
@@ -40,9 +42,12 @@ type wasmRequest struct {
 	Config map[string]any `json:"config"`
 	Vars   map[string]any `json:"vars"`
 	// OAuth is the connected account's access token (OAuth2 plugins only).
-	OAuth     *nodes.OAuthToken `json:"oauth,omitempty"`
-	Workflow  any               `json:"workflow,omitempty"`
-	Execution any               `json:"execution,omitempty"`
+	OAuth *nodes.OAuthToken `json:"oauth,omitempty"`
+	// Credential holds the field values of the node's credential (credential
+	// plugins only, decrypted, defaults applied).
+	Credential map[string]any `json:"credential,omitempty"`
+	Workflow   any            `json:"workflow,omitempty"`
+	Execution  any            `json:"execution,omitempty"`
 }
 
 type wasmItem struct {
@@ -69,6 +74,7 @@ const (
 type wasmModule struct {
 	compiled *extism.CompiledPlugin
 	timeout  time.Duration
+	hosts    []string // allowedHosts, re-checked on every redirect
 	log      *slog.Logger
 }
 
@@ -105,7 +111,7 @@ func compileWasm(ctx context.Context, m *nodes.Manifest, wasm []byte, log *slog.
 		compiled.Close(ctx)
 		return nil, fmt.Errorf("wasm module does not export an `execute` function")
 	}
-	return &wasmModule{compiled: compiled, timeout: timeout, log: log.With("module", m.Module)}, nil
+	return &wasmModule{compiled: compiled, timeout: timeout, hosts: m.AllowedHosts, log: log.With("module", m.Module)}, nil
 }
 
 func (w *wasmModule) close() { _ = w.compiled.Close(context.Background()) }
@@ -130,6 +136,7 @@ func (n *wasmNode) Execute(ctx context.Context, ec *nodes.ExecContext) (nodes.Ou
 	req := wasmRequest{Node: n.nodeType, Config: ec.Config, Workflow: ec.Env["workflow"], Execution: ec.Env["execution"]}
 	req.Vars = ec.Vars
 	req.OAuth = ec.OAuth
+	req.Credential = ec.Credential
 	if req.Config == nil {
 		req.Config = map[string]any{}
 	}
@@ -157,6 +164,7 @@ func (n *wasmNode) Execute(ctx context.Context, ec *nodes.ExecContext) (nodes.Ou
 		return nil, err
 	}
 
+	ctx = netguard.WithAllowedHosts(ctx, n.mod.hosts)
 	ctx, cancel := context.WithTimeout(ctx, n.mod.timeout)
 	defer cancel()
 	inst, err := n.mod.compiled.Instance(ctx, extism.PluginInstanceConfig{})

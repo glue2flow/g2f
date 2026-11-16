@@ -24,7 +24,7 @@ func send(ctx context.Context, ec *nodes.ExecContext) (nodes.Output, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Default sender: a personal account (node Username) sends as itself,
+	// Default sender: a personal account (the node's credential) sends as itself,
 	// the organization's account as the configured sender.
 	orgUser := strings.TrimSpace(expression.Stringify(ec.Config["smtpUsername"]))
 	defaultFrom := strings.TrimSpace(expression.Stringify(ec.Config["fromAddress"]))

@@ -63,7 +63,7 @@ func runShipped(t *testing.T, n Node, params map[string]any, item Item) Item {
 	def := n.Definition()
 	out, err := n.Execute(context.Background(), &ExecContext{
 		Node: &workflow.Node{Name: def.Name, Params: params}, Def: &def, Items: []Item{item},
-		OAuth: &OAuthToken{AccessToken: "tok"}, Vars: map[string]any{"defaultTeamId": "team-1", "defaultChannelId": "19:chan@thread.tacv2"},
+		OAuth: &OAuthToken{AccessToken: "tok", InstanceURL: "https://acme.my.salesforce.com"}, Vars: map[string]any{"defaultTeamId": "team-1", "defaultChannelId": "19:chan@thread.tacv2"},
 		Env: expression.Env{}, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
 	if err != nil {
